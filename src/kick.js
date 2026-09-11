@@ -48,6 +48,11 @@ export class KickChatClient {
     this.leaderboard = this._loadLeaderboard();
     this.assignments = this._loadAssignments();
     this.updateAssignments();
+
+    // Widzowie "wyeliminowani" przez bossa (patrz boss.js) - stan runtime,
+    // NIE zapisywany do localStorage. Dopoki trwa walka z bossem, nie moga
+    // wrocic do rankingu (recordEarned/creditRecoveredMoney je ignoruja).
+    this.eliminated = new Set();
   }
 
   _loadLeaderboard() {
@@ -198,6 +203,8 @@ export class KickChatClient {
   recordEarned(username, amount, color) {
     if (!username) return;
     const key = username.toLowerCase();
+    if (this.eliminated.has(key)) return; // zabici przez bossa nie wracaja do rankingu w trakcie walki
+
     if (!this.leaderboard[key]) {
       this.leaderboard[key] = {
         username,
@@ -249,6 +256,8 @@ export class KickChatClient {
   creditRecoveredMoney(username, amount = 0, color) {
     if (!username || amount <= 0) return;
     const key = username.toLowerCase();
+    if (this.eliminated.has(key)) return; // zabici przez bossa nie wracaja do rankingu w trakcie walki
+
     if (!this.leaderboard[key]) {
       this.leaderboard[key] = {
         username,
@@ -276,6 +285,34 @@ export class KickChatClient {
   }
 
   /**
+   * "Zabicie" widza przez bossa (patrz boss.js, timeout dzialania matematycznego):
+   * traci caly dorobek, znika z rankingu, zwalnia sie jego przypisany pracownik,
+   * a jego nick trafia do this.eliminated - dopoki trwa walka, nie moze wrocic
+   * do rankingu (patrz guard w recordEarned/creditRecoveredMoney).
+   */
+  eliminateUser(username) {
+    if (!username) return;
+    const key = username.toLowerCase();
+    this.eliminated.add(key);
+    delete this.leaderboard[key];
+
+    const slot = this.assignments.userToWorker[key];
+    if (slot !== undefined) {
+      delete this.assignments.userToWorker[key];
+      delete this.assignments.workerToUser[slot];
+    }
+
+    this._saveLeaderboard();
+    this.updateAssignments();
+    this._scheduleLeaderboardUpdate();
+  }
+
+  /** Koniec walki z bossem - eliminacje przestaja blokowac powrot do rankingu. */
+  clearEliminated() {
+    this.eliminated.clear();
+  }
+
+  /**
    * Pełny reset rankingu widzów i przypisań pracowników (np. przy restarcie gry)
    */
   reset() {
@@ -293,6 +330,7 @@ export class KickChatClient {
 
     this.leaderboard = {};
     this.assignments = { userToWorker: {}, workerToUser: {} };
+    this.eliminated.clear();
     this.stats.kliksReceived = 0;
     try {
       localStorage.removeItem(LEADERBOARD_KEY);

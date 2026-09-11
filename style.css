@@ -925,3 +925,219 @@ html, body {
   #vanessa-log-panel { width: calc(100vw - 24px); bottom: 8px; }
   #vanessa-log-body { max-height: 130px; }
 }
+
+/* ===== Boss "Kamil Kovalenko" ===== */
+
+#btn-spawn-boss {
+  pointer-events: auto;
+  background: linear-gradient(135deg, #1a0a24, #3a0f4e);
+  border: 1px solid #b23dff;
+  color: #fff;
+  border-radius: 6px;
+  padding: 5px 11px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  box-shadow: 0 2px 8px rgba(178, 61, 255, 0.4);
+  transition: background 0.15s ease, transform 0.1s ease, box-shadow 0.15s ease;
+}
+
+#btn-spawn-boss:hover {
+  background: #b23dff;
+  box-shadow: 0 0 14px #b23dff;
+  transform: scale(1.03);
+}
+
+#btn-spawn-boss:active {
+  transform: scale(0.97);
+}
+
+/* Plakietka bossa - nazwa + pasek HP */
+.boss-nameplate {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  background: linear-gradient(135deg, rgba(20, 4, 12, 0.95), rgba(60, 8, 30, 0.95));
+  border: 2px solid #ff0044;
+  border-radius: 14px;
+  padding: 6px 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  box-shadow: 0 0 18px rgba(255, 0, 68, 0.7), 0 4px 14px rgba(0, 0, 0, 0.9);
+  pointer-events: none;
+  z-index: 50;
+}
+
+.boss-name-row {
+  font-size: 14px;
+  font-weight: 900;
+  color: #ff5c7a;
+  letter-spacing: 0.5px;
+  text-shadow: 0 0 10px rgba(255, 0, 68, 0.9);
+}
+
+.boss-hp-bar {
+  width: 160px;
+  height: 12px;
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid rgba(255, 0, 68, 0.5);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.boss-hp-fill {
+  height: 100%;
+  width: 100%;
+  background: linear-gradient(90deg, #ff0044, #ff6b8a);
+  transition: width 0.25s ease;
+}
+
+.boss-hp-text {
+  font-size: 11px;
+  font-weight: 800;
+  color: #ffd1dc;
+}
+
+/* Dymek bossa z dzialaniem matematycznym i paskiem odliczania */
+.boss-bubble {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  background: #1c0510;
+  border: 2px solid #ff0044;
+  border-radius: 14px;
+  padding: 10px 18px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-width: 160px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.85), 0 0 16px rgba(255, 0, 68, 0.5);
+  pointer-events: none;
+  z-index: 51;
+}
+
+.boss-bubble::after {
+  content: '';
+  position: absolute;
+  bottom: -7px;
+  left: 50%;
+  transform: translateX(-50%);
+  border-width: 7px 7px 0;
+  border-style: solid;
+  border-color: #ff0044 transparent;
+}
+
+.boss-equation {
+  font-size: 26px;
+  font-weight: 900;
+  color: #fff;
+  text-shadow: 0 0 10px rgba(255, 0, 68, 0.8);
+  letter-spacing: 1px;
+  white-space: nowrap;
+}
+
+.boss-timer-bar {
+  width: 150px;
+  height: 8px;
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.boss-timer-fill {
+  height: 100%;
+  width: 100%;
+  background: #53fc18;
+  transition: width 0.1s linear, background 0.3s ease;
+}
+
+.boss-timer-fill.danger {
+  background: #ff2a2a;
+  box-shadow: 0 0 8px rgba(255, 42, 42, 0.9);
+}
+
+/* Letterbox filmowy podczas cutscenki */
+.boss-letterbox {
+  position: fixed;
+  left: 0;
+  right: 0;
+  height: 12vh;
+  background: #000;
+  pointer-events: none;
+  z-index: 9998;
+  transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.boss-letterbox-top {
+  top: 0;
+  transform: translateY(-100%);
+}
+
+.boss-letterbox-bottom {
+  bottom: 0;
+  transform: translateY(100%);
+}
+
+.boss-letterbox.show {
+  transform: translateY(0);
+}
+
+/* Karta tytulowa bossa */
+.boss-title-card {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) scale(0.8);
+  text-align: center;
+  pointer-events: none;
+  opacity: 0;
+  z-index: 9999;
+  transition: opacity 0.5s ease, transform 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.boss-title-card.show {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+  animation: bossTitlePulse 1.6s ease-in-out infinite;
+}
+
+@keyframes bossTitlePulse {
+  0%, 100% { text-shadow: 0 0 24px rgba(255, 0, 68, 0.7); }
+  50% { text-shadow: 0 0 44px rgba(255, 0, 68, 1); }
+}
+
+.boss-title-name {
+  font-size: 52px;
+  font-weight: 900;
+  color: #ff2a4a;
+  letter-spacing: 3px;
+  text-shadow: 0 0 30px rgba(255, 0, 68, 0.9), 0 4px 10px rgba(0, 0, 0, 0.9);
+}
+
+.boss-title-sub {
+  margin-top: 6px;
+  font-size: 18px;
+  font-weight: 800;
+  color: #ffd1dc;
+  letter-spacing: 4px;
+}
+
+@media (max-width: 700px) {
+  .boss-title-name { font-size: 30px; letter-spacing: 1.5px; }
+  .boss-title-sub { font-size: 12px; letter-spacing: 2px; }
+  .boss-equation { font-size: 20px; }
+  .boss-hp-bar, .boss-timer-bar { width: 120px; }
+}
+
+/* Plakietka pracownika, gdy jest omdlony (boss.js) */
+.worker-nameplate.worker-fainted {
+  border-color: #7c8aa0;
+  opacity: 0.75;
+  filter: grayscale(0.6);
+}

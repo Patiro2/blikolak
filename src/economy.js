@@ -57,6 +57,7 @@ function defaultState() {
     totalEarned: 0, // suma wszystkiego, co kiedykolwiek wplynelo do puli
     totalChatClicks: 0, // laczna liczba klikniec "klik" z czatu - napedza awans tieru
     machineTier: 0,
+    bossesDefeated: [], // numery tierow, dla ktorych boss zostal juz pokonany (anty-powtorka)
     lastSave: Date.now(),
   };
 }
@@ -86,6 +87,11 @@ export class Economy {
         }
         if (typeof merged.machineTier !== 'number' || merged.machineTier < 0 || merged.machineTier >= MACHINE_TIERS.length) {
           merged.machineTier = 0;
+        }
+        if (!Array.isArray(merged.bossesDefeated)) {
+          merged.bossesDefeated = [];
+        } else {
+          merged.bossesDefeated = merged.bossesDefeated.filter((t) => typeof t === 'number' && t >= 0);
         }
         return merged;
       }

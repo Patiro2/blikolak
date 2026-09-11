@@ -142,6 +142,8 @@ export class VanessaManager {
     // FSM: 'IDLE' | 'SNEAKING' | 'STEALING' | 'ESCAPING' | 'FLEEING'
     this.state = 'IDLE';
 
+    this.paused = false; // ustawiane z main.js, gdy boss.isActive() - blokuje nowy spawn Vanessy
+
     this.spawnTimer = this._randomSpawnDelay();
     this.stealTimer = 0;
     this.stealTickAcc = 0;
@@ -673,6 +675,7 @@ export class VanessaManager {
   update(delta, camera, canvasRect) {
     // 1. Oczekiwanie na losowy spawn
     if (this.state === 'IDLE') {
+      if (this.paused) return; // boss.isActive() - Vanessa nie ma sie prawa pojawic w trakcie walki
       this.spawnTimer -= delta;
       if (this.spawnTimer <= 0) {
         this.spawn();

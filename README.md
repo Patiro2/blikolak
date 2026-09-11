@@ -61,7 +61,9 @@ Stan zapisuje się sam do `localStorage` co 5 s i przy zamykaniu karty.
 | `src/coins.js` | pula 120 monet z lotem po łuku |
 | `src/economy.js` | stan wspólnej puli czatu, wartość kliknięcia, progi awansu tieru, zapis/odczyt |
 | `src/ui.js` | HUD (pula, postęp do awansu, kombo, reset), widget czatu Kick, ranking |
-| `src/kick.js` | integracja z czatem Kick.com (Pusher WebSocket), detekcja komendy "klik" |
+| `src/kick.js` | integracja z czatem Kick.com (Pusher WebSocket), detekcja komendy "klik", eliminacje bossa |
+| `src/vanessa.js` | złodziejka Vanessa - FSM, kradzież zł, przepędzanie, `normalizePolish`/`showTopAnnouncement` (współdzielone też przez bossa) |
+| `src/boss.js` | boss "Kamil Kovalenko" - cutscenka, walka matematyczna, omdlenia, `BOSS_DEFS` |
 | `src/format.js` | skrócona notacja liczb (1.5K, 2.3M) |
 
 Assety są skopiowane do `assets/arcade/` i `assets/dungeon/` — **osobno**, bo
@@ -84,6 +86,58 @@ Gra łączy się na żywo z czatem kanału **patiro** na Kick.com przez WebSocke
   - Jej ofiarą jest losowo wybrany widz z Top 10 rankingu. Vanessa podchodzi pod jego postać (pracownika) i co 0,8 s zabiera mu porcję (ok. 5%) jego dorobku w zł - nie kliknięć! Statystyka liczby komend "klik" w rankingu pozostaje nietknięta.
   - **Przegonienie**: kliknięcie na jej model/plakietkę (przez gracza) albo wpisanie jej sekretnego hasła na czacie (przez widza) każe jej uciekać w panice sprintem. W obu przypadkach do gry wraca dokładnie **50% kwoty, którą zdążyła ukraść** w tym wystąpieniu - reszta przepada bezpowrotnie razem z nią, więc nic nie jest dodrukowywane. Gdy przegania ją gracz (streamer), odzyskana kwota trafia do WSPÓLNEJ PULI CZATU; gdy przegania ją widz hasłem, odzyskana kwota trafia na jego konto w rankingu (jako odzyskana kwota, nie świeży zarobek).
   - Jeśli Vanessa nie zostanie przepędzona w porę, ucieka z całym łupem - ofiara traci go bezpowrotnie.
+
+## Boss: Kamil Kovalenko
+
+Przy KAŻDYM awansie tieru bankomatu wyskakuje boss - na razie zaimplementowany
+tylko pierwszy (`src/boss.js`, tablica `BOSS_DEFS` indeksowana numerem tieru,
+wypełniony tylko indeks 1 - kolejni bossowie to `null`, czyli awans na te
+tiery przebiega po staremu, bez walki). Boss to `wheelchair-deluxe` (Kenney
+mini-characters) + `character-male-f`, złożone w jedną grupę i wyskalowane
+×3 względem zwykłych postaci.
+
+- **Trigger**: gdy czat wbije próg klików na kolejny tier i ten boss nie był
+  jeszcze pokonany, zamiast natychmiastowego awansu odpala się `boss.start(tier)`.
+  Awans bankomatu (podmiana modelu + baner) jest odłożony do momentu pokonania
+  bossa - `economy.state.machineTier` jest już podniesiony (liczy się do progów),
+  ale model 3D i baner czekają.
+- **Cutscenka (~5 s)**: czarne pasy (letterbox) wjeżdżają z góry i dołu, karta
+  tytułowa "KAMIL KOVALENKO / SZEF WSZYSTKICH BANKOMATÓW", kamera na ten czas
+  przechodzi pod pełną kontrolę bossa (kinowy najazd, `controls.enabled = false`)
+  i wraca do pozycji wyjściowej na koniec. Boss wjeżdża z korytarza z tyłu sceny,
+  okrąża bankomat driftem i w nim uderza - bankomat zostaje przechylony
+  (`rotation.z ≈ 0.35`) na cały czas walki, komenda `klik` z czatu działa dalej
+  normalnie. Boss zatrzymuje się w środku kręgu graczy, ZA bankomatem (patrząc
+  od kamery), twarzą do kamery - przy skali ×3 postój przed bankomatem zasłaniał
+  całą scenę, więc bankomat i pracownicy zostają widoczni przez całą walkę.
+- **Walka**: 100 HP. Nad głową bossa plakietka z nazwą, paskiem HP i dymkiem z
+  działaniem matematycznym (`+ - × ÷`, wynik zawsze całkowity i nieujemny) oraz
+  paskiem odliczania 8 s. Każda wiadomość z czatu, w której którykolwiek token
+  po oczyszczeniu (`replace(/[^\d-]/g,'')`) zgadza się z wynikiem, to trafienie -
+  liczy się pierwsza poprawna odpowiedź. Trafienie zabiera 5 HP (20 trafień =
+  pokonanie), po ~1,2 s pojawia się nowe działanie. Odpowiadający NIE dostaje
+  złotówek ani klików - to czysta minigra, ranking się nie zmienia.
+- **Kara za brak odpowiedzi**: po 8 s boss "zabija" losowego widza z Top 10 -
+  traci CAŁY dorobek (`totalEarned`) i znika z rankingu (`kickChat.eliminateUser`),
+  jego awatar gra `die` i po ~2,5 s znika ze sceny. Ofiara nie wraca do rankingu,
+  dopóki trwa walka (`kickChat.eliminated`).
+- **Omdlenia**: co 12-22 s boss omdlewa losowego widza z Top 10 (leży, plakietka
+  dostaje 💤, jego `klik` i odpowiedzi są ignorowane - bez utraty pieniędzy).
+  Ratunek: inny widz pisze `pomoc` (lub `!pomoc`, wielkość liter/polskie znaki
+  bez znaczenia) - podnosi najdłużej leżącą osobę. Po pokonaniu bossa wszyscy
+  omdleni są automatycznie ocucani.
+- **Pokonanie**: boss gra `die`, przechyla się i znika po ~3 s, bankomat wraca
+  do pionu, DOPIERO WTEDY następuje właściwy awans tieru (ten sam baner
+  "🎰 AWANS BANKOMATU!" co przy zwykłym awansie - tekst żyje w jednym miejscu,
+  `announceTierAdvance()` w `main.js`) plus dodatkowy baner
+  "🏆 KAMIL KOVALENKO POKONANY!". Numer tieru trafia do `economy.state.bossesDefeated`
+  (anty-powtórka - ten boss już się więcej nie odpali).
+- **Vanessa** nie pojawia się w trakcie walki z bossem (`vanessa.paused`,
+  ustawiane z `main.js` na `boss.isActive()`); jeśli była w scenie w chwili
+  startu bossa, zostaje odpędzona (`despawn()`).
+
+Panel testowy: przycisk **👹 Zresp bossa** obok "Zresp Vanessę" wywołuje
+`boss.start(1, { force: true })` niezależnie od `bossesDefeated`.
 
 ## Log zdarzeń Vanessy
 
@@ -126,4 +180,10 @@ window.__game.economy.state.money += 1e6;                  // dosypanie do wspol
 window.__game.vanessa.spawn();                              // natychmiastowe przywołanie Vanessy
 window.__game.kickChat.simulate('Widz1', 'klik');            // symulacja kliknięcia z czatu
 window.__game.kickChat.simulate('Widz1', 'Pozdro dla czatu!'); // dymek wypowiedzi nad postacią widza w 3D
+
+window.__game.boss.start(1, { force: true });               // natychmiastowe odpalenie bossa (test)
+window.__game.boss.damage(5);                                // zadanie obrażeń bossowi z pominięciem czatu
+window.__game.boss.faintRandom();                             // natychmiastowe omdlenie losowego widza z Top 10
+window.__game.boss.printLog();                                // log zdarzeń bossa jako tabela w konsoli
+window.__game.kickChat.simulate('Widz1', 'pomoc');            // ratunek omdlonego widza
 ```

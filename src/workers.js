@@ -166,6 +166,39 @@ export class WorkerManager {
     }
   }
 
+  /**
+   * Odgrywa klip "die" pracownika (np. gdy boss go "zabija" po timeoucie
+   * dzialania matematycznego). LoopOnce + clampWhenFinished - awatar zostaje
+   * lezacy na ostatniej klatce, dopoki nie zostanie usuniety (patrz removeWorkerType).
+   */
+  playDeath(typeIndex) {
+    const entry = this.getWorkerType(typeIndex);
+    if (!entry || !entry.mixer) return;
+    // Klip "die" nie byl dotad cache'owany w entry - pobieramy go z szablonu.
+    const template = this.templates.get(entry.modelKey);
+    const dieClip = THREE.AnimationClip.findByName(template ? template.animations : [], 'die');
+    if (!dieClip) return;
+
+    if (entry.idleAction) entry.idleAction.stop();
+    if (entry.interactAction) entry.interactAction.stop();
+
+    const dieAction = entry.mixer.clipAction(dieClip);
+    dieAction.setLoop(THREE.LoopOnce);
+    dieAction.clampWhenFinished = true;
+    dieAction.reset();
+    dieAction.play();
+    entry.dieAction = dieAction;
+  }
+
+  /** Usuwa awatar danego typu ze sceny i wpis z entries (np. po smierci zadanej przez bossa). */
+  removeWorkerType(typeIndex) {
+    const idx = this.entries.findIndex((e) => e.typeIndex === typeIndex);
+    if (idx === -1) return;
+    const entry = this.entries[idx];
+    if (entry.obj) this.scene.remove(entry.obj);
+    this.entries.splice(idx, 1);
+  }
+
   update(delta) {
     for (const entry of this.entries) {
       if (entry.mixer) entry.mixer.update(delta);

@@ -435,6 +435,8 @@ export class WorkerOverlayManager {
       bubbleEl,
       timer: null,
       active: false,
+      fainted: false, // stan omdlenia (boss.js) - musi przetrwac kazdy update z syncLeaderboardAndOverlays
+      savedRank: '',
     };
     this.overlays.set(workerIndex, data);
     return data;
@@ -450,10 +452,28 @@ export class WorkerOverlayManager {
     }
     item.active = true;
     const rank = userData.rank;
-    item.rankSpan.textContent = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : (rank ? `#${rank}` : '');
+    const rankLabel = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : (rank ? `#${rank}` : '');
+    item.savedRank = rankLabel;
     item.userSpan.textContent = userData.username;
     item.userSpan.style.color = userData.color || '#53fc18';
     item.nameplateEl.className = `worker-nameplate ${rank === 1 ? 'rank-1' : ''}`;
+    // Kazdy sync rankingu (np. po zwyklym "kliku" z czatu) nadpisuje className
+    // i tresc rankSpan - bez tego znacznik omdlenia (boss.js) gasnie po ulamku
+    // sekundy przy zywym czacie. Odtwarzamy go na koniec, PO nadpisaniu.
+    if (item.fainted) {
+      item.nameplateEl.classList.add('worker-fainted');
+      item.rankSpan.textContent = '💤';
+    } else {
+      item.rankSpan.textContent = rankLabel;
+    }
+  }
+
+  /** Wlacza/wylacza wizualny znacznik omdlenia danego slotu (uzywane przez boss.js). */
+  setFainted(workerIndex, fainted) {
+    const item = this._getOrCreate(workerIndex);
+    item.fainted = !!fainted;
+    item.nameplateEl.classList.toggle('worker-fainted', item.fainted);
+    item.rankSpan.textContent = item.fainted ? '💤' : item.savedRank;
   }
 
   showSpeechBubble(workerIndex, text) {

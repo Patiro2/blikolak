@@ -9,6 +9,7 @@ import { Economy, WORKER_TYPE_DEFS, MACHINE_TIERS } from './economy.js';
 import { UI, KickUI, LeaderboardUI, WorkerOverlayManager, VanessaLogUI } from './ui.js';
 import { KickChatClient } from './kick.js';
 import { VanessaManager, showTopAnnouncement } from './vanessa.js';
+import { BossManager, BOSS_DEFS } from './boss.js';
 import { fmtShort } from './format.js';
 
 async function main() {
@@ -83,6 +84,37 @@ async function main() {
   const clock = new THREE.Clock();
   const machineBurstOrigin = new THREE.Vector3(0, 0.6, 0.3);
 
+  // Wspolny baner awansu bankomatu - uzywany zarowno przy zwyklym awansie,
+  // jak i po pokonaniu bossa (patrz onDefeated ponizej), zeby tekst zyl w JEDNYM miejscu.
+  function announceTierAdvance(tier) {
+    const def = MACHINE_TIERS[tier];
+    showTopAnnouncement(
+      '🎰 AWANS BANKOMATU!',
+      `Czat wbił już <strong>${economy.state.totalChatClicks}</strong> klików - bankomat awansuje na <strong>${def.name}</strong> (×${def.mult} zarobku)!`,
+      3400,
+    );
+  }
+
+  const boss = new BossManager(
+    scene,
+    camera,
+    controls,
+    machine,
+    economy,
+    coinPool,
+    (point, text, opts) => {
+      projectAndFloat(point, text, opts);
+    },
+  );
+  await boss.init();
+
+  const spawnBossBtn = document.getElementById('btn-spawn-boss');
+  if (spawnBossBtn) {
+    spawnBossBtn.addEventListener('click', () => {
+      boss.start(1, { force: true });
+    });
+  }
+
   const kickUI = new KickUI();
   const leaderboardUI = new LeaderboardUI();
   const workerOverlays = new WorkerOverlayManager();
@@ -143,6 +175,8 @@ async function main() {
       kickUI.addMessage(msg);
       // Sprawdzenie czy widz na czacie napisał sekretne hasło Vanessy
       vanessa.checkChatWord(msg.content, msg.username, msg.color);
+      // Odpowiedzi na dzialania matematyczne bossa oraz komenda "pomoc" (omdlenia)
+      boss.onChatMessage(msg.username, msg.content, msg.color);
     },
     onTopWorkerChat: ({ workerIndex, content }) => {
       const clean = (content || '')
@@ -159,10 +193,17 @@ async function main() {
       }
     },
     onKlik: async (sender) => {
+      const nick = sender.username || 'Widz';
+
+      // Omdlony przez bossa widz nie moze klikac - jego komenda jest w calosci
+      // ignorowana (bez kasy, bez licznika klikow, bez wplywu na prog tieru).
+      if (boss.isFainted(nick)) {
+        return;
+      }
+
       const { value, isCrit, tierAdvanced } = economy.performClick(performance.now(), true);
       machine.triggerClickAnim();
       coinPool.burst(machineBurstOrigin, value);
-      const nick = sender.username || 'Widz';
       const text = isCrit ? `KRYT! +${fmtShort(value)} (@${nick})` : `+${fmtShort(value)} (@${nick})`;
       projectAndFloat(machineBurstOrigin, text, { crit: isCrit, kick: true });
       kickUI.updateKliksCount(kickChat.stats.kliksReceived);
@@ -182,14 +223,17 @@ async function main() {
       // Automatyczny awans tieru automatu - gdy laczna liczba klikniec z czatu
       // przekroczy kolejny prog (patrz MACHINE_TIER_CLICK_THRESHOLDS w economy.js).
       if (tierAdvanced !== null) {
-        await machine.setTier(tierAdvanced);
-        const def = MACHINE_TIERS[tierAdvanced];
-        showTopAnnouncement(
-          '🎰 AWANS BANKOMATU!',
-          `Czat wbił już <strong>${economy.state.totalChatClicks}</strong> klików - bankomat awansuje na <strong>${def.name}</strong> (×${def.mult} zarobku)!`,
-          3400,
-        );
-        save();
+        const def_ = BOSS_DEFS[tierAdvanced];
+        const alreadyDefeated = economy.state.bossesDefeated.includes(tierAdvanced);
+        if (def_ && !alreadyDefeated) {
+          // Boss przejmuje kontrole - awans bankomatu i baner wykonaja sie
+          // dopiero po pokonaniu go (patrz onDefeated w setContext powyzej).
+          boss.start(tierAdvanced);
+        } else {
+          await machine.setTier(tierAdvanced);
+          announceTierAdvance(tierAdvanced);
+          save();
+        }
       }
     },
     onLeaderboardUpdate: () => {
@@ -199,6 +243,25 @@ async function main() {
     },
   });
   vanessa.setContext({ workerManager, kickChat });
+  boss.setContext({
+    workerManager,
+    workerOverlays,
+    kickChat,
+    vanessa,
+    onDefeated: async (tier) => {
+      await machine.setTier(tier);
+      announceTierAdvance(tier);
+      showTopAnnouncement(
+        '🏆 KAMIL KOVALENKO POKONANY!',
+        `Boss <strong>${boss.def ? boss.def.name : 'Kamil Kovalenko'}</strong> został pokonany przez czat! Bankomat wraca do gry na nowym tierze.`,
+        3200,
+      );
+      if (!economy.state.bossesDefeated.includes(tier)) {
+        economy.state.bossesDefeated.push(tier);
+      }
+      save();
+    },
+  });
   try {
     await syncLeaderboardAndOverlays();
   } catch (err) {
@@ -214,6 +277,7 @@ async function main() {
       workerOverlays.clear();
       workerManager.clear();
       vanessa.reset();
+      boss.reset();
       await machine.setTier(0);
       try {
         await syncLeaderboardAndOverlays();
@@ -251,6 +315,7 @@ async function main() {
     coinPool,
     goldCoin,
     vanessa,
+    boss,
     ui,
     kickChat,
     kickUI,
@@ -265,7 +330,14 @@ async function main() {
     requestAnimationFrame(animate);
     const delta = Math.min(0.1, clock.getDelta());
 
-    controls.update();
+    // W trakcie cutscenki bossa kamera jest w pelni pod jego kontrola -
+    // controls.update() nadpisalby recznie ustawiona pozycje (OrbitControls
+    // zawsze przelicza kamere z wewnetrznego stanu sferycznego, ignorujac
+    // reczne zmiany camera.position).
+    if (!boss.isCameraLocked()) {
+      controls.update();
+    }
+    vanessa.paused = boss.isActive();
     machine.update(delta);
     workerManager.update(delta);
     coinPool.update(delta);
@@ -284,6 +356,9 @@ async function main() {
 
     // Aktualizacja złodziejki Vanessy (ruch, animacja, kradzież, rzutowanie dymków i plakietki)
     vanessa.update(delta, camera, canvasRect);
+
+    // Aktualizacja bossa (cutscenka, walka matematyczna, omdlenia, rzutowanie plakietki i dymka)
+    boss.update(delta, camera, canvasRect);
 
     // Aktualizacja pozycji plakietek z nickami i dymków czatu nad głowami pracowników w rzucie 3D -> 2D
     workerOverlays.updatePositions(workerManager.entries, camera, canvasRect);
