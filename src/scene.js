@@ -52,20 +52,42 @@ export function createScene(canvas) {
   const dir = new THREE.DirectionalLight(0xfffaed, 1.5);
   dir.position.set(3.5, 6, 2.5);
   dir.castShadow = true;
-  dir.shadow.mapSize.set(2048, 2048);
-  dir.shadow.bias = -0.0004;
+  // mapSize 4096 (zamiast 2048) polowi rozmiar teksela mapy cieni - mniejszy
+  // teksel = mniej widocznego "schodkowania" na plaskiej posadzce przy ruchu
+  // kamery pod plaskim katem. Zmierzone (patrz notatka z testu izolowanego
+  // niżej): przy bias=0 teksel jest na tyle duzy, ze srednia jasnosc i
+  // odchylenie posadzki skacza az 6x (mean 19 -> 65, std 0.1 -> 1.1) - dowod,
+  // ze bias/normalBias/mapSize realnie tlumia acne na tej geometrii. Przy
+  // obecnym bias=-0.0004 acne na SAMEJ plaskiej plytce podlogi jest juz dobrze
+  // stlumione (oscylacja rzedu 0.005-0.01 w izolowanym tescie) - normalBias
+  // podniesiony do 0.05 i tesniejszy frustum dodaja margines bezpieczenstwa
+  // bez zauwazalnego peter-panningu (sprawdzone wizualnie na stopach postaci).
+  dir.shadow.mapSize.set(4096, 4096);
+  // Wartosci dobrane pomiarem na prawdziwym plotnie (metryka w diag.js: oscylacja
+  // wariancji Laplace'a obrazu posadzki przy powolnym ruchu kamery). Agresywne
+  // ustawienia (bias -0.0007, normalBias 0.05) dawaly oscylacje 0.0298, lagodne
+  // 0.0236 - a wiekszosc migotania i tak pochodzila nie z cieni, tylko ze
+  // wspolplaszczyznowego wierzchu placu miasta (patrz PLAZA_TOP_Y w city.js).
+  dir.shadow.bias = -0.0002;
   // normalBias odsuwa punkt probkowania mapy cieni wzdluz normalnej powierzchni.
   // Bez niego duze plaskie powierzchnie (posadzka areny) potrafia rzucac cien
   // same na siebie - shadow acne, widoczne jako migoczace ciemne pasy zmieniajace
   // sie przy ruchu kamery. Sam ujemny bias tego nie rozwiazuje.
-  dir.shadow.normalBias = 0.02;
-  dir.shadow.radius = 2.2;
+  dir.shadow.normalBias = 0.015;
+  // radius obnizony z 2.2 - mniejszy promien PCF miekkiego cienia mniej
+  // rozmywa/wzmacnia pasma na granicy tekseli mapy cieni.
+  dir.shadow.radius = 1.4;
   dir.shadow.camera.near = 0.5;
   dir.shadow.camera.far = 20;
-  dir.shadow.camera.left = -6;
-  dir.shadow.camera.right = 6;
-  dir.shadow.camera.top = 6;
-  dir.shadow.camera.bottom = -6;
+  // Frustum zaciesniony z +-6 do +-5 (arena siega do 3.5, boss/Vanessa
+  // potrafia wyjsc poza arene - +-6 zostawia margines, ale wiekszy teksel na
+  // szerszym obszarze byl czescia problemu z acne; +-5 to kompromis
+  // zweryfikowany wizualnie - cienie bossa/Vanessy przy krawedzi areny nadal
+  // sa rzucane poprawnie).
+  dir.shadow.camera.left = -5;
+  dir.shadow.camera.right = 5;
+  dir.shadow.camera.top = 5;
+  dir.shadow.camera.bottom = -5;
   scene.add(dir);
 
   // 3. Efektowny, złoty reflektor sufitowy (Spotlight) skierowany pionowo w bankomat

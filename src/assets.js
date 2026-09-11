@@ -36,6 +36,7 @@ export const MACHINE_KEYS = [
 
 const ARCADE_PATH = 'assets/arcade/';
 const DUNGEON_PATH = 'assets/dungeon/';
+const FOREST_PATH = 'assets/forest/';
 
 function fixMaterials(root) {
   root.traverse((node) => {
@@ -155,6 +156,13 @@ export function loadArcade(name) {
 
 export function loadDungeon(name) {
   return loadGltf(`${DUNGEON_PATH}${name}.glb`);
+}
+
+// mini-forest ma WLASNY Textures/colormap.png (rozna tresc niz arcade/dungeon) -
+// stad osobny katalog assets/forest/ i osobna funkcja ladujaca (patrz CLAUDE.md,
+// sekcja "Texture filenames collide across packs").
+export function loadForest(name) {
+  return loadGltf(`${FOREST_PATH}${name}.glb`);
 }
 
 /**

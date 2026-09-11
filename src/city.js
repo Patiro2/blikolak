@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { loadForest, loadArcade } from './assets.js';
 
 // Tlo gry: proceduralne miasto noca wokol i ponizej areny. Arena (pokoj 7x7
 // ze scianami, patrz scene.js) zostaje DOKLADNIE taka, jaka jest - stoi na
@@ -17,9 +18,30 @@ import * as THREE from 'three';
 // uzywane obiekty tymczasowe (dummy/scratch).
 
 const PLAZA_HALF = 6.5; // polowa boku betonowego placu, na ktorym stoi arena (arena siega do 3.5)
-const PLAZA_TOP_Y = 0; // wierzch placu - poziom podlogi areny
+// Wierzch placu MUSI lezec ponizej y = 0. Kafle podlogi areny (Kenney floor.glb)
+// zajmuja y od 0 do 0.025 i maja material DoubleSide, wiec ich DOLNA sciana
+// (dokladnie na y = 0) nie jest odrzucana przez back-face culling i normalnie
+// zapisuje glebie. Gdy wierzch placu tez lezal na y = 0, pod cala arena bylo
+// 49 par wspolplaszczyznowych powierzchni - to dawalo migotanie posadzki przy
+// ruchu kamery. Zmierzone na prawdziwym plotnie: ukrycie placu zbijalo wskaznik
+// oscylacji obrazu z 0.104 do 0.030, czyli 3.5-krotnie (patrz diag.js).
+const PLAZA_TOP_Y = -0.02; // wierzch placu - 2 cm PONIZEJ posadzki areny
 const CITY_GROUND_Y = -2.2; // poziom ulicy (dolny poziom miasta)
 const PLAZA_HEIGHT = PLAZA_TOP_Y - CITY_GROUND_Y;
+
+// --- Foreground: zielono-miejski pierscien TUZ przy arenie (patrz _buildForeground) ---
+// Kamera (OrbitControls, patrz scene.js) orbituje wokol LOOK_TARGET ~ (0,0.65,0.1)
+// z maxDistance=8.5, wiec teoretyczny najdalszy promien kamery od (0,0,0) to
+// ~8.5 + |target| ~= 9.16 j. Niskie elementy (krzaki/kamienie, <0.6 j.) sa
+// bezpieczne w kazdej odleglosci - nie siegaja wysokosci kamery/glowy postaci.
+// WYSOKIE elementy (drzewa/budynki) MUSZA staC poza tym promieniem, inaczej w
+// jakims kacie kamery znajda sie miedzy kamera a arena i zaslonia rozgrywke.
+const FOREGROUND_APRON_HALF = 10.5; // polowa boku zielonego "trawnika" rozszerzajacego plac
+const FOREGROUND_LOW_MIN = 6.7; // tuz za krawedzia oryginalnego placu (6.5)
+const FOREGROUND_LOW_MAX = 8.6; // niska zielen - bezpieczna wszedzie
+const FOREGROUND_TALL_MIN = 9.4; // margines bezpieczenstwa ponad teoretyczne 9.16
+const FOREGROUND_TALL_MAX = 10.3; // w granicach apronu (10.5)
+const FOREGROUND_SLOTS = 26; // rozstaw katowy - "skomponowane" sloty, nie czysty losowy rozrzut
 
 const CITY_HALF = 34; // zasieg miasta (budynki/ulice) od centrum
 const BUILDING_GRID = 4; // rozstaw siatki dzialek budynkow
@@ -217,6 +239,223 @@ export class CityBackground {
     this._buildStreetGround(scene);
     this._buildBuildings(scene, renderer);
     this._buildCars(scene);
+    this._buildForegroundApron(scene);
+    // Asynchroniczne (GLB) - leci w tle, nie blokuje pierwszej klatki. Ewentualny
+    // blad sieci/ladowania jest logowany, ale NIE wywraca reszty gry (patrz
+    // main.js - city.build() nigdy nie jest await-owane).
+    this._buildForegroundProps(scene, renderer).catch((err) => {
+      console.error('[city] Nie udalo sie zbudowac foregroundu (drzewa/budynki):', err);
+    });
+  }
+
+  // --- Zielony "apron" - lekko obnizone (o 0.005, zero Z-fightingu z placem)
+  // rozszerzenie placu, na ktorym stoi caly zielono-miejski foreground. ---
+  _buildForegroundApron(scene) {
+    const geo = new THREE.BoxGeometry(FOREGROUND_APRON_HALF * 2, PLAZA_HEIGHT, FOREGROUND_APRON_HALF * 2);
+    const mat = new THREE.MeshStandardMaterial({ color: 0x1c2a1e, roughness: 1, metalness: 0 });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(0, CITY_GROUND_Y + PLAZA_HEIGHT / 2 - 0.005, 0);
+    mesh.receiveShadow = true;
+    scene.add(mesh);
+    this.foregroundApronMesh = mesh;
+  }
+
+  /** Zwraca pierwszy THREE.Mesh znaleziony w scenie GLTF (kazdy model mini-forest ma dokladnie jeden). */
+  _firstMesh(gltf) {
+    let found = null;
+    gltf.scene.traverse((o) => {
+      if (!found && o.isMesh) found = o;
+    });
+    return found;
+  }
+
+  /**
+   * Buduje pierscien zieleni/zabudowy dookola placu z modeli kenney_mini-forest
+   * (assets/forest/, patrz assets.js loadForest) + kilku elementow z mini-arcade
+   * (kolumny) i kilku proceduralnych brył budynkow w stylu dalekiego miasta, ale
+   * cieplej zabarwionych, zeby czytac sie jako BLISKI, celowy foreground a nie
+   * dalsza mgla. Kazdy typ modelu = jeden InstancedMesh (jedno wywolanie
+   * loadForest zwraca DOKLADNIE jeden mesh na model - zweryfikowane w GLB), wiec
+   * cala dodatkowa zabudowa to tylko kilkanascie dodatkowych draw calls,
+   * niezaleznie od liczby instancji.
+   */
+  async _buildForegroundProps(scene, renderer) {
+    const [tree, treeHigh, plant, rocksHigh, rocksLow, stones, fence, bStruct, bRoof] = await Promise.all([
+      loadForest('tree'), loadForest('tree-high'), loadForest('plant'),
+      loadForest('rocks-high'), loadForest('rocks-low'), loadForest('stones'),
+      loadForest('fence'), loadForest('building-structure'), loadForest('building-roof'),
+    ]);
+
+    const dummy = new THREE.Object3D();
+    const color = new THREE.Color();
+
+    // --- Niska zielen (promien 6.7-8.6): rosliny, kamienie, ogrodzenia ---
+    const lowDefs = [
+      { gltf: plant, count: 22, scaleRange: [0.8, 1.3] },
+      { gltf: rocksLow, count: 10, scaleRange: [0.7, 1.1] },
+      { gltf: rocksHigh, count: 8, scaleRange: [0.7, 1.0] },
+      { gltf: stones, count: 10, scaleRange: [0.8, 1.2] },
+      { gltf: fence, count: FOREGROUND_SLOTS, scaleRange: [0.95, 1.05], tangential: true },
+    ];
+    for (const def of lowDefs) {
+      const mesh = this._firstMesh(def.gltf);
+      const inst = new THREE.InstancedMesh(mesh.geometry, mesh.material, def.count);
+      inst.castShadow = true;
+      inst.receiveShadow = true;
+      inst.frustumCulled = false;
+      for (let i = 0; i < def.count; i++) {
+        const angle = def.tangential
+          ? (i / def.count) * Math.PI * 2
+          : randRange(0, Math.PI * 2);
+        const radius = def.tangential
+          ? FOREGROUND_LOW_MAX + 0.15
+          : randRange(FOREGROUND_LOW_MIN, FOREGROUND_LOW_MAX);
+        const x = Math.sin(angle) * radius;
+        const z = Math.cos(angle) * radius;
+        const s = randRange(def.scaleRange[0], def.scaleRange[1]);
+        dummy.position.set(x, 0, z);
+        dummy.rotation.set(0, def.tangential ? angle : randRange(0, Math.PI * 2), 0);
+        dummy.scale.setScalar(s);
+        dummy.updateMatrix();
+        inst.setMatrixAt(i, dummy.matrix);
+      }
+      inst.instanceMatrix.needsUpdate = true;
+      scene.add(inst);
+    }
+
+    // --- Wysoka zielen/zabudowa (promien 9.4-10.3): drzewa + male "domki" ---
+    const treeCount = Math.round(FOREGROUND_SLOTS * 0.42);
+    const treeHighCount = Math.round(FOREGROUND_SLOTS * 0.27);
+    const hutCount = Math.round(FOREGROUND_SLOTS * 0.31);
+
+    const treeMesh = this._firstMesh(tree);
+    const treeInst = new THREE.InstancedMesh(treeMesh.geometry, treeMesh.material, treeCount);
+    treeInst.castShadow = true; treeInst.receiveShadow = true; treeInst.frustumCulled = false;
+
+    const treeHighMesh = this._firstMesh(treeHigh);
+    const treeHighInst = new THREE.InstancedMesh(treeHighMesh.geometry, treeHighMesh.material, treeHighCount);
+    treeHighInst.castShadow = true; treeHighInst.receiveShadow = true; treeHighInst.frustumCulled = false;
+
+    const structMesh = this._firstMesh(bStruct);
+    const roofMesh = this._firstMesh(bRoof);
+    const structInst = new THREE.InstancedMesh(structMesh.geometry, structMesh.material, hutCount);
+    const roofInst = new THREE.InstancedMesh(roofMesh.geometry, roofMesh.material, hutCount);
+    structInst.castShadow = true; structInst.receiveShadow = true; structInst.frustumCulled = false;
+    roofInst.castShadow = true; roofInst.receiveShadow = true; roofInst.frustumCulled = false;
+
+    // Sloty katowe - "skomponowany" pierscien: kazdy slot losuje jeden typ
+    // wysokiego elementu (drzewo / wysokie drzewo / domek), zeby zabudowa nie
+    // wygladala jak czysto losowy rozrzut, tylko jak swiadomie ulozony pierscien.
+    let ti = 0, thi = 0, hi = 0;
+    for (let slot = 0; slot < FOREGROUND_SLOTS; slot++) {
+      const angle = (slot / FOREGROUND_SLOTS) * Math.PI * 2 + randRange(-0.06, 0.06);
+      const radius = randRange(FOREGROUND_TALL_MIN, FOREGROUND_TALL_MAX);
+      const x = Math.sin(angle) * radius;
+      const z = Math.cos(angle) * radius;
+      const pick = slot % 3;
+
+      if (pick === 0 && ti < treeCount) {
+        const s = randRange(0.85, 1.25);
+        dummy.position.set(x, 0, z);
+        dummy.rotation.set(0, randRange(0, Math.PI * 2), 0);
+        dummy.scale.setScalar(s);
+        dummy.updateMatrix();
+        treeInst.setMatrixAt(ti++, dummy.matrix);
+      } else if (pick === 1 && thi < treeHighCount) {
+        const s = randRange(0.85, 1.2);
+        dummy.position.set(x, 0, z);
+        dummy.rotation.set(0, randRange(0, Math.PI * 2), 0);
+        dummy.scale.setScalar(s);
+        dummy.updateMatrix();
+        treeHighInst.setMatrixAt(thi++, dummy.matrix);
+      } else if (hi < hutCount) {
+        const s = randRange(1.0, 1.6);
+        const ry = randRange(0, Math.PI * 2);
+        dummy.position.set(x, 0, z);
+        dummy.rotation.set(0, ry, 0);
+        dummy.scale.setScalar(s);
+        dummy.updateMatrix();
+        structInst.setMatrixAt(hi, dummy.matrix);
+        dummy.position.set(x, 1.0 * s, z);
+        dummy.updateMatrix();
+        roofInst.setMatrixAt(hi, dummy.matrix);
+        hi++;
+      } else if (ti < treeCount) {
+        // rezerwowe miejsce w razie wyczerpania puli domkow
+        const s = randRange(0.85, 1.25);
+        dummy.position.set(x, 0, z);
+        dummy.rotation.set(0, randRange(0, Math.PI * 2), 0);
+        dummy.scale.setScalar(s);
+        dummy.updateMatrix();
+        treeInst.setMatrixAt(ti++, dummy.matrix);
+      }
+    }
+    // Niewykorzystane sloty (np. zaokraglenia liczby hutCount) - schowaj poza scena
+    for (; ti < treeCount; ti++) { dummy.position.set(0, -1000, 0); dummy.scale.setScalar(0.0001); dummy.updateMatrix(); treeInst.setMatrixAt(ti, dummy.matrix); }
+    for (; thi < treeHighCount; thi++) { dummy.position.set(0, -1000, 0); dummy.scale.setScalar(0.0001); dummy.updateMatrix(); treeHighInst.setMatrixAt(thi, dummy.matrix); }
+    for (; hi < hutCount; hi++) { dummy.position.set(0, -1000, 0); dummy.scale.setScalar(0.0001); dummy.updateMatrix(); structInst.setMatrixAt(hi, dummy.matrix); roofInst.setMatrixAt(hi, dummy.matrix); }
+
+    treeInst.instanceMatrix.needsUpdate = true;
+    treeHighInst.instanceMatrix.needsUpdate = true;
+    structInst.instanceMatrix.needsUpdate = true;
+    roofInst.instanceMatrix.needsUpdate = true;
+    scene.add(treeInst, treeHighInst, structInst, roofInst);
+
+    // --- Kilka cieplej zabarwionych, proceduralnych brył budynkow (jak dalekie
+    // miasto, ale bez przygaszenia mgla-dystansem) dla zroznicowanej wysokosci
+    // sylwetki tuz za pierscieniem drzew. ---
+    const closeCount = 9;
+    const closeGeo = new THREE.BoxGeometry(1, 1, 1);
+    const closeMat = new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.85, metalness: 0.08 });
+    const closeInst = new THREE.InstancedMesh(closeGeo, closeMat, closeCount);
+    closeInst.castShadow = true; closeInst.receiveShadow = true; closeInst.frustumCulled = false;
+    const closePalette = [0x33404a, 0x3a2f45, 0x2f4a3a, 0x4a3a2f];
+    for (let i = 0; i < closeCount; i++) {
+      const angle = (i / closeCount) * Math.PI * 2 + randRange(-0.1, 0.1) + 0.12;
+      const radius = randRange(FOREGROUND_TALL_MIN + 0.2, FOREGROUND_TALL_MAX);
+      const x = Math.sin(angle) * radius;
+      const z = Math.cos(angle) * radius;
+      const height = randRange(2.2, 4.2);
+      const footprint = randRange(1.1, 1.6);
+      dummy.position.set(x, height / 2, z);
+      dummy.scale.set(footprint, height, footprint);
+      dummy.rotation.y = randRange(0, Math.PI * 2);
+      dummy.updateMatrix();
+      closeInst.setMatrixAt(i, dummy.matrix);
+      color.setHex(closePalette[i % closePalette.length]);
+      closeInst.setColorAt(i, color);
+    }
+    closeInst.instanceMatrix.needsUpdate = true;
+    if (closeInst.instanceColor) closeInst.instanceColor.needsUpdate = true;
+    scene.add(closeInst);
+
+    // --- Kilka kolumn z mini-arcade jako ozdobne pilastry przy co trzecim domku ---
+    const columnGltf = await loadArcade('column');
+    const columnMesh = this._firstMesh(columnGltf);
+    const columnCount = 6;
+    const columnInst = new THREE.InstancedMesh(columnMesh.geometry, columnMesh.material, columnCount * 2);
+    columnInst.castShadow = true; columnInst.receiveShadow = true; columnInst.frustumCulled = false;
+    let ci = 0;
+    for (let i = 0; i < columnCount; i++) {
+      const angle = (i / columnCount) * Math.PI * 2 + 0.3;
+      const radius = FOREGROUND_TALL_MIN + 0.1;
+      const x = Math.sin(angle) * radius;
+      const z = Math.cos(angle) * radius;
+      const perp = angle + Math.PI / 2;
+      for (const sign of [-1, 1]) {
+        const ox = x + Math.sin(perp) * 0.55 * sign;
+        const oz = z + Math.cos(perp) * 0.55 * sign;
+        dummy.position.set(ox, 0, oz);
+        dummy.rotation.set(0, angle, 0);
+        dummy.scale.setScalar(1);
+        dummy.updateMatrix();
+        columnInst.setMatrixAt(ci++, dummy.matrix);
+      }
+    }
+    columnInst.instanceMatrix.needsUpdate = true;
+    scene.add(columnInst);
+
+    this.foregroundMeshes = [treeInst, treeHighInst, structInst, roofInst, closeInst, columnInst];
   }
 
   // --- Plac pod arena - jedna bryla betonu, wierzch na y=0 (poziom podlogi areny) ---
