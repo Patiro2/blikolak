@@ -103,8 +103,12 @@ export function makeDraggable(panelEl, handleEl, storageKey = null) {
     try {
       const saved = localStorage.getItem(storageKey);
       if (saved) {
-        const { x, y } = JSON.parse(saved);
+        let { x, y } = JSON.parse(saved);
         if (typeof x === 'number' && typeof y === 'number') {
+          // Zabezpieczenie przed nakładaniem się rankingu na przyciski HUD w lewym górnym rogu
+          if (storageKey === 'bankomat-clicker-leaderboard-pos' && x < 340 && y < 145) {
+            y = 155;
+          }
           const maxLeft = Math.max(10, window.innerWidth - 80);
           const maxTop = Math.max(10, window.innerHeight - 40);
           panelEl.style.left = `${Math.min(Math.max(10, x), maxLeft)}px`;
@@ -437,6 +441,7 @@ export class WorkerOverlayManager {
       active: false,
       fainted: false, // stan omdlenia (boss.js) - musi przetrwac kazdy update z syncLeaderboardAndOverlays
       savedRank: '',
+      lastUsername: null,
     };
     this.overlays.set(workerIndex, data);
     return data;
@@ -448,8 +453,22 @@ export class WorkerOverlayManager {
       item.active = false;
       item.nameplateEl.style.display = 'none';
       item.bubbleEl.style.display = 'none';
+      // Awatar zostal usuniety ze slotu (np. zabity przez bossa) - znacznik
+      // omdlenia NIE moze zostac wiszacy, inaczej kolejny widz, ktory zajmie
+      // ten slot, dostanie 💤 mimo ze wcale nie jest omdlaly.
+      item.fainted = false;
+      item.nameplateEl.classList.remove('worker-fainted');
+      item.lastUsername = null;
       return;
     }
+    // Nowy widz zajal ten slot (inny nick niz poprzednio) - stary znacznik
+    // omdlenia nalezal do KOGO INNEGO i nie moze przetrwac na nowym wlascicielu slotu.
+    const cleanUser = String(userData.username || '').toLowerCase();
+    if (item.lastUsername !== null && item.lastUsername !== cleanUser) {
+      item.fainted = false;
+      item.nameplateEl.classList.remove('worker-fainted');
+    }
+    item.lastUsername = cleanUser;
     item.active = true;
     const rank = userData.rank;
     const rankLabel = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : (rank ? `#${rank}` : '');
@@ -633,4 +652,54 @@ export class VanessaLogUI {
     }
     for (const e of entries) this.listEl.appendChild(this._rowFor(e));
   }
+}
+
+const MAX_BOSS_FEED_ITEMS = 4;
+const DEFAULT_BOSS_FEED_DURATION = 6500;
+
+/**
+ * Wyświetla eleganckie powiadomienie o zdarzeniach walki z bossem
+ * po prawej stronie ekranu. Nowe wpisy pojawiają się na dole.
+ * Limituje liczbę powiadomień do 4, aby uniknąć cluttera.
+ */
+export function showBossNotification(type, title, bodyText, durationMs = DEFAULT_BOSS_FEED_DURATION) {
+  let feed = document.getElementById('boss-feed');
+  if (!feed) {
+    feed = document.createElement('div');
+    feed.id = 'boss-feed';
+    feed.className = 'boss-feed';
+    document.body.appendChild(feed);
+  }
+
+  // Ograniczenie cluttera: maksymalnie MAX_BOSS_FEED_ITEMS widocznych powiadomień
+  while (feed.children.length >= MAX_BOSS_FEED_ITEMS) {
+    const oldest = feed.firstElementChild;
+    if (oldest) {
+      if (oldest._dismissTimer) clearTimeout(oldest._dismissTimer);
+      oldest.remove();
+    }
+  }
+
+  const item = document.createElement('div');
+  item.className = `boss-feed-item type-${type}`;
+  item.innerHTML = `
+    <div class="boss-feed-title">${title}</div>
+    <div class="boss-feed-body">${bodyText}</div>
+  `;
+
+  feed.appendChild(item);
+
+  // Wymuszenie reflow i animacja wejścia z prawej strony
+  void item.offsetWidth;
+  item.classList.add('show');
+
+  item._dismissTimer = setTimeout(() => {
+    item.classList.remove('show');
+    item.classList.add('fade-out');
+    setTimeout(() => {
+      if (item.parentNode === feed) {
+        item.remove();
+      }
+    }, 320);
+  }, durationMs);
 }

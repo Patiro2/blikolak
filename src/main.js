@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { createScene, buildRoom } from './scene.js';
 import { preloadAll } from './assets.js';
 import { Machine } from './machine.js';
-import { WorkerManager } from './workers.js';
+import { WorkerManager, parseMovementDirection } from './workers.js';
 import { CoinPool } from './coins.js';
 import { GoldenCoinManager } from './goldcoin.js';
 import { Economy, WORKER_TYPE_DEFS, MACHINE_TIERS } from './economy.js';
@@ -11,6 +11,8 @@ import { KickChatClient } from './kick.js';
 import { VanessaManager, showTopAnnouncement } from './vanessa.js';
 import { BossManager, BOSS_DEFS } from './boss.js';
 import { fmtShort } from './format.js';
+import { CityBackground } from './city.js';
+import { audio } from './audio.js';
 
 async function main() {
   const canvas = document.getElementById('scene');
@@ -18,8 +20,20 @@ async function main() {
 
   const economy = new Economy();
 
+  // Preload dzwiekow leci w tle - main() NIE czeka na niego (patrz audio.js).
+  // Ewentualny blad pojedynczego pliku jest tam obslugiwany osobno i nie moze
+  // przerwac reszty preloadu ani startu gry.
+  audio.preload().catch((err) => console.warn('[audio] Blad preloadu dzwiekow:', err));
+
   await preloadAll();
   await buildRoom(scene);
+
+  // Miasto w tle - wokol i ponizej areny (patrz src/city.js). Zbudowane
+  // WYLACZNIE z prymitywow Three.js (InstancedMesh), bo zaden z pakietow
+  // Kenney w projekcie nie ma modeli budynkow/ulic/samochodow. Arena
+  // pozostaje bez zmian - miasto tylko dobudowuje otoczenie wokol niej.
+  const city = new CityBackground();
+  city.build(scene, renderer);
 
   const machine = new Machine(scene, camera, renderer.domElement);
   await machine.setTier(economy.state.machineTier);
@@ -37,12 +51,7 @@ async function main() {
   const coinPool = new CoinPool(scene);
   await coinPool.init();
 
-  const goldCoin = new GoldenCoinManager(scene, machine, (point) => {
-    const bonus = economy.collectGoldenCoin();
-    coinPool.burst(point, bonus);
-    projectAndFloat(point, `+${fmtShort(bonus)} zł!`, { gold: true });
-    save();
-  });
+  const goldCoin = new GoldenCoinManager(scene);
   await goldCoin.init();
 
   const vanessa = new VanessaManager(
@@ -69,6 +78,45 @@ async function main() {
     else vanessaLogUI.append(entry);
   };
 
+  // Dzwiek "ui-klik" dla kazdego przycisku w pasku HUD (delegacja zdarzen -
+  // obejmuje tez przyszle przyciski, np. wyciszenie/glosnosc, bez dopisywania
+  // osobnego listenera do kazdego z osobna).
+  const hudButtonsBar = document.getElementById('hud-top-left-buttons');
+  if (hudButtonsBar) {
+    hudButtonsBar.addEventListener('click', (e) => {
+      if (e.target.closest('button')) audio.play('ui-klik');
+    });
+  }
+
+  // Sterowanie dzwiekiem: przycisk wyciszenia + suwak glosnosci. Stan (glosnosc,
+  // wyciszenie) zyje w AudioManager i zapisuje sie sam do localStorage (patrz audio.js).
+  const muteBtn = document.getElementById('btn-mute');
+  const volumeSlider = document.getElementById('volume-slider');
+  if (volumeSlider) {
+    volumeSlider.value = String(Math.round(audio.getVolume() * 100));
+  }
+  function refreshAudioUI() {
+    if (muteBtn) muteBtn.textContent = audio.isMuted() ? '🔇' : '🔊';
+  }
+  refreshAudioUI();
+  if (muteBtn) {
+    muteBtn.addEventListener('click', () => {
+      audio.toggleMuted();
+      refreshAudioUI();
+    });
+  }
+  if (volumeSlider) {
+    volumeSlider.addEventListener('input', () => {
+      audio.setVolume(Number(volumeSlider.value) / 100);
+      // Ruszanie suwakiem przy wyciszeniu ma sens tylko jesli od razu odciszamy -
+      // inaczej uzytkownik przesuwa suwak i nic nie slyszy, myslac ze suwak nie dziala.
+      if (audio.isMuted()) {
+        audio.setMuted(false);
+        refreshAudioUI();
+      }
+    });
+  }
+
   const spawnVanessaBtn = document.getElementById('btn-spawn-vanessa');
   if (spawnVanessaBtn) {
     spawnVanessaBtn.addEventListener('click', () => {
@@ -84,10 +132,27 @@ async function main() {
   const clock = new THREE.Clock();
   const machineBurstOrigin = new THREE.Vector3(0, 0.6, 0.3);
 
+  // Dzwiek kombo ma grac TYLKO na progach co 5 stopni ("kombo x10", "x15"...),
+  // nie przy kazdym klikniecu - inaczej przy zywym czacie zlewaloby sie w szum.
+  // Sledzimy ostatni osiagniety prog (podloga combo/5) i gramy tylko przy zmianie.
+  let lastComboTier = 0;
+  function maybePlayComboSound(combo) {
+    if (combo <= 0) {
+      lastComboTier = 0;
+      return;
+    }
+    const tier = Math.floor(combo / 5);
+    if (tier > 0 && tier !== lastComboTier) {
+      lastComboTier = tier;
+      audio.play('kombo');
+    }
+  }
+
   // Wspolny baner awansu bankomatu - uzywany zarowno przy zwyklym awansie,
   // jak i po pokonaniu bossa (patrz onDefeated ponizej), zeby tekst zyl w JEDNYM miejscu.
   function announceTierAdvance(tier) {
     const def = MACHINE_TIERS[tier];
+    audio.play('awans-bankomatu');
     showTopAnnouncement(
       '🎰 AWANS BANKOMATU!',
       `Czat wbił już <strong>${economy.state.totalChatClicks}</strong> klików - bankomat awansuje na <strong>${def.name}</strong> (×${def.mult} zarobku)!`,
@@ -177,8 +242,23 @@ async function main() {
       vanessa.checkChatWord(msg.content, msg.username, msg.color);
       // Odpowiedzi na dzialania matematyczne bossa oraz komenda "pomoc" (omdlenia)
       boss.onChatMessage(msg.username, msg.content, msg.color);
+      // Chodzenie po siatce 2D areny - tylko dla aktywnych graczy w grze (Top 10)
+      const moveDir = parseMovementDirection(msg.content);
+      if (moveDir) {
+        const slot = kickChat.getWorkerForUser(msg.username);
+        if (
+          slot !== null &&
+          (!boss.isFainted || !boss.isFainted(msg.username)) &&
+          (!vanessa.isStealingFrom || !vanessa.isStealingFrom(msg.username))
+        ) {
+          workerManager.moveWorker(slot, moveDir);
+        }
+      }
     },
     onTopWorkerChat: ({ workerIndex, content }) => {
+      // Komendy ruchu nie powinny wyzwalać animacji uderzenia w bankomat ani dymków
+      if (parseMovementDirection(content)) return;
+
       const clean = (content || '')
         .replace(/(?:^|\s)[!/]*klik+[!.,?*~]*(?=\s|$)/gi, '')
         .replace(/(?:^|\s)[!/]*click+[!.,?*~]*(?=\s|$)/gi, '')
@@ -188,7 +268,7 @@ async function main() {
 
       workerOverlays.showSpeechBubble(workerIndex, clean);
       const entry = workerManager.getWorkerType(workerIndex);
-      if (entry) {
+      if (entry && !entry.isFainted && !entry.isMoving) {
         workerManager.triggerInteract(entry);
       }
     },
@@ -201,12 +281,18 @@ async function main() {
         return;
       }
 
-      const { value, isCrit, tierAdvanced } = economy.performClick(performance.now(), true);
+      const { value, isCrit, combo, tierAdvanced } = economy.performClick(performance.now(), true);
       machine.triggerClickAnim();
+      audio.play('klik');
+      if (isCrit) audio.play('kryt');
+      maybePlayComboSound(combo);
       coinPool.burst(machineBurstOrigin, value);
       const text = isCrit ? `KRYT! +${fmtShort(value)} (@${nick})` : `+${fmtShort(value)} (@${nick})`;
       projectAndFloat(machineBurstOrigin, text, { crit: isCrit, kick: true });
       kickUI.updateKliksCount(kickChat.stats.kliksReceived);
+
+      // Rejestracja wygenerowanego zarobku w rankingu widzów (automatycznie wywołuje onLeaderboardUpdate)
+      kickChat.recordEarned(nick, value, sender.identity?.color);
 
       // Jeśli klikający widz ma przypisanego pracownika, wywołujemy również jego animację uderzenia w bankomat
       const assignedSlot = kickChat.getWorkerForUser(nick);
@@ -216,9 +302,6 @@ async function main() {
           workerManager.triggerInteract(entry);
         }
       }
-
-      // Rejestracja wygenerowanego zarobku w rankingu widzów (automatycznie wywołuje onLeaderboardUpdate)
-      kickChat.recordEarned(nick, value, sender.identity?.color);
 
       // Automatyczny awans tieru automatu - gdy laczna liczba klikniec z czatu
       // przekroczy kolejny prog (patrz MACHINE_TIER_CLICK_THRESHOLDS w economy.js).
@@ -242,6 +325,7 @@ async function main() {
       });
     },
   });
+  workerManager.setContext({ boss, vanessa });
   vanessa.setContext({ workerManager, kickChat });
   boss.setContext({
     workerManager,
@@ -261,6 +345,14 @@ async function main() {
       }
       save();
     },
+  });
+  goldCoin.setContext({
+    workerManager,
+    kickChat,
+    economy,
+    coinPool,
+    projectAndFloat,
+    save,
   });
   try {
     await syncLeaderboardAndOverlays();
@@ -302,6 +394,8 @@ async function main() {
     // Klik streamera bezposrednio w model 3D - dolicza kase do wspolnej puli,
     // ale NIE liczy sie do progu awansu tieru (ten napedza wylacznie czat).
     const { value, isCrit } = economy.performClick(performance.now(), false);
+    audio.play('klik-gracz');
+    if (isCrit) audio.play('kryt');
     coinPool.burst(point, value);
     const text = isCrit ? `KRYT! +${fmtShort(value)}` : `+${fmtShort(value)}`;
     projectAndFloat(point, text, { crit: isCrit });
@@ -309,6 +403,7 @@ async function main() {
 
   // Ekspozycja do debugowania/weryfikacji w konsoli przeglądarki.
   window.__game = {
+    audio,
     economy,
     machine,
     workerManager,
@@ -324,6 +419,10 @@ async function main() {
     vanessaLogUI,
     syncLeaderboardAndOverlays,
     save,
+    scene,
+    camera,
+    renderer,
+    city,
   };
 
   function animate() {
@@ -342,6 +441,7 @@ async function main() {
     workerManager.update(delta);
     coinPool.update(delta);
     goldCoin.update(delta);
+    city.update(delta);
 
     // Brak dochodu pasywnego - zl powstaja WYLACZNIE z klikniec.
     // Awatary Top 10 animuja sie tylko wtedy, gdy ich widz naprawde napisze

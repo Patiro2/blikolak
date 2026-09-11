@@ -2,16 +2,11 @@ import * as THREE from 'three';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { loadArcade } from './assets.js';
 import { fmtShort } from './format.js';
+import { audio } from './audio.js';
 
 const SPAWN_MIN = 35; // sekundy do kolejnego pojawienia się
 const SPAWN_MAX = 70;
 const MODEL_KEY = 'character-female-e';
-
-// Ulamek skradzionej kwoty, ktory wraca do gry po przepedzeniu Vanessy.
-// Reszta (LOST_FRACTION) przepada bezpowrotnie wraz z nia - to celowe,
-// zeby bilans nigdy nie rosl (nic sie nie tworzy z powietrza).
-const RECOVERED_FRACTION = 0.5;
-const LOST_FRACTION = 1 - RECOVERED_FRACTION;
 
 // Parametry tykania kradziezy - co ile sekund i jaki ulamek dorobku ofiary
 const STEAL_TICK_INTERVAL = 0.8;
@@ -94,13 +89,6 @@ const CORNERS = [
 ];
 
 const TARGET_ATM = { x: 0.18, z: 0.72 }; // pozycja tuż przed ekranem bankomatu
-
-const SNEAK_TAUNTS = [
-  'Ciiicho... idę po waszą kasę! 🤫',
-  'Nikt mnie nie zauważy... 😈',
-  'Ten bankomat będzie mój! 💰',
-  'Oby czat nie odkrył mojego hasła! 🤫',
-];
 
 const STEAL_TAUNTS = [
   'Haha! Cała ta forsa jest moja! 😈',
@@ -215,10 +203,48 @@ export class VanessaManager {
     }
   }
 
+  /**
+   * Zwraca czy dany gracz jest w tym momencie okradany przez Vanessę (stan STEALING).
+   * Dopiero w trakcie kradzieży gracz zostaje zablokowany i nie może się ruszać.
+   */
+  isStealingFrom(username) {
+    if (this.state !== 'STEALING' || !this.victim || !this.victim.username) return false;
+    return this.victim.username.toLowerCase() === (username || '').toLowerCase();
+  }
+
+  /**
+   * Zwraca czy dany slot pracownika jest w tym momencie unieruchomiony przez Vanessę.
+   */
+  isWorkerRobbed(workerIndex) {
+    if (this.state !== 'STEALING' || !this.victim) return false;
+    return this.victim.workerIndex === workerIndex;
+  }
+
+  _setVictimRobbed() {
+    if (this.victim && this.workerManager && this.victim.workerIndex !== null) {
+      const entry = this.workerManager.getWorkerType(this.victim.workerIndex);
+      if (entry) {
+        entry.isRobbed = true;
+      }
+    }
+  }
+
+  _clearVictimRobbed() {
+    if (this.victim && this.workerManager && this.victim.workerIndex !== null) {
+      const entry = this.workerManager.getWorkerType(this.victim.workerIndex);
+      if (entry) {
+        entry.isRobbed = false;
+      }
+    }
+  }
+
   /** Zmiana stanu automatu skonczonego z wpisem do logu. */
   _setState(next, reason) {
     const prev = this.state;
     if (prev === next) return;
+    if (prev === 'STEALING' && next !== 'STEALING') {
+      this._clearVictimRobbed();
+    }
     this.state = next;
     this._log('info', `Stan: ${prev} → ${next}${reason ? ` (${reason})` : ''}`);
   }
@@ -473,6 +499,7 @@ export class VanessaManager {
       this.chaseAway(point);
     });
 
+    audio.play('vanessa-spawn');
     this.nameplateEl.style.display = 'flex';
     this.showBubble(`Ciiicho... idę okraść @${this.victim.username} ze złotówek! 😈`, 3500);
   }
@@ -519,58 +546,63 @@ export class VanessaManager {
     }
 
     this._setState('FLEEING', `przegoniona przez @${username}`);
+    audio.play('vanessa-przegoniona');
     this.speed = 3.4; // szybki sprint ucieczki w panice!
     this.playAction('sprint');
 
-    // Nagroda = dokladnie RECOVERED_FRACTION tego, co Vanessa faktycznie
-    // zdazyla ukrasc w tym wystapieniu. Reszta przepada wraz z nia - nic
-    // nie jest dodrukowywane. Clamp/asercja: wyplata NIGDY nie moze
-    // przekroczyc kwoty faktycznie skradzionej.
     const stolen = this.totalStolen;
-    const bounty = Math.max(0, Math.min(Math.floor(stolen * RECOVERED_FRACTION), stolen));
+    // Nagroda: zawsze 10 zł, chyba że połowa ukradzionej kwoty jest większa niż 10 zł (wtedy połowa ukradzionej kwoty)
+    const halfStolen = Math.floor(stolen * 0.5);
+    const bounty = halfStolen > 10 ? halfStolen : 10;
 
-    // Nagroda trafia na konto widza, ktory wykrzyczal haslo (odzyskana
-    // kwota w rankingu, NIE świeży zarobek - nie zwieksza licznika klikow).
-    if (bounty > 0 && this.onRewardViewer) {
+    // Nagroda trafia na konto widza, który wykrzyczał hasło
+    if (this.onRewardViewer) {
       this.onRewardViewer(username, bounty, color);
     }
 
-    this._log('good', `Przegoniona przez widza @${username} - odzyskano ${bounty} zl`, {
+    this._log('good', `Przegoniona przez widza @${username} - nagroda ${bounty} zl`, {
       przegonil: username,
       haslo: word,
       ukradlaLacznie: Math.round(stolen),
-      odzyskane: bounty,
-      przepadlo: Math.round(stolen) - bounty,
-      trafiloDo: bounty > 0 ? `ranking: @${username}` : 'nikt (nic nie ukradla)',
+      nagroda: bounty,
+      polowaWiekszaNiz10: halfStolen > 10,
+      trafiloDo: `ranking: @${username}`,
       ofiara: this.victim ? this.victim.username : null,
     });
 
-    const bountyText = bounty > 0
-      ? `+${fmtShort(bounty)} zł dla @${username}! (krzyknął "${word}"!)`
-      : `@${username} krzyknął "${word}"! Vanessa nic jeszcze nie zdążyła ukraść.`;
+    const bountyText = `+${fmtShort(bounty)} zł dla @${username}! (krzyknął "${word}"!)`;
     this.projectAndFloat(
       this.model.position,
       bountyText,
-      { crit: bounty > 0, gold: bounty > 0, kick: true }
+      { crit: true, gold: true, kick: true }
     );
 
-    // Dłuższy komunikat na górze środkowej części ekranu (2-3 sekundy, powoli pojawia się i znika)
+    // Dłuższy komunikat na górze środkowej części ekranu (2-3 sekundy)
     const bannerTitle = `🦹‍♀️ PRZEPĘDZONO ZŁODZIEJKĘ VANESSĘ!`;
-    let bannerBody = `Widz <strong class="announcement-hero" style="color:${color || '#00f0ff'}">@${username}</strong> wykrzyczał hasło <strong>"${word}"</strong>!`;
+    let bannerBody = `Widz <strong class="announcement-hero" style="color:${color || '#00f0ff'}">@${username}</strong> wykrzyczał hasło <strong>"${word}"</strong> i zdobywa <strong>${fmtShort(bounty)} zł</strong>!`;
     if (this.victim && stolen > 0) {
-      bannerBody += `<br><span class="announcement-sub">@${username} odzyskał 50% skradzionej kwoty (+${fmtShort(bounty)} zł z ${fmtShort(stolen)} zł ukradzionych od <strong class="announcement-victim">@${this.victim.username}</strong>)! Reszta przepadła z Vanessą.</span>`;
+      if (halfStolen > 10) {
+        bannerBody += `<br><span class="announcement-sub">@${username} odzyskał 50% skradzionej kwoty (+${fmtShort(bounty)} zł z ${fmtShort(stolen)} zł ukradzionych od <strong class="announcement-victim">@${this.victim.username}</strong>)! Reszta przepadła z Vanessą.</span>`;
+      } else {
+        bannerBody += `<br><span class="announcement-sub">Vanessa ukradła łącznie ${fmtShort(stolen)} zł od <strong class="announcement-victim">@${this.victim.username}</strong> zanim została przegoniona.</span>`;
+      }
     }
     showTopAnnouncement(bannerTitle, bannerBody, 2800);
 
-    const escapeWords = [
-      `Aaa! @${username} krzyknął "${word}"! Zwiewam! 😱🏃‍♀️💨`,
-      `Skąd @${username} znał hasło "${word}"?! Uciekam! 😭🏃‍♀️💨`,
-      `O nie, "${word}"! Zdemaskowana przez @${username}! 🏃‍♀️💨`,
-    ];
+    const escapeWords = halfStolen > 10
+      ? [
+          `Aaa! Oddaję połowę (+${fmtShort(bounty)} zł), reszta moja! 😭🏃‍♀️💨`,
+          `Skąd @${username} znał hasło "${word}"?! Uciekam z resztą hajsu! 😱🏃‍♀️💨`,
+        ]
+      : [
+          `Aaa! @${username} krzyknął "${word}"! Zwiewam! 😱🏃‍♀️💨`,
+          `Skąd @${username} znał hasło "${word}"?! Uciekam! 😭🏃‍♀️💨`,
+          `O nie, "${word}"! Zdemaskowana przez @${username}! 🏃‍♀️💨`,
+        ];
     this.showBubble(escapeWords[Math.floor(Math.random() * escapeWords.length)], 4000);
 
     if (this.secretTagEl) {
-      this.secretTagEl.innerHTML = `Przepędził: <strong class="vanessa-word" style="color:${color || '#53fc18'}">@${username}</strong>`;
+      this.secretTagEl.innerHTML = `Przepędził: <strong class="vanessa-word" style="color:${color || '#53fc18'}">@${username} (+${fmtShort(bounty)} zł)</strong>`;
     }
 
     this.model.lookAt(this.exitPos.x, 0, this.exitPos.z);
@@ -586,55 +618,58 @@ export class VanessaManager {
     }
 
     this._setState('FLEEING', 'przegoniona klikiem gracza');
+    audio.play('vanessa-przegoniona');
     this.speed = 3.2; // szybki sprint ucieczki!
     this.playAction('sprint');
 
-    // Nagroda = dokladnie RECOVERED_FRACTION tego, co Vanessa faktycznie
-    // zdazyla ukrasc. Reszta przepada wraz z nia. Clamp/asercja: wyplata
-    // NIGDY nie moze przekroczyc kwoty faktycznie skradzionej.
     const stolen = this.totalStolen;
-    const bounty = Math.max(0, Math.min(Math.floor(stolen * RECOVERED_FRACTION), stolen));
+    const halfStolen = Math.floor(stolen * 0.5);
+    const bounty = halfStolen > 10 ? halfStolen : 10;
 
-    // Nagroda trafia bezposrednio do gracza (przepedzil ja osobiscie klikiem)
-    if (bounty > 0) {
+    // Nagroda trafia do wspólnej puli (przepędzona osobiście przez gracza)
+    if (this.economy) {
       this.economy.addMoney(bounty);
+    }
+    if (this.coinPool) {
       this.coinPool.burst(this.model.position, bounty);
     }
 
-    this._log('good', `Przegoniona klikiem gracza - odzyskano ${bounty} zl`, {
+    this._log('good', `Przegoniona klikiem gracza - nagroda ${bounty} zl`, {
       ukradlaLacznie: Math.round(stolen),
-      odzyskane: bounty,
-      przepadlo: Math.round(stolen) - bounty,
-      trafiloDo: bounty > 0 ? 'kasa gracza' : 'nikt (nic nie ukradla)',
+      nagroda: bounty,
+      polowaWiekszaNiz10: halfStolen > 10,
+      trafiloDo: 'kasa gracza',
       ofiara: this.victim ? this.victim.username : null,
     });
 
     const burstPoint = point || this.model.position;
-    const bountyText = bounty > 0
-      ? `+${fmtShort(bounty)} zł! (Przepędzono Vanessę, odzyskano 50%!)`
-      : `Przepędzono Vanessę! (Nic jeszcze nie zdążyła ukraść)`;
+    const bountyText = `+${fmtShort(bounty)} zł! (Przepędzono Vanessę!)`;
     this.projectAndFloat(
       burstPoint,
       bountyText,
-      { crit: bounty > 0, gold: bounty > 0 }
+      { crit: true, gold: true }
     );
 
-    // Dłuższy komunikat na górze środkowej części ekranu (2-3 sekundy, powoli pojawia się i znika)
+    // Dłuższy komunikat na górze środkowej części ekranu (2-3 sekundy)
     const bannerTitle = `🦹‍♀️ PRZEPĘDZONO ZŁODZIEJKĘ VANESSĘ!`;
-    let bannerBody = `Gracz osobiście przepędził Vanessę kliknięciem myszy!`;
+    let bannerBody = `Gracz osobiście przepędził Vanessę kliknięciem myszy i zdobywa <strong>${fmtShort(bounty)} zł</strong>!`;
     if (this.victim && stolen > 0) {
-      bannerBody += `<br><span class="announcement-sub">Odzyskano 50% skradzionej kwoty (+${fmtShort(bounty)} zł z ${fmtShort(stolen)} zł ukradzionych od <strong class="announcement-victim">@${this.victim.username}</strong>)! Reszta przepadła z Vanessą.</span>`;
+      if (halfStolen > 10) {
+        bannerBody += `<br><span class="announcement-sub">Odzyskano 50% skradzionej kwoty (+${fmtShort(bounty)} zł z ${fmtShort(stolen)} zł ukradzionych od <strong class="announcement-victim">@${this.victim.username}</strong>)! Reszta przepadła z Vanessą.</span>`;
+      } else {
+        bannerBody += `<br><span class="announcement-sub">Vanessa ukradła łącznie ${fmtShort(stolen)} zł od <strong class="announcement-victim">@${this.victim.username}</strong> zanim została przegoniona.</span>`;
+      }
     }
     showTopAnnouncement(bannerTitle, bannerBody, 2800);
 
     if (this.victim && stolen > 0) {
-      this.showBubble(`Auuuć! Zostaw mnie, oddaję połowę hajsu ukradzionego od @${this.victim.username}! 😭🏃‍♀️💨`, 3500);
+      this.showBubble(halfStolen > 10 ? `Auuuć! Zostaw mnie, oddaję połowę hajsu! 😭🏃‍♀️💨` : `Auuuć! Zostaw mnie, uciekam z tym co mam! 😭🏃‍♀️💨`, 3500);
     } else {
       this.showBubble(FLEE_TAUNTS[Math.floor(Math.random() * FLEE_TAUNTS.length)], 3000);
     }
 
     if (this.secretTagEl) {
-      this.secretTagEl.innerHTML = `Przepędzona kliknięciem! 💥`;
+      this.secretTagEl.innerHTML = `Przepędzona kliknięciem! (+${fmtShort(bounty)} zł) 💥`;
     }
 
     // Wybór narożnika ucieczki (ten sam lub przeciwny)
@@ -642,6 +677,7 @@ export class VanessaManager {
   }
 
   despawn() {
+    this._clearVictimRobbed();
     if (this.model) {
       this._log('info', `Zniknela ze sceny. Lup w tym napadzie: ${Math.round(this.totalStolen)} zl`, {
         stanPrzedZnikniecien: this.state,
@@ -668,6 +704,7 @@ export class VanessaManager {
   }
 
   reset() {
+    this._clearVictimRobbed();
     this.despawn();
     this.spawnTimer = this._randomSpawnDelay();
   }
@@ -692,13 +729,30 @@ export class VanessaManager {
 
     // 3. Maszyna stanów ruchu i kradzieży
     if (this.state === 'SNEAKING') {
+      // Dynamicznie śledzimy pozycję ofiary, aby Vanessa podążała za graczem, gdy ten chodzi po arenie
+      if (this.victim && this.workerManager && this.victim.workerIndex !== null) {
+        const workerEntry = this.workerManager.getWorkerType(this.victim.workerIndex);
+        if (workerEntry && workerEntry.obj) {
+          const wp = workerEntry.obj.position;
+          this.victimWorkerPos = wp.clone();
+          const distToCenter = Math.hypot(wp.x, wp.z);
+          if (distToCenter > 0.1) {
+            const factor = Math.max(0.2, (distToCenter - 0.38) / distToCenter);
+            this.targetPos.set(wp.x * factor, 0, wp.z * factor);
+          } else {
+            this.targetPos.copy(wp);
+          }
+        }
+      }
+
       const dirX = this.targetPos.x - this.model.position.x;
       const dirZ = this.targetPos.z - this.model.position.z;
       const dist = Math.hypot(dirX, dirZ);
 
-      if (dist <= 0.22) {
-        // Dotarła pod postać gracza - rozpoczyna kradzież kliknięć!
+      if (dist <= 0.35) {
+        // Dotarła pod postać gracza - rozpoczyna kradzież i unieruchamia ofiarę!
         this._setState('STEALING', 'doszla do celu');
+        this._setVictimRobbed();
         this.stealTimer = 0;
         this.stealTickAcc = 0;
         this.playAction('interact-right');
@@ -737,6 +791,7 @@ export class VanessaManager {
             const amount = Math.min(available, wanted);
             const stolen = this.kickChat.stealMoneyFromUser(this.victim.username, amount);
             if (stolen > 0) {
+              audio.play('vanessa-kradnie');
               this.totalStolen += stolen;
               this._log('steal', `Ukradla ${Math.round(stolen)} zl od @${this.victim.username}`, {
                 tenTyk: Math.round(stolen),
@@ -759,6 +814,7 @@ export class VanessaManager {
           ofiara: this.victim ? this.victim.username : null,
         });
         this._setState('ESCAPING', 'uplynal czas kradziezy');
+        audio.play('vanessa-ucieka');
         this.speed = 1.6;
         this.playAction('walk');
         if (this.victim) {

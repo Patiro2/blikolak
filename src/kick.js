@@ -20,6 +20,26 @@ const ASSIGNMENTS_KEY = 'bankomat-clicker-worker-assignments';
 const SAVE_DEBOUNCE_MS = 1000;
 const UPDATE_THROTTLE_MS = 250;
 
+/**
+ * Usuwa poprzedzajace "@" i biale znaki z nicku, zachowujac oryginalna
+ * wielkosc liter (do wyswietlania, np. jako "username" w rankingu).
+ */
+export function stripNickPrefix(username) {
+  return String(username || '').replace(/^@+/, '').trim();
+}
+
+/**
+ * Normalizuje nick widza do postaci uzywanej jako klucz porownan/mapowan w
+ * calej grze: usuwa "@", przycina biale znaki, sprowadza do malych liter.
+ * Uzywane wszedzie tam, gdzie porownujemy nicki (ranking, przypisania
+ * pracownikow, omdlenia bossa, ratunek "pomoc") - bez tej jednej wspolnej
+ * funkcji nick z "@" (np. wpisany recznie) rozjezdzal sie z reszta systemu
+ * (patrz boss.js _tryHelp/isFainted, ktore kiedys robily surowe .toLowerCase()).
+ */
+export function normalizeNick(username) {
+  return stripNickPrefix(username).toLowerCase();
+}
+
 export class KickChatClient {
   constructor(options = {}) {
     this.chatroomId = options.chatroomId || DEFAULT_CHATROOM_ID;
@@ -124,7 +144,7 @@ export class KickChatClient {
    */
   updateAssignments() {
     const top10 = this.getTopEarners(10);
-    const top10Keys = new Set(top10.map((u) => u.username.toLowerCase()));
+    const top10Keys = new Set(top10.map((u) => normalizeNick(u.username || '')));
 
     // 1. Eviction: usunięcie widzów, którzy wypadli poza Top 10
     for (const uKey of Object.keys(this.assignments.userToWorker)) {
@@ -135,9 +155,22 @@ export class KickChatClient {
       }
     }
 
+    // 1b. Eviction osieroconych slotów w workerToUser (np. po dawnych sesjach)
+    for (const slotKey of Object.keys(this.assignments.workerToUser)) {
+      const data = this.assignments.workerToUser[slotKey];
+      if (!data || !data.username) {
+        delete this.assignments.workerToUser[slotKey];
+      } else {
+        const cleanUser = normalizeNick(data.username);
+        if (!top10Keys.has(cleanUser)) {
+          delete this.assignments.workerToUser[slotKey];
+        }
+      }
+    }
+
     // 2. Przypisanie wolnych slotów dla nowych osób w Top 10 (z zachowaniem istniejących slotów)
     for (const user of top10) {
-      const uKey = user.username.toLowerCase();
+      const uKey = normalizeNick(user.username || '');
       if (this.assignments.userToWorker[uKey] === undefined) {
         // Szukamy pierwszego wolnego slotu pracownika (0..9)
         for (let slot = 0; slot < 10; slot++) {
@@ -183,10 +216,12 @@ export class KickChatClient {
   }
 
   getUserForWorker(workerIndex) {
+    workerIndex = Number(workerIndex);
     const data = this.assignments.workerToUser[workerIndex];
     if (!data) return null;
     const topEarners = this.getTopEarners(100);
-    const rankIndex = topEarners.findIndex((u) => u.username.toLowerCase() === data.username.toLowerCase());
+    const cleanUser = normalizeNick(data.username || '');
+    const rankIndex = topEarners.findIndex((u) => normalizeNick(u.username || '') === cleanUser);
     return {
       username: data.username,
       color: data.color || '#53fc18',
@@ -196,18 +231,38 @@ export class KickChatClient {
 
   getWorkerForUser(username) {
     if (!username) return null;
-    const slot = this.assignments.userToWorker[username.toLowerCase()];
-    return slot !== undefined ? slot : null;
+    const clean = normalizeNick(username);
+    const slot = this.assignments.userToWorker[clean];
+    return slot !== undefined ? Number(slot) : null;
   }
 
-  recordEarned(username, amount, color) {
+  isEliminated(username) {
+    if (!username) return false;
+    const clean = normalizeNick(username);
+    return this.eliminated.has(clean);
+  }
+
+  /**
+   * Dolicza zarobek widzowi w rankingu. `countsAsClick` (domyslnie true)
+   * decyduje, czy ten zarobek zwieksza tez licznik `clicks` w rankingu -
+   * ten licznik MUSI odzwierciedlac wylacznie realne komendy "klik" z czatu.
+   * Zrodla zarobku inne niz komenda "klik" (np. zebranie zlotej monety przez
+   * dobiegniecie postaci) wywoluja to z countsAsClick=false, zeby nie
+   * fabrykowac klikniec, ktorych widz nigdy nie napisal.
+   */
+  recordEarned(username, amount, color, countsAsClick = true) {
     if (!username) return;
-    const key = username.toLowerCase();
-    if (this.eliminated.has(key)) return; // zabici przez bossa nie wracaja do rankingu w trakcie walki
+    const cleanUsername = stripNickPrefix(username);
+    const key = cleanUsername.toLowerCase();
+    // Jeśli gracz zginął podczas walki z bossem, "klik" odradza go w grze
+    // z nowym dorobkiem, pozwalając ponownie dołączyć do Top 10
+    if (this.eliminated.has(key)) {
+      this.eliminated.delete(key);
+    }
 
     if (!this.leaderboard[key]) {
       this.leaderboard[key] = {
-        username,
+        username: cleanUsername,
         totalEarned: 0,
         clicks: 0,
         color: color || '#53fc18',
@@ -215,9 +270,9 @@ export class KickChatClient {
       };
     }
     const entry = this.leaderboard[key];
-    entry.username = username;
+    entry.username = cleanUsername;
     entry.totalEarned += amount;
-    entry.clicks += 1;
+    if (countsAsClick) entry.clicks += 1;
     if (color) entry.color = color;
     entry.lastActive = Date.now();
 
@@ -233,7 +288,7 @@ export class KickChatClient {
    */
   stealMoneyFromUser(username, amount = 0) {
     if (!username) return 0;
-    const key = username.toLowerCase();
+    const key = normalizeNick(username);
     const entry = this.leaderboard[key];
     if (!entry) return 0;
 
@@ -255,12 +310,15 @@ export class KickChatClient {
    */
   creditRecoveredMoney(username, amount = 0, color) {
     if (!username || amount <= 0) return;
-    const key = username.toLowerCase();
-    if (this.eliminated.has(key)) return; // zabici przez bossa nie wracaja do rankingu w trakcie walki
+    const cleanUsername = stripNickPrefix(username);
+    const key = cleanUsername.toLowerCase();
+    if (this.eliminated.has(key)) {
+      this.eliminated.delete(key);
+    }
 
     if (!this.leaderboard[key]) {
       this.leaderboard[key] = {
-        username,
+        username: cleanUsername,
         totalEarned: 0,
         clicks: 0,
         color: color || '#53fc18',
@@ -268,7 +326,7 @@ export class KickChatClient {
       };
     }
     const entry = this.leaderboard[key];
-    entry.username = username;
+    entry.username = cleanUsername;
     entry.totalEarned += amount;
     if (color) entry.color = color;
     entry.lastActive = Date.now();
@@ -292,7 +350,7 @@ export class KickChatClient {
    */
   eliminateUser(username) {
     if (!username) return;
-    const key = username.toLowerCase();
+    const key = normalizeNick(username);
     this.eliminated.add(key);
     delete this.leaderboard[key];
 

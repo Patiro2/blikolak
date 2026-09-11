@@ -44,8 +44,25 @@ Port można podać jako argument: `python serve.py 8080`.
 - **Kombo czatu** — szybkie klikniecia od widzów (dowolnych, pod rząd, w
   krótkim oknie czasu) podbijają wspólny mnożnik zarobku. Wygasa po przerwie
   w klikaniu.
-- **Złota moneta** — pojawia się losowo w scenie, klikalna przez streamera,
-  bonus wpada do wspólnej puli.
+- **Złota moneta** — pojawia się co 10 s na losowym, wolnym polu siatki areny
+  (znika po 25 s, jeśli nikt jej nie zbierze). NIE jest klikalna myszką -
+  zbiera ją pierwszy awatar Top 10, który do niej dobiegnie (patrz "Chodzenie
+  po siatce" niżej), i zgarnia 25 zł do wspólnej puli oraz do swojego dorobku
+  w rankingu. Zebranie monety NIE liczy się jako komenda "klik" - licznik
+  klików widza w rankingu rośnie wyłącznie od realnego "klik" na czacie.
+- **Chodzenie po siatce 2D** — każdy widz z przypisanym awatarem (Top 10) może
+  ruszać swoją postacią komendami na czacie: `up`/`w`/`góra`, `down`/`s`/`dół`,
+  `left`/`a`/`lewo`, `right`/`d`/`prawo` (i kilka polskich wariantów, np.
+  "w lewo", "do przodu"). Kierunki są WZGLĘDEM tego, gdzie postać aktualnie
+  patrzy (jak sterowanie "zza pleców postaci"), nie względem osi świata -
+  `left`/`right` obracają postać o 90° i robią krok, `up`/`down` to krok do
+  przodu/tyłu względem aktualnego zwrotu. Postać nie wychodzi poza arenę 7×7,
+  nie wchodzi na pole bankomatu (0,0) ani na pole zajęte przez innego
+  pracownika - w takich przypadkach tylko się obraca w tę stronę.
+- **Feed powiadomień bossa** — w trakcie walki z bossem Kamilem Kovalenko
+  (patrz niżej) w prawym dolnym rogu ekranu pojawiają się kolejno karty z
+  najważniejszymi zdarzeniami walki (trafienie, "zabicie" widza, omdlenie,
+  ratunek, tryb awaryjny) - maksymalnie 4 naraz, najstarsze znikają.
 
 Stan zapisuje się sam do `localStorage` co 5 s i przy zamykaniu karty.
 
@@ -57,14 +74,17 @@ Stan zapisuje się sam do `localStorage` co 5 s i przy zamykaniu karty.
 | `src/scene.js` | renderer, kamera, światła, pokój z kafli 1×1 |
 | `src/assets.js` | ładowanie GLB z cache, retry i limitem współbieżności |
 | `src/machine.js` | model automatu, podmiana tieru, raycast i animacja kliknięcia |
-| `src/workers.js` | awatary Top 10, klony szkieletów, animacje `idle`/`interact-right` |
+| `src/workers.js` | awatary Top 10, klony szkieletów, animacje `idle`/`interact-right`, ruch po siatce 2D (`moveWorker`, kolizje między pracownikami) |
 | `src/coins.js` | pula 120 monet z lotem po łuku |
+| `src/goldcoin.js` | złota moneta na siatce areny - spawn, znacznik czasu na podłodze, zbieranie przez dobiegnięcie awatara |
 | `src/economy.js` | stan wspólnej puli czatu, wartość kliknięcia, progi awansu tieru, zapis/odczyt |
-| `src/ui.js` | HUD (pula, postęp do awansu, kombo, reset), widget czatu Kick, ranking |
-| `src/kick.js` | integracja z czatem Kick.com (Pusher WebSocket), detekcja komendy "klik", eliminacje bossa |
+| `src/ui.js` | HUD (pula, postęp do awansu, kombo, reset), widget czatu Kick, ranking, feed powiadomień bossa (`showBossNotification`) |
+| `src/kick.js` | integracja z czatem Kick.com (Pusher WebSocket), detekcja komendy "klik", eliminacje bossa, `normalizeNick`/`stripNickPrefix` (współdzielone przez cały kod) |
 | `src/vanessa.js` | złodziejka Vanessa - FSM, kradzież zł, przepędzanie, `normalizePolish`/`showTopAnnouncement` (współdzielone też przez bossa) |
-| `src/boss.js` | boss "Kamil Kovalenko" - cutscenka, walka matematyczna, omdlenia, `BOSS_DEFS` |
+| `src/boss.js` | boss "Kamil Kovalenko" - cutscenka, walka matematyczna, omdlenia, tryb awaryjny odpowiedzi, `BOSS_DEFS` |
 | `src/format.js` | skrócona notacja liczb (1.5K, 2.3M) |
+| `src/city.js` | proceduralne miasto w tle areny (budynki, ulice, jeżdżące samochody) |
+| `src/audio.js` | dźwięki gry - `AudioManager` na Web Audio API, mapa zdarzeń `SOUND_MAP`, limitowanie głosów, wyciszenie/głośność (patrz sekcja "Dźwięki" niżej) |
 
 Assety są skopiowane do `assets/arcade/` i `assets/dungeon/` — **osobno**, bo
 oba pakiety mają plik `Textures/colormap.png` o tej samej nazwie i różnej treści,
@@ -84,7 +104,7 @@ Gra łączy się na żywo z czatem kanału **patiro** na Kick.com przez WebSocke
 - **Złodziejka Vanessa (Losowy event)**:
   - W losowych odstępach czasu z jednego z narożników areny zakrada się Vanessa (`🦹‍♀️ Vanessa`), pod warunkiem że w Top 10 rankingu widzów jest ktoś z dodatnim dorobkiem w zł - w przeciwnym razie nie ma kogo okraść i Vanessa się nie pojawia.
   - Jej ofiarą jest losowo wybrany widz z Top 10 rankingu. Vanessa podchodzi pod jego postać (pracownika) i co 0,8 s zabiera mu porcję (ok. 5%) jego dorobku w zł - nie kliknięć! Statystyka liczby komend "klik" w rankingu pozostaje nietknięta.
-  - **Przegonienie**: kliknięcie na jej model/plakietkę (przez gracza) albo wpisanie jej sekretnego hasła na czacie (przez widza) każe jej uciekać w panice sprintem. W obu przypadkach do gry wraca dokładnie **50% kwoty, którą zdążyła ukraść** w tym wystąpieniu - reszta przepada bezpowrotnie razem z nią, więc nic nie jest dodrukowywane. Gdy przegania ją gracz (streamer), odzyskana kwota trafia do WSPÓLNEJ PULI CZATU; gdy przegania ją widz hasłem, odzyskana kwota trafia na jego konto w rankingu (jako odzyskana kwota, nie świeży zarobek).
+  - **Przegonienie**: kliknięcie na jej model/plakietkę (przez gracza) albo wpisanie jej sekretnego hasła na czacie (przez widza) każe jej uciekać w panice sprintem. W obu przypadkach do gry wraca **`max(10, połowa ukradzionej kwoty)` zł** - czyli zawsze co najmniej 10 zł, a jeśli połowa łupu przekracza 10 zł, wraca dokładnie połowa; reszta przepada bezpowrotnie razem z nią, więc nic nie jest dodrukowywane. Gdy przegania ją gracz (streamer), odzyskana kwota trafia do WSPÓLNEJ PULI CZATU; gdy przegania ją widz hasłem, odzyskana kwota trafia na jego konto w rankingu (jako odzyskana kwota, nie świeży zarobek).
   - Jeśli Vanessa nie zostanie przepędzona w porę, ucieka z całym łupem - ofiara traci go bezpowrotnie.
 
 ## Boss: Kamil Kovalenko
@@ -117,6 +137,12 @@ mini-characters) + `character-male-f`, złożone w jedną grupę i wyskalowane
   liczy się pierwsza poprawna odpowiedź. Trafienie zabiera 5 HP (20 trafień =
   pokonanie), po ~1,2 s pojawia się nowe działanie. Odpowiadający NIE dostaje
   złotówek ani klików - to czysta minigra, ranking się nie zmienia.
+  Normalnie odpowiadać mogą tylko osoby z Top 10 z przypisanym pracownikiem
+  (i tylko jeśli nie są aktualnie omdlone) - ale jeśli w danym momencie nie ma
+  ANI JEDNEJ takiej osoby (ranking pusty albo wszyscy uprawnieni omdleli),
+  boss przełącza się w **tryb awaryjny** i przyjmuje odpowiedź od KAŻDEGO
+  widza czatu, żeby walka nigdy nie zaklinowała się na amen - w feedzie
+  bossa pojawia się wtedy widoczny komunikat "⚠️ TRYB AWARYJNY!".
 - **Kara za brak odpowiedzi**: po 8 s boss "zabija" losowego widza z Top 10 -
   traci CAŁY dorobek (`totalEarned`) i znika z rankingu (`kickChat.eliminateUser`),
   jego awatar gra `die` i po ~2,5 s znika ze sceny. Ofiara nie wraca do rankingu,
@@ -170,9 +196,67 @@ Przycisk **Reset gry** (obok przycisku respienia Vanessy, w lewym górnym
 rogu) zeruje wspólną pulę, ranking, przypisania pracowników i tier automatu
 (po potwierdzeniu w oknie dialogowym). Postępu nie da się cofnąć.
 
+## Dźwięki
+
+Wszystkie dźwięki gry leżą w `assets/audio/` - to paczki **Kenney** (Interface,
+Casino, Impact, Sci-Fi + podkatalogi z jinglami "Sax jingles", "Steel jingles"
+itd.), **CC0 1.0** (domena publiczna, użycie bez ograniczeń; podanie "Kenney" /
+"www.kenney.nl" jest mile widziane, ale nieobowiązkowe - patrz `License.txt`
+w każdej paczce). Odtwarzanie jest zbudowane na czystym Web Audio API
+(`src/audio.js`, klasa `AudioManager`) - celowo BEZ elementów `<audio>`, bo
+przy serii kliknięć z czatu Kicka jeden element `<audio>` by się zaciął.
+
+**Podmiana pliku dla danego zdarzenia** - jedyne miejsce do edycji to stała
+`SOUND_MAP` na górze `src/audio.js`. Każde zdarzenie ma wpis:
+
+```js
+'klik': {
+  pliki: ['chip-lay-1.ogg', 'chip-lay-2.ogg', 'chip-lay-3.ogg'], // losuje jeden z listy
+  glosnosc: 0.35,      // mnoznik glosnosci tego zdarzenia (0..1)
+  cooldownMs: 40,       // minimalny odstep miedzy kolejnymi odtworzeniami
+  maxJednoczesnie: 3,    // ile glosow tego zdarzenia moze grac naraz
+  wysokoscVar: 0.08,     // losowa odchylka wysokosci dzwieku (playbackRate, ±8%)
+},
+```
+
+Żeby podmienić dźwięk - wystarczy zmienić nazwę(y) pliku w `pliki` (ścieżka
+względem `assets/audio/`; podkatalogi ze spacjami, np. `"Sax jingles/jingles_SAX00.ogg"`,
+działają bez zmian - `encodeURI` jest już obsłużony w `audio.js`). Wpisy z
+dwoma plikami i `tryb: 'wszystkie'` (np. `boss-wejscie`, `vanessa-spawn`) grają
+OBA pliki naraz zamiast losować jeden - to celowe (dwa nałożone efekty dźwiękowe).
+
+Pełna lista zdarzeń: `klik`, `klik-gracz`, `kryt`, `kombo`, `moneta-spawn`,
+`moneta-zebrana`, `awans-bankomatu`, `krok`, `boss-wejscie`, `boss-uderzenie`,
+`boss-dzialanie`, `boss-tik`, `boss-trafienie`, `boss-zabija`, `omdlenie`,
+`ratunek`, `boss-pokonany`, `vanessa-spawn`, `vanessa-kradnie`,
+`vanessa-przegoniona`, `vanessa-ucieka`, `ui-klik`.
+
+**Głośność i wyciszenie** - przycisk 🔊/🔇 i suwak obok przycisków HUD
+(`#audio-controls` w `index.html`) sterują `AudioManager`; stan zapisuje się
+sam do `localStorage` (klucz `bankomat-clicker-audio-v1`) i wczytuje przy
+starcie gry, niezależnie od zapisu stanu rozgrywki (`economy.js`).
+
+**Ograniczenia dbające o to, żeby spam "klik" nie brzmiał jak karabin
+maszynowy**: globalny limit 12 jednoczesnych źródeł dźwięku, cooldown i limit
+równoległych odtworzeń per zdarzenie, losowa wysokość dźwięku w zadanym
+zakresie. `AudioContext` startuje zawieszony (polityka autoplay) i odblokowuje
+się przy pierwszym kliknięciu/klawiszu na stronie - do tego czasu `play()` jest
+cichym no-opem. Preload leci w tle i NIE blokuje startu gry; brakujący lub
+niedekodowalny plik loguje jedno ostrzeżenie w konsoli i trwale wyłącza to
+jedno zdarzenie - reszta gry działa dalej normalnie.
+
+Debug z konsoli przeglądarki:
+
+```js
+window.__game.audio.play('klik');            // ręczne odtworzenie zdarzenia
+window.__game.audio.activeVoiceCount();       // ile zrodel dzwieku gra teraz
+window.__game.audio.setVolume(0.5);            // 0..1
+window.__game.audio.toggleMuted();
+```
+
 ## Debugowanie
 
-W konsoli przeglądarki dostępne jest `window.__game` z polami `economy`,
+W konsoli przeglądarki dostępne jest `window.__game` z polami `audio`, `economy`,
 `machine`, `workerManager`, `coinPool`, `goldCoin`, `vanessa`, `ui`, `kickChat`, `kickUI`, `leaderboardUI`, `workerOverlays` i `save()`.
 
 ```js

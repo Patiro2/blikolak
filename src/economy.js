@@ -216,20 +216,6 @@ export class Economy {
     return next < MACHINE_TIER_CLICK_THRESHOLDS.length ? MACHINE_TIER_CLICK_THRESHOLDS[next] : null;
   }
 
-  // --- Zlota moneta ---
-
-  // Premia liczona wylacznie od wartosci klikniecia - w grze nie ma juz
-  // zadnego dochodu pasywnego, wiec nie ma sie do czego innego odniesc.
-  goldenCoinBonus() {
-    return Math.max(100, Math.round(this.baseClickValue() * 60));
-  }
-
-  collectGoldenCoin() {
-    const bonus = this.goldenCoinBonus();
-    this.addMoney(bonus);
-    return bonus;
-  }
-
   addMoney(amount) {
     this.state.money += amount;
     this.state.totalEarned += amount;

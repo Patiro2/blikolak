@@ -3,8 +3,8 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { loadArcade } from './assets.js';
 
 const BASE_FOV = 42;
-const BASE_POS = new THREE.Vector3(0, 2.7, 4.6);
-const LOOK_TARGET = new THREE.Vector3(0, 0.4, 0.35);
+const BASE_POS = new THREE.Vector3(0, 3.2, 5.4);
+const LOOK_TARGET = new THREE.Vector3(0, 0.65, 0.1);
 
 /**
  * Przy waskim/wysokim oknie (aspect < 1.3) kadr 42mm/pozycja (0,2.7,4.6) zaweza
@@ -183,6 +183,60 @@ export async function buildRoom(scene) {
     group.add(col);
   }
 
+  // Wizualna neonowa siatka 2D na podłodze areny (7x7 pól, każde pole 1.0 x 1.0 m)
+  const gridMesh = createFloorGridMesh(SIZE, SIZE);
+  group.add(gridMesh);
+
   scene.add(group);
   return group;
+}
+
+/** Tworzy estetyczną, świecącą siatkę 2D na posadzce z wyrysowanymi kwadratami pól. */
+function createFloorGridMesh(size, divisions) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 1024;
+  canvas.height = 1024;
+  const ctx = canvas.getContext('2d');
+
+  ctx.clearRect(0, 0, 1024, 1024);
+
+  const cellSize = 1024 / divisions;
+
+  // Każde pole siatki otrzymuje neonową ramkę
+  ctx.strokeStyle = 'rgba(83, 252, 24, 0.7)';
+  ctx.lineWidth = 4;
+  ctx.shadowColor = '#53fc18';
+  ctx.shadowBlur = 10;
+
+  for (let x = 0; x < divisions; x++) {
+    for (let y = 0; y < divisions; y++) {
+      const rx = x * cellSize;
+      const ry = y * cellSize;
+
+      ctx.strokeRect(rx + 2, ry + 2, cellSize - 4, cellSize - 4);
+
+      // Subtelny znacznik środka pola
+      ctx.fillStyle = 'rgba(83, 252, 24, 0.35)';
+      ctx.beginPath();
+      ctx.arc(rx + cellSize / 2, ry + cellSize / 2, 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.ClampToEdgeWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+
+  const geo = new THREE.PlaneGeometry(size, size);
+  const mat = new THREE.MeshBasicMaterial({
+    map: texture,
+    transparent: true,
+    opacity: 0.75,
+    depthWrite: false,
+  });
+
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.position.set(0, 0.028, 0);
+  return mesh;
 }

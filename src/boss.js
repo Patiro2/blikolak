@@ -2,7 +2,10 @@ import * as THREE from 'three';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { loadArcade } from './assets.js';
 import { fmtShort } from './format.js';
-import { normalizePolish, showTopAnnouncement } from './vanessa.js';
+import { normalizePolish } from './vanessa.js';
+import { showBossNotification } from './ui.js';
+import { normalizeNick } from './kick.js';
+import { audio } from './audio.js';
 
 // Architektura gotowa na kolejnych bossow (jeden na kazdy tier bankomatu) -
 // tablica indeksowana numerem tieru, wypelniony na razie tylko indeks 1.
@@ -30,25 +33,19 @@ const CUTSCENE_DURATION = 5.0;
 
 const SPAWN_POS = new THREE.Vector3(0, 0, -3.0); // korytarz z tylu sceny
 const IMPACT_POS = new THREE.Vector3(0.3, 0, 0.2); // punkt uderzenia w bankomat (tuz przed nim)
-// Miejsce postoju jest CELOWO przesuniete W BOK od bankomatu (nadal w srodku
-// okregu pracownikow r=1.75 wokol (0,0,0), dystans od centrum ~1.5) - przy
-// skali x3 postoj wprost przed bankomatem (stare FINAL_POS (0,0,1.15)) zaslanial
-// cala scene, a postoj daleko z tylu (proba (0,0,-1.3)) wypadal zbyt malo i
-// zbyt wysoko w kadrze, w calosci pod wlasnym plakietka+dymkiem. Pozycja z boku,
-// nieco blizej kamery, zostawia widoczny bankomat ORAZ cale cialo bossa ponizej
-// plakietki (zmierzone empirycznie - patrz raport).
-const FINAL_POS = new THREE.Vector3(1.1, 0, 1.0); // miejsce postoju, z boku bankomatu, w srodku kregu graczy
-const APPROACH_CTRL = new THREE.Vector3(1.8, 0, -1.6); // punkt kontrolny "driftu" podjazdu
-const SETTLE_CTRL = new THREE.Vector3(1.9, 0, -0.2); // punkt kontrolny okrazania po uderzeniu, do pozycji z boku
+// Miejsce postoju bossa: idealnie pośrodku wszystkich graczy (X = 0, Z = -0.45),
+// w centrum areny za przechylonym bankomatem, twarzą prosto do kamery i widzów.
+const FINAL_POS = new THREE.Vector3(0, 0, -0.85);
+const APPROACH_CTRL = new THREE.Vector3(1.8, 0, -1.6); // punkt kontrolny "driftu" podjazdu (z prawej)
+const SETTLE_CTRL = new THREE.Vector3(-1.4, 0, 0.1); // punkt kontrolny driftu po uderzeniu (okrążenie z lewej do środka)
 
-// Lokalny offset postaci wzgledem wozka (przed skalowaniem grupy x3) - wyliczony
+// Lokalny offset postaci wzgledem wozka (przed skalowaniem grupy x2.2) - wyliczony
 // empirycznie z world-space Box3 obu czesci w pozie "wheelchair-sit": bez niego
-// postac zjezdza ok. 0.34 j. (w swiecie) PONIZEJ podlogi i siedzi zauwazalnie
-// przed siedziskiem. Patrz komentarz przy _buildModel().
+// postac zjezdza pod podloge i siedzi przed siedziskiem.
 const CHAR_LOCAL_OFFSET = new THREE.Vector3(0, 0.113, -0.11);
 
-const CAM_KINO_POS = new THREE.Vector3(0.4, 1.15, 2.5);
-const CAM_KINO_TARGET = new THREE.Vector3(0, 0.55, 0.2);
+const CAM_KINO_POS = new THREE.Vector3(0.6, 2.0, 3.6);
+const CAM_KINO_TARGET = new THREE.Vector3(0, 0.65, 0.1);
 
 const LOG_LIMIT = 300;
 
@@ -157,7 +154,15 @@ export class BossManager {
     this.currentEq = null; // { text, result }
     this.eqTimer = 0;
     this.interDelay = 0;
+    this._lastTickSecond = null;
     this.faintTimer = this._randomFaintDelay();
+
+    // Tryb awaryjny (patrz _hasEligibleSolvers): gdy nikt z Top 10 nie moze
+    // juz odpowiadac (ranking pusty albo wszyscy uprawnieni omdleni), boss
+    // przyjmuje odpowiedzi od KAZDEGO widza czatu, zeby walka nigdy nie
+    // zaklinowala sie na amen. Flaga pilnuje, zeby komunikat w feedzie
+    // pokazal sie raz na dzialanie, nie przy kazdej wiadomosci na czacie.
+    this._emergencyAnnounced = false;
 
     this.faintedMap = new Map(); // username(lower) -> { username, slot, ts }
 
@@ -243,7 +248,7 @@ export class BossManager {
   /** Czy dany widz jest aktualnie omdlony - jego "klik" ma byc ignorowany (patrz main.js onKlik). */
   isFainted(username) {
     if (!username) return false;
-    return this.faintedMap.has(username.toLowerCase());
+    return this.faintedMap.has(normalizeNick(username));
   }
 
   // --- DOM overlaye: plakietka z HP, dymek z dzialaniem, letterbox, karta tytulowa ---
@@ -252,11 +257,22 @@ export class BossManager {
     np.className = 'boss-nameplate';
     np.style.display = 'none';
 
+    // Górny wiersz: Nazwa bossa po lewej, tekst HP po prawej
+    const headerRow = document.createElement('div');
+    headerRow.className = 'boss-header-row';
+
     const nameRow = document.createElement('div');
     nameRow.className = 'boss-name-row';
     nameRow.textContent = '👹 Kamil Kovalenko';
-    np.appendChild(nameRow);
+    headerRow.appendChild(nameRow);
 
+    const hpText = document.createElement('div');
+    hpText.className = 'boss-hp-text';
+    hpText.textContent = '100 / 100';
+    headerRow.appendChild(hpText);
+    np.appendChild(headerRow);
+
+    // Pasek HP
     const hpWrap = document.createElement('div');
     hpWrap.className = 'boss-hp-bar';
     const hpFill = document.createElement('div');
@@ -264,34 +280,31 @@ export class BossManager {
     hpWrap.appendChild(hpFill);
     np.appendChild(hpWrap);
 
-    const hpText = document.createElement('div');
-    hpText.className = 'boss-hp-text';
-    hpText.textContent = '100 / 100';
-    np.appendChild(hpText);
-
-    this.container.appendChild(np);
-    this.nameplateEl = np;
-    this.hpFillEl = hpFill;
-    this.hpTextEl = hpText;
-
-    const bubble = document.createElement('div');
-    bubble.className = 'boss-bubble';
-    bubble.style.display = 'none';
+    // Zintegrowana sekcja działania matematycznego z paskiem odliczania
+    const eqSection = document.createElement('div');
+    eqSection.className = 'boss-equation-section';
+    eqSection.style.display = 'none';
 
     const eqText = document.createElement('div');
     eqText.className = 'boss-equation';
     eqText.textContent = '';
-    bubble.appendChild(eqText);
+    eqSection.appendChild(eqText);
 
     const timerWrap = document.createElement('div');
     timerWrap.className = 'boss-timer-bar';
     const timerFill = document.createElement('div');
     timerFill.className = 'boss-timer-fill';
     timerWrap.appendChild(timerFill);
-    bubble.appendChild(timerWrap);
+    eqSection.appendChild(timerWrap);
 
-    this.container.appendChild(bubble);
-    this.bubbleEl = bubble;
+    np.appendChild(eqSection);
+
+    this.container.appendChild(np);
+    this.nameplateEl = np;
+    this.hpFillEl = hpFill;
+    this.hpTextEl = hpText;
+    this.equationSectionEl = eqSection;
+    this.bubbleEl = eqSection;
     this.eqTextEl = eqText;
     this.timerFillEl = timerFill;
 
@@ -382,6 +395,7 @@ export class BossManager {
 
     this._log('spawn', `Startuje walka z bossem "${def.name}" (awans na tier ${tier})`, { tier, hp: this.hp });
 
+    audio.play('boss-wejscie');
     this._buildModel();
     this._beginCutscene();
     return true;
@@ -399,7 +413,7 @@ export class BossManager {
     char.position.copy(CHAR_LOCAL_OFFSET);
     group.add(chair);
     group.add(char);
-    group.scale.setScalar(3);
+    group.scale.setScalar(2.2);
 
     group.traverse((child) => {
       if (child.isMesh) {
@@ -515,16 +529,14 @@ export class BossManager {
     if (this.model) {
       this.model.position.copy(pos);
       // Kierunek patrzenia - w strone kolejnego punktu na krzywej (styczna)
-      if (driveU < 0.98) {
+      if (driveU < 0.90) {
         const aheadU = Math.min(1, driveU + 0.03);
         let ahead;
         if (aheadU < 0.55) ahead = quadBezier(this._bezierTmp2, SPAWN_POS, APPROACH_CTRL, IMPACT_POS, aheadU / 0.55);
         else ahead = quadBezier(this._bezierTmp2, IMPACT_POS, SETTLE_CTRL, FINAL_POS, Math.min(1, (aheadU - 0.55) / 0.45));
         this.model.lookAt(ahead.x, this.model.position.y, ahead.z);
       } else {
-        // Ostatni odcinek - obraca sie twarza do kamery (graczy). Patrzy wzdluz
-        // czystej osi +Z (nie w strone (0,y,10)), zeby boczny offset FINAL_POS.x
-        // nie przekrzywial kierunku patrzenia.
+        // Ostatni odcinek driftu - boss obraca się twarzą prosto do kamery (graczy)
         this.model.lookAt(this.model.position.x, this.model.position.y, this.model.position.z + 10);
       }
     }
@@ -541,13 +553,21 @@ export class BossManager {
   }
 
   _triggerImpact() {
+    audio.play('boss-uderzenie');
     this._log('bad', 'Boss uderza w bankomat! Bankomat zostaje rozwalony na czas walki');
     if (this.machine.model) {
       this.machine.model.rotation.z = 0.35;
-      this.machine.model.position.x = -0.08;
+      this.machine.model.position.x = -0.12;
       this.machine.model.position.y = -0.04;
+      this.machine.model.position.z = 0.28;
     }
     this.coinPool.burst(new THREE.Vector3(0, 0.6, 0.3), 40);
+
+    showBossNotification(
+      'boss',
+      '💥 UDERZENIE W BANKOMAT!',
+      'Kamil Kovalenko rozwalił bankomat i przejmuje arenę!',
+    );
 
     // Wstrzas kamery - krotki losowy offset przez kilka klatek (obslugiwany prostym timerem)
     this._camShakeT = 0.35;
@@ -596,6 +616,16 @@ export class BossManager {
         this.timerFillEl.style.width = `${frac * 100}%`;
         this.timerFillEl.classList.toggle('danger', frac < 0.25);
       }
+      // Tik odliczania - dokladnie raz na sekunde w ostatnich 3 sekundach
+      // (NIE co klatke - eqTimer plynie po delta, wiec pilnujemy zmiany
+      // zaokraglonej sekundy zamiast odtwarzac dzwiek na kazdym update()).
+      if (this.eqTimer > 0 && this.eqTimer <= 3) {
+        const sec = Math.ceil(this.eqTimer);
+        if (sec !== this._lastTickSecond) {
+          this._lastTickSecond = sec;
+          audio.play('boss-tik');
+        }
+      }
       if (this.eqTimer <= 0) {
         this._onTimeout();
       }
@@ -613,6 +643,9 @@ export class BossManager {
     this.currentEq = genEquation();
     this.eqTimer = ANSWER_WINDOW;
     this.interDelay = 0;
+    this._emergencyAnnounced = false;
+    this._lastTickSecond = null;
+    audio.play('boss-dzialanie');
     if (this.eqTextEl) this.eqTextEl.textContent = this.currentEq.text;
     if (this.bubbleEl) this.bubbleEl.style.display = 'flex';
     if (this.timerFillEl) {
@@ -636,8 +669,29 @@ export class BossManager {
 
     if (!this.currentEq || this.interDelay > 0) return;
 
-    const key = username.toLowerCase();
-    if (this.faintedMap.has(key)) return; // omdlali nie moga odpowiadac
+    // Failsafe: gdy nikt z Top 10 nie jest juz w stanie odpowiedziec (ranking
+    // pusty albo wszyscy uprawnieni omdleli), walka NIE moze zostac na zawsze
+    // zaklinowana - boss zaczyna przyjmowac odpowiedzi od KAZDEGO widza czatu.
+    const emergency = !this._hasEligibleSolvers();
+    if (emergency) {
+      if (!this._emergencyAnnounced) {
+        this._emergencyAnnounced = true;
+        this._log('bad', 'Brak uprawnionych do odpowiedzi (ranking pusty/wszyscy omdleli) - TRYB AWARYJNY: boss przyjmuje odpowiedzi od calego czatu');
+        showBossNotification(
+          'boss',
+          '⚠️ TRYB AWARYJNY!',
+          'Nikt z Top 10 nie może już odpowiadać - <strong>boss przyjmuje odpowiedzi od całego czatu!</strong>',
+        );
+      }
+    } else {
+      // Normalna zasada: tylko osoby bedace aktualnie w grze (w Top 10 z
+      // przypisana postacia) moga odgadywac wyniki, i tylko jesli nie omdlaly.
+      const inGame = this.kickChat && this.kickChat.getWorkerForUser(username) !== null;
+      if (!inGame) return;
+
+      const key = normalizeNick(username);
+      if (this.faintedMap.has(key)) return; // omdlali nie moga odpowiadac
+    }
 
     const tokens = content.split(/\s+/).map((t) => t.replace(/[^\d-]/g, '')).filter((t) => t.length > 0);
     const hit = tokens.some((t) => Number(t) === this.currentEq.result);
@@ -646,18 +700,44 @@ export class BossManager {
     }
   }
 
+  /**
+   * Czy w tym momencie istnieje choc jedna osoba UPRAWNIONA do normalnego
+   * odpowiadania na dzialania bossa - czyli widz z Top 10 z przypisanym
+   * pracownikiem, ktory NIE jest omdlaly. Gdy zwraca false, onChatMessage
+   * przechodzi w tryb awaryjny (patrz wyzej) - inaczej walka moglaby utknac
+   * na zawsze (pusty ranking albo ostatnia osoba w nim akurat omdlala).
+   */
+  _hasEligibleSolvers() {
+    if (!this.kickChat) return false;
+    const top10 = this.kickChat.getTopEarners(10);
+    return top10.some((u) => {
+      const slot = this.kickChat.getWorkerForUser(u.username);
+      if (slot === null) return false;
+      const key = normalizeNick(u.username || '');
+      return !this.faintedMap.has(key);
+    });
+  }
+
   _onCorrectAnswer(username, color) {
     const dmg = HP_PER_HIT;
+    const eqText = this.currentEq ? this.currentEq.text.replace(' = ?', ` = ${this.currentEq.result}`) : '';
     this.hp = Math.max(0, this.hp - dmg);
-    this._log('good', `@${username} trafil poprawna odpowiedz (${this.currentEq.result}) - boss traci ${dmg} HP`, {
+    this._log('good', `@${username} trafil poprawna odpowiedz (${this.currentEq?.result}) - boss traci ${dmg} HP`, {
       hpPo: this.hp,
     });
 
+    audio.play('boss-trafienie');
     if (this.model) {
       this.projectAndFloat(this._bossFloaterOrigin(), `✔ @${username}`, { crit: true, kick: true });
     }
     this.playAction('emote-no', { once: true });
     this._shakeBossOnce();
+
+    showBossNotification(
+      'hit',
+      `✔ @${username} ROZWIĄZAŁ DZIAŁANIE!`,
+      `Odpowiedział <strong>${eqText}</strong> — boss traci ${dmg} HP! (${this.hp}/${this.maxHp})`,
+    );
 
     if (this.hpFillEl) this.hpFillEl.style.width = `${(this.hp / this.maxHp) * 100}%`;
     if (this.hpTextEl) this.hpTextEl.textContent = `${this.hp} / ${this.maxHp}`;
@@ -701,7 +781,7 @@ export class BossManager {
     if (!this.kickChat) return null;
     const top10 = this.kickChat.getTopEarners(10);
     const eligible = top10.filter((u) => {
-      const key = u.username.toLowerCase();
+      const key = normalizeNick(u.username);
       if (this.faintedMap.has(key)) return false;
       if (requirePositive && !((u.totalEarned || 0) > 0)) return false;
       return true;
@@ -724,6 +804,7 @@ export class BossManager {
     const workerIndex = this.kickChat.getWorkerForUser(username);
     const lostAmount = Math.round(victim.totalEarned || 0);
 
+    audio.play('boss-zabija');
     if (this.kickChat) this.kickChat.eliminateUser(username);
 
     if (workerIndex !== null && this.workerManager) {
@@ -733,15 +814,22 @@ export class BossManager {
         this.projectAndFloat(origin, `💀 @${username}`, { crit: true, steal: true });
         this.workerManager.playDeath(workerIndex);
         setTimeout(() => {
-          if (this.workerManager) this.workerManager.removeWorkerType(workerIndex);
+          // Usunięcie modelu tylko wtedy, gdy slot nie został w międzyczasie
+          // ponownie zajęty przez powracającego widza lub nowego gracza
+          if (this.workerManager) {
+            const currentSlotUser = this.kickChat ? this.kickChat.getUserForWorker(workerIndex) : null;
+            if (!currentSlotUser) {
+              this.workerManager.removeWorkerType(workerIndex);
+            }
+          }
         }, 2500);
       }
     }
 
-    showTopAnnouncement(
+    showBossNotification(
+      'kill',
       `💀 KAMIL KOVALENKO ZABIŁ @${username}!`,
-      `Stracił cały dorobek (<strong>${fmtShort(lostAmount)} zł</strong>) i wypadł z rankingu!`,
-      3200,
+      `Brak odpowiedzi w 8 s! Stracił cały dorobek (<strong>${fmtShort(lostAmount)} zł</strong>) i wypadł z rankingu.`,
     );
 
     this._log('bad', `Boss "zabil" @${username} - stracil ${lostAmount} zl i wypadl z rankingu`, {
@@ -759,19 +847,20 @@ export class BossManager {
       return;
     }
     const username = victim.username;
-    const key = username.toLowerCase();
+    const key = normalizeNick(username);
     const workerIndex = this.kickChat ? this.kickChat.getWorkerForUser(username) : null;
 
     this.faintedMap.set(key, { username, slot: workerIndex, ts: Date.now() });
 
+    audio.play('omdlenie');
     if (workerIndex !== null && this.workerManager) {
-      this.workerManager.playDeath(workerIndex);
+      this.workerManager.setFainted(workerIndex, true);
     }
 
-    showTopAnnouncement(
+    showBossNotification(
+      'faint',
       `💤 @${username} OMDLAŁ!`,
-      `Boss go powalił. Napisz <strong>pomoc</strong> na czacie, żeby go podnieść!`,
-      3000,
+      `Boss go powalił! Ktoś inny musi napisać <strong>pomoc</strong> na czacie, żeby go podnieść!`,
     );
     this._log('info', `@${username} omdlal - napisz "pomoc" na czacie, zeby go podniesc`, { ofiara: username });
 
@@ -785,6 +874,21 @@ export class BossManager {
     return true;
   }
 
+  isFainted(username) {
+    if (!username || this.state !== 'FIGHT') return false;
+    const key = normalizeNick(username);
+    return this.faintedMap.has(key);
+  }
+
+  isFaintedForSlot(slot) {
+    if (this.state !== 'FIGHT') return false;
+    const target = Number(slot);
+    for (const info of this.faintedMap.values()) {
+      if (Number(info.slot) === target) return true;
+    }
+    return false;
+  }
+
   _refreshFaintedNameplate(workerIndex, fainted) {
     if (workerIndex === null || workerIndex === undefined) return;
     if (this.workerOverlays) this.workerOverlays.setFainted(workerIndex, fainted);
@@ -792,41 +896,42 @@ export class BossManager {
 
   _tryHelp(rescuerUsername, color) {
     if (this.faintedMap.size === 0) return;
+    const rescuerKey = normalizeNick(rescuerUsername);
+    // Omdlony gracz nie może nikogo ratować, dopóki sam leży
+    if (this.faintedMap.has(rescuerKey)) return;
+
     // Nie mozna podniesc samego siebie
     let oldestKey = null;
     let oldestTs = Infinity;
     for (const [key, info] of this.faintedMap) {
-      if (key === rescuerUsername.toLowerCase()) continue;
+      if (key === rescuerKey) continue;
       if (info.ts < oldestTs) {
         oldestTs = info.ts;
         oldestKey = key;
       }
     }
+    // Brak innych graczy do podniesienia (nie można podnieść samego siebie)
     if (!oldestKey) return;
 
     const info = this.faintedMap.get(oldestKey);
     this.faintedMap.delete(oldestKey);
 
+    audio.play('ratunek');
     if (info.slot !== null && info.slot !== undefined && this.workerManager) {
-      const entry = this.workerManager.getWorkerType(info.slot);
-      if (entry) {
-        if (entry.idleAction) {
-          entry.idleAction.reset().play();
-        }
-        if (entry.dieAction) entry.dieAction.stop();
-      }
+      this.workerManager.setFainted(info.slot, false);
       this._refreshFaintedNameplate(info.slot, false);
 
+      const entry = this.workerManager.getWorkerType(info.slot);
       if (entry && entry.obj) {
         const origin = entry.obj.position.clone().add(new THREE.Vector3(0, 1.6, 0));
         this.projectAndFloat(origin, `🤝 @${rescuerUsername} podniósł @${info.username}!`, { gold: true });
       }
     }
 
-    showTopAnnouncement(
+    showBossNotification(
+      'help',
       `🤝 RATUNEK!`,
       `<strong>@${rescuerUsername}</strong> podniósł <strong>@${info.username}</strong>!`,
-      2400,
     );
     this._log('good', `@${rescuerUsername} podnosi omdlalego @${info.username}`, {
       ratownik: rescuerUsername,
@@ -837,11 +942,7 @@ export class BossManager {
   _wakeAllFainted() {
     for (const [key, info] of this.faintedMap) {
       if (info.slot !== null && info.slot !== undefined && this.workerManager) {
-        const entry = this.workerManager.getWorkerType(info.slot);
-        if (entry) {
-          if (entry.idleAction) entry.idleAction.reset().play();
-          if (entry.dieAction) entry.dieAction.stop();
-        }
+        this.workerManager.setFainted(info.slot, false);
         this._refreshFaintedNameplate(info.slot, false);
       }
     }
@@ -862,6 +963,7 @@ export class BossManager {
   }
 
   _onDefeatedBoss() {
+    audio.play('boss-pokonany');
     this._log('spawn', `Boss "${this.def.name}" pokonany!`);
     this.state = 'VICTORY';
     this.currentEq = null;
@@ -872,6 +974,12 @@ export class BossManager {
     this._victoryT = 0;
 
     this._wakeAllFainted();
+
+    showBossNotification(
+      'boss',
+      '🏆 KAMIL KOVALENKO POKONANY!',
+      'Czat powalił bossa! Bankomat wraca na nowym tierze.',
+    );
   }
 
   _updateVictory(delta) {
@@ -894,6 +1002,7 @@ export class BossManager {
       this.machine.model.rotation.z = 0;
       this.machine.model.position.x = 0;
       this.machine.model.position.y = 0;
+      this.machine.model.position.z = 0;
     }
 
     if (this.onDefeated) {
@@ -916,6 +1025,13 @@ export class BossManager {
     this.mixer = null;
     this.currentAction = null;
     this.charObj = null;
+
+    if (this.machine && this.machine.model) {
+      this.machine.model.rotation.z = 0;
+      this.machine.model.position.x = 0;
+      this.machine.model.position.y = 0;
+      this.machine.model.position.z = 0;
+    }
 
     this.state = 'IDLE';
     this.currentEq = null;
@@ -944,36 +1060,25 @@ export class BossManager {
 
   _updateOverlayPositions(camera, canvasRect) {
     if (!this.model || !camera || !canvasRect) return;
-    if (this.state !== 'FIGHT' && this.state !== 'VICTORY') {
-      // W cutscence plakietka jest widoczna, ale bez dymka z dzialaniem
-      if (this.bubbleEl) this.bubbleEl.style.display = 'none';
-    }
 
     this.model.getWorldPosition(this._headWorld);
-    // Zmniejszony offset (bylo 2.3) - przy skali x3 dawny offset wypychal
-    // punkt rzutowania nad krawedz kadru i plakietka/dymek renderowaly sie
-    // poza oknem (ujemny Y). 1.9 trzyma punkt tuz nad glowa bossa.
-    this._headWorld.y += 1.9;
+    // Offset punktu rzutowania - trzyma zintegrowany pasek idealnie nad głową bossa
+    this._headWorld.y += 1.85;
 
     this._projected.copy(this._headWorld).project(camera);
 
     if (this._projected.z >= 1.0) {
       this.nameplateEl.style.display = 'none';
-      this.bubbleEl.style.display = 'none';
       return;
     }
 
     let sx = canvasRect.left + (this._projected.x * 0.5 + 0.5) * canvasRect.width;
     let sy = canvasRect.top + (-this._projected.y * 0.5 + 0.5) * canvasRect.height;
 
-    // Klamrowanie do wnetrza canvasa z marginesem - plakietka i dymek nad nia
-    // (razem ok. 150px w pionie, ~180px w poziomie) musza ZAWSZE w calosci
-    // miescic sie w oknie, niezaleznie od tego, gdzie akurat projektuje sie
-    // glowa bossa (przy skali x3 latwo wypasc nad gorna krawedz). Dolna granica
-    // gornego marginesu jest tez na tyle niska, zeby nie wchodzic pod panel HUD
-    // w lewym gornym rogu.
-    const H_MARGIN = 100;
-    const TOP_MARGIN = 150;
+    // Klamrowanie do wnętrza canvasa z marginesem - zintegrowany pasek ma ~110px wysokości,
+    // więc TOP_MARGIN = 125 gwarantuje, że pasek z nazwą i HP nigdy nie zostanie ucięty u góry ekranu.
+    const H_MARGIN = 130;
+    const TOP_MARGIN = 125;
     const BOTTOM_MARGIN = 20;
     const minX = canvasRect.left + H_MARGIN;
     const maxX = canvasRect.left + Math.max(H_MARGIN, canvasRect.width - H_MARGIN);
@@ -984,12 +1089,12 @@ export class BossManager {
 
     this.nameplateEl.style.display = 'flex';
     this.nameplateEl.style.left = `${sx}px`;
-    this.nameplateEl.style.top = `${sy - 10}px`;
+    this.nameplateEl.style.top = `${sy}px`;
 
-    if (this.state === 'FIGHT' && this.currentEq && this.interDelay <= 0) {
-      this.bubbleEl.style.display = 'flex';
-      this.bubbleEl.style.left = `${sx}px`;
-      this.bubbleEl.style.top = `${sy - 58}px`;
+    // Zintegrowana sekcja działania wewnątrz paska bossa
+    if (this.equationSectionEl) {
+      const showEq = this.state === 'FIGHT' && this.currentEq && this.interDelay <= 0;
+      this.equationSectionEl.style.display = showEq ? 'flex' : 'none';
     }
   }
 
