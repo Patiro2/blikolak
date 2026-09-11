@@ -31,10 +31,14 @@ Port można podać jako argument: `python serve.py 8080`.
   `src/economy.js`). Awans podmienia model 3D i pokazuje baner na górze ekranu.
   Klikniecia gracza (streamera) bezpośrednio w model NIE liczą się do progu —
   tylko klikniecia z czatu.
+- **Złotówki wyłącznie z kliknięć** — w grze NIE MA żadnego dochodu
+  pasywnego. Bankomat sam z siebie nie produkuje nic; pula rośnie tylko
+  wtedy, gdy ktoś naprawdę kliknie (komenda `klik` na czacie albo kliknięcie
+  streamera w model).
 - **Pracownicy = awatary Top 10** — każdemu z 10 widzów w rankingu Top 10
-  przypisany jest jeden z 10 modeli postaci w scenie. Tempo animacji i
-  dochód pasywny zależą od MIEJSCA w rankingu: 1. miejsce zarabia i klika
-  najszybciej, 10. miejsce najwolniej. Dochód pasywny trafia do wspólnej puli.
+  przypisany jest jeden z 10 modeli postaci w scenie. Awatar odgrywa animację
+  uderzenia w bankomat dokładnie wtedy, gdy jego widz napisze `klik` — nigdy
+  sam z siebie.
 - **Krytyczne kliknięcia** — stała szansa 5% na trafienie krytyczne, stały
   mnożnik ×3. Nic się tu nie kupuje.
 - **Kombo czatu** — szybkie klikniecia od widzów (dowolnych, pod rząd, w
@@ -55,8 +59,8 @@ Stan zapisuje się sam do `localStorage` co 5 s i przy zamykaniu karty.
 | `src/machine.js` | model automatu, podmiana tieru, raycast i animacja kliknięcia |
 | `src/workers.js` | awatary Top 10, klony szkieletów, animacje `idle`/`interact-right` |
 | `src/coins.js` | pula 120 monet z lotem po łuku |
-| `src/economy.js` | stan wspólnej puli czatu, progi awansu tieru, dochód pasywny wg rankingu, zapis/odczyt |
-| `src/ui.js` | HUD (pula, dochód, kombo, reset), widget czatu Kick, ranking |
+| `src/economy.js` | stan wspólnej puli czatu, wartość kliknięcia, progi awansu tieru, zapis/odczyt |
+| `src/ui.js` | HUD (pula, postęp do awansu, kombo, reset), widget czatu Kick, ranking |
 | `src/kick.js` | integracja z czatem Kick.com (Pusher WebSocket), detekcja komendy "klik" |
 | `src/format.js` | skrócona notacja liczb (1.5K, 2.3M) |
 
@@ -72,7 +76,7 @@ Gra łączy się na żywo z czatem kanału **patiro** na Kick.com przez WebSocke
 - **Stały Leaderboard**: Zawsze widoczna lista Top 10 widzów, którzy wygenerowali najwięcej zysku (z medalami 🥇🥈🥉, kolorami nicków z Kicka i przypisanymi rolami).
 - **Awatar pracownika dla każdego z Top 10**:
   - Każdej osobie z Top 10 przypisywany jest jeden z 10 modeli pracowników w świecie 3D.
-  - Tempo animacji i dochód pasywny tego awatara zależą od MIEJSCA w rankingu (1. miejsce najszybsze i najbardziej dochodowe, 10. miejsce najwolniejsze).
+  - Awatar odgrywa animację uderzenia w bankomat tylko wtedy, gdy jego widz napisze `klik` na czacie.
   - Nad głową postaci unosi się plakietka z pozycją w rankingu oraz nickiem.
   - Każda kolejna wiadomość napisana przez tego widza na czacie pojawia się w animowanym dymku komiksowym nad głową jego postaci w 3D!
 - **Złodziejka Vanessa (Losowy event)**:

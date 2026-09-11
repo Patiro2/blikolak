@@ -39,8 +39,6 @@ export const WORKER_TYPE_DEFS = [
 // Tempo (klik/s rownowazne) dochodu pasywnego generowanego przez awatar na
 // danym MIEJSCU w rankingu (rank 1 = najlepsze, najszybsze; rank 10 =
 // najslabsze). Miejsce 1 zarabia najwiecej, miejsce 10 najmniej.
-const RANK_BASE_RATE = 0.4; // tempo miejsca #10
-const RANK_RATE_STEP = 0.15; // przyrost tempa za kazde miejsce blizej #1
 
 // Krytyczne klikniecia - STALA szansa i STALY mnoznik (nic tu sie nie kupuje).
 const CRIT_CHANCE = 0.05; // 5% szans na trafienie krytyczne
@@ -206,36 +204,22 @@ export class Economy {
     return { value, isCrit, combo: this._combo, tierAdvanced };
   }
 
-  // --- Dochod pasywny z awatarow Top 10 (patrz main.js: syncLeaderboardAndOverlays) ---
-
-  /** Tempo (klik/s rownowazne) dochodu pasywnego dla danego MIEJSCA w rankingu (1..10). */
-  rankUnitRate(rank) {
-    const clamped = Math.max(1, Math.min(10, rank || 10));
-    return RANK_BASE_RATE + RANK_RATE_STEP * (10 - clamped);
-  }
-
-  /** Zl/s generowane do wspolnej puli przez awatar na danym miejscu w rankingu. */
-  rankContribution(rank) {
-    return this.rankUnitRate(rank) * this.baseClickValue();
-  }
-
-  /** Suma zl/s ze wszystkich AKTYWNYCH miejsc (activeRanks = ile miejsc Top 10 jest obecnie zajetych). */
-  totalIncomePerSecond(activeRanks = 0) {
-    let total = 0;
-    for (let rank = 1; rank <= activeRanks; rank++) {
-      total += this.rankContribution(rank);
-    }
-    return total;
+  /** Prog klikow otwierajacy kolejny tier bankomatu albo null, gdy osiagnieto ostatni. */
+  nextTierThreshold() {
+    const next = this.state.machineTier + 1;
+    return next < MACHINE_TIER_CLICK_THRESHOLDS.length ? MACHINE_TIER_CLICK_THRESHOLDS[next] : null;
   }
 
   // --- Zlota moneta ---
 
-  goldenCoinBonus(activeRanks = 0) {
-    return Math.max(100, this.totalIncomePerSecond(activeRanks) * 45 + this.baseClickValue() * 25);
+  // Premia liczona wylacznie od wartosci klikniecia - w grze nie ma juz
+  // zadnego dochodu pasywnego, wiec nie ma sie do czego innego odniesc.
+  goldenCoinBonus() {
+    return Math.max(100, Math.round(this.baseClickValue() * 60));
   }
 
-  collectGoldenCoin(activeRanks = 0) {
-    const bonus = this.goldenCoinBonus(activeRanks);
+  collectGoldenCoin() {
+    const bonus = this.goldenCoinBonus();
     this.addMoney(bonus);
     return bonus;
   }

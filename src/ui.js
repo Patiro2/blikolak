@@ -48,12 +48,19 @@ export class UI {
     });
   }
 
-  /** Wywoływać co klatkę - odświeża tylko liczby HUD-u, bez przebudowy DOM. `activeRanks` to liczba zajętych miejsc Top 10 (do wyliczenia dochodu pasywnego). */
-  refreshNumbers(now, activeRanks = 0) {
+  /** Wywoływać co klatkę - odświeża tylko liczby HUD-u, bez przebudowy DOM. */
+  refreshNumbers(now) {
     if (now - this._lastMoneyRefresh < 100) return;
     this._lastMoneyRefresh = now;
     this.moneyEl.textContent = `${fmt(this.economy.state.money)} zł`;
-    this.incomeEl.textContent = `${fmt(this.economy.totalIncomePerSecond(activeRanks))} zł/s`;
+
+    // W grze nie ma dochodu pasywnego, wiec zamiast "zl/s" pokazujemy licznik
+    // klikow czatu i postep do kolejnego tieru - to jedyne, co napedza progresje.
+    const kliki = this.economy.state.totalChatClicks;
+    const prog = this.economy.nextTierThreshold();
+    this.incomeEl.textContent = prog === null
+      ? `${fmt(kliki)} klików czatu • maksymalny bankomat`
+      : `${fmt(kliki)} / ${fmt(prog)} klików do awansu`;
     if (this.comboEl) {
       const combo = this.economy.comboCount();
       if (combo > 1) {

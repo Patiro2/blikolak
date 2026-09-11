@@ -37,8 +37,7 @@ async function main() {
   await coinPool.init();
 
   const goldCoin = new GoldenCoinManager(scene, machine, (point) => {
-    const activeRanks = kickChat.getTopEarners(10).length;
-    const bonus = economy.collectGoldenCoin(activeRanks);
+    const bonus = economy.collectGoldenCoin();
     coinPool.burst(point, bonus);
     projectAndFloat(point, `+${fmtShort(bonus)} zł!`, { gold: true });
     save();
@@ -82,7 +81,6 @@ async function main() {
   }
 
   const clock = new THREE.Clock();
-  const workerBurstOrigin = new THREE.Vector3();
   const machineBurstOrigin = new THREE.Vector3(0, 0.6, 0.3);
 
   const kickUI = new KickUI();
@@ -273,33 +271,14 @@ async function main() {
     coinPool.update(delta);
     goldCoin.update(delta);
 
-    // Dochod pasywny generowany przez awatary Top 10 - im wyzsze miejsce w
-    // rankingu, tym wieksze tempo i wiekszy wklad do wspolnej puli czatu.
-    const topEarners = kickChat.getTopEarners(10);
-    for (let slot = 0; slot < 10; slot++) {
-      const user = kickChat.getUserForWorker(slot);
-      if (!user) continue;
-      const rank = user.rank || topEarners.length;
-
-      const contribution = economy.rankContribution(rank);
-      economy.addMoney(contribution * delta);
-
-      const entry = workerManager.getWorkerType(slot);
-      if (entry && entry.obj) {
-        const animRate = Math.min(2.5, Math.max(0.2, economy.rankUnitRate(rank)));
-        entry.animAcc = (entry.animAcc || 0) + delta * animRate;
-        if (entry.animAcc >= 1) {
-          entry.animAcc -= 1;
-          workerManager.triggerInteract(entry);
-          workerBurstOrigin.set(0, 0.45, 0);
-          coinPool.burst(workerBurstOrigin, 1);
-        }
-      }
-    }
+    // Brak dochodu pasywnego - zl powstaja WYLACZNIE z klikniec.
+    // Awatary Top 10 animuja sie tylko wtedy, gdy ich widz naprawde napisze
+    // "klik" na czacie (obsluga w onKlik ponizej), wiec animacja zawsze
+    // odpowiada realnemu klikniecu, a nie tyka sama z siebie.
 
     // Ceny i wyszarzenie przyciskow odswiezaja sie w refreshNumbers (co 100 ms)
     // bez przebudowy DOM.
-    ui.refreshNumbers(performance.now(), topEarners.length);
+    ui.refreshNumbers(performance.now());
 
     const canvasRect = canvas.getBoundingClientRect();
 
