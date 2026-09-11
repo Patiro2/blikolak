@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bankomat Clicker</title>
+<link rel="stylesheet" href="style.css">
+<script type="importmap">
+{"imports":{
+  "three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}}
+</script>
+</head>
+<body>
+<canvas id="scene"></canvas>
+
+<div id="hud">
+  <div id="top-announcement" class="top-announcement"></div>
+  <div id="hud-top-left">
+    <div id="money-label">🏦 Wspólna pula czatu</div>
+    <div id="money">0 zł</div>
+    <div id="income">0 zł/s</div>
+    <div id="combo" style="display:none;"></div>
+    <div id="hud-top-left-buttons">
+      <button id="btn-spawn-vanessa" title="Zrespij złodziejkę Vanessę natychmiast">🦹‍♀️ Zresp Vanessę</button>
+      <button id="reset-btn" title="Reset gry">Reset gry</button>
+    </div>
+  </div>
+
+  <div id="floaters"></div>
+  <div id="worker-overlays"></div>
+
+  <div id="leaderboard-panel">
+    <div id="leaderboard-header" class="floating-header" title="Chwyć i przeciągnij okno rankingu">
+      <div id="leaderboard-title"><span class="drag-grip">⋮⋮</span> 🏆 TOP 10 WIDZÓW</div>
+      <button id="leaderboard-toggle-btn" title="Zwiń / Rozwiń ranking">–</button>
+    </div>
+    <div id="leaderboard-body">
+      <div id="leaderboard-list"></div>
+    </div>
+  </div>
+
+  <div id="kick-panel">
+    <div id="kick-header" class="floating-header" title="Chwyć i przeciągnij okno czatu">
+      <div id="kick-channel-info">
+        <span class="drag-grip">⋮⋮</span>
+        <span id="kick-status-dot" class="status-connecting" title="Łączenie..."></span>
+        <span id="kick-logo">KICK</span>
+        <a href="https://kick.com/patiro" target="_blank" rel="noopener" id="kick-channel-link">/patiro</a>
+      </div>
+      <div id="kick-stats">
+        <span id="kick-kliks-badge">0 klików</span>
+        <button id="kick-toggle-btn" title="Minimalizuj czat">–</button>
+      </div>
+    </div>
+    <div id="kick-body">
+      <div id="kick-messages"></div>
+      <div id="kick-footer-tip">Napisz <span class="tip-klik">klik</span> na czacie, aby kliknąć w bankomat!</div>
+    </div>
+  </div>
+
+  <div id="vanessa-log-panel" class="collapsed">
+    <div id="vanessa-log-header" class="floating-header" title="Chwyć i przeciągnij okno logu">
+      <div id="vanessa-log-title"><span class="drag-grip">⋮⋮</span> 🦹‍♀️ LOG VANESSY</div>
+      <div class="vanessa-log-actions">
+        <button id="vanessa-log-clear-btn" title="Wyczyść log">🗑</button>
+        <button id="vanessa-log-toggle-btn" title="Zwiń / Rozwiń log">+</button>
+      </div>
+    </div>
+    <div id="vanessa-log-body">
+      <div id="vanessa-log-list"></div>
+    </div>
+  </div>
+
+</div>
+
+<script type="module" src="src/main.js"></script>
+</body>
+</html>

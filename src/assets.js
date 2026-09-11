@@ -1,0 +1,158 @@
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+// Bez tego kazdy z ~20 modeli GLB ciagnie wlasna kopie Textures/colormap.png
+// (GLTFLoader nie deduplikuje zadan miedzy osobnymi load()). THREE.Cache sprawia,
+// ze tekstura leci po sieci raz.
+THREE.Cache.enabled = true;
+
+const loader = new GLTFLoader();
+const cache = new Map(); // path -> Promise<GLTF>
+
+export const CHARACTER_KEYS = [
+  'character-male-a', 'character-male-b', 'character-male-c',
+  'character-male-d', 'character-male-e', 'character-male-f',
+  'character-female-a', 'character-female-b', 'character-female-c',
+  'character-female-d', 'character-female-e', 'character-female-f',
+  'character-employee',
+];
+
+export const MACHINE_KEYS = [
+  'gambling-machine', 'vending-machine', 'ticket-machine',
+  'arcade-machine', 'claw-machine', 'dance-machine',
+];
+
+const ARCADE_PATH = 'assets/arcade/';
+const DUNGEON_PATH = 'assets/dungeon/';
+
+function fixMaterials(root) {
+  root.traverse((node) => {
+    if (node.isMesh && node.material) {
+      const mats = Array.isArray(node.material) ? node.material : [node.material];
+      for (const mat of mats) {
+        if (mat.map) {
+          mat.map.colorSpace = THREE.SRGBColorSpace;
+          mat.map.magFilter = THREE.NearestFilter;
+          mat.map.needsUpdate = true;
+        }
+      }
+      node.castShadow = true;
+      node.receiveShadow = true;
+    }
+  });
+}
+
+// Przy ERR_CONNECTION_RESET (zerwanie polaczenia na poziomie TCP, w odroznieniu
+// od zwyklego bledu HTTP typu 404) potrafi sie zdarzyc, ze wewnetrzny fetch()
+// uzywany przez GLTFLoader/FileLoader nigdy nie rozstrzyga zwroconego Promise
+// (ani resolve, ani reject) - loadAsync() wisi w nieskonczonosc. Bez limitu
+// czasu taki jeden zawieszony model blokowalby na zawsze petle w
+// syncLeaderboardAndOverlays (patrz main.js). Kazda proba dostaje wlasny timeout.
+const LOAD_ATTEMPT_TIMEOUT_MS = 8000;
+
+function withTimeout(promise, ms, label) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`Timeout (${ms}ms) przy ladowaniu: ${label}`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+/**
+ * Proste serwery statyczne (python -m http.server) potrafia zerwac polaczenie
+ * przy kilkunastu rownoleglych zadaniach - stad proby ponowne + limit czasu
+ * na kazda z nich (patrz komentarz przy LOAD_ATTEMPT_TIMEOUT_MS).
+ */
+async function loadWithRetry(path, attempts = 3) {
+  let lastErr;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await withTimeout(loader.loadAsync(path), LOAD_ATTEMPT_TIMEOUT_MS, path);
+    } catch (err) {
+      lastErr = err;
+      await new Promise((r) => setTimeout(r, 150 * (i + 1)));
+    }
+  }
+  throw new Error(`Nie udalo sie zaladowac ${path}: ${lastErr}`);
+}
+
+// Wspolny limiter wspolbieznosci - uzywany zarowno przez preloadAll(), jak i
+// przez dociaganie modeli postaci "na zadanie" (np. gdy 10 widzow wchodzi do
+// Top 10 naraz). Bez tego leci seria rownoleglych zadan i prosty serwer
+// deweloperski zaczyna zrywac polaczenia (ERR_CONNECTION_RESET).
+const MAX_CONCURRENT_LOADS = 4;
+let activeLoads = 0;
+const loadQueue = [];
+
+function runQueued() {
+  while (activeLoads < MAX_CONCURRENT_LOADS && loadQueue.length > 0) {
+    const { task, resolve, reject } = loadQueue.shift();
+    activeLoads += 1;
+    task()
+      .then(resolve, reject)
+      .finally(() => {
+        activeLoads -= 1;
+        runQueued();
+      });
+  }
+}
+
+function enqueue(task) {
+  return new Promise((resolve, reject) => {
+    loadQueue.push({ task, resolve, reject });
+    runQueued();
+  });
+}
+
+function loadGltf(path) {
+  if (cache.has(path)) return cache.get(path);
+  const p = enqueue(() => loadWithRetry(path)).then((gltf) => {
+    fixMaterials(gltf.scene);
+    return gltf;
+  });
+  // Jesli ladowanie sie nie powiedzie, usuwamy wpis z cache - inaczej jeden
+  // chwilowy blad sieci "zatruwa" cache na reszte sesji i kolejne proby
+  // natychmiast odrzucaja z tym samym starym bledem, mimo ze serwer juz dziala.
+  p.catch(() => {
+    if (cache.get(path) === p) {
+      cache.delete(path);
+    }
+  });
+  cache.set(path, p);
+  return p;
+}
+
+/** Uruchamia zadania partiami, zeby nie zasypac serwera naraz. */
+async function inBatches(items, size, fn) {
+  for (let i = 0; i < items.length; i += size) {
+    await Promise.all(items.slice(i, i + size).map(fn));
+  }
+}
+
+export function loadArcade(name) {
+  return loadGltf(`${ARCADE_PATH}${name}.glb`);
+}
+
+export function loadDungeon(name) {
+  return loadGltf(`${DUNGEON_PATH}${name}.glb`);
+}
+
+/**
+ * Laduje to, co jest potrzebne do pierwszej klatki: pokoj, maszyny i monete.
+ * Postacie celowo NIE sa tu preladowane - jest ich 13, a na starcie zwykle nie
+ * ma ani jednego pracownika. WorkerManager dociaga model przy pierwszym
+ * zatrudnieniu i cache'uje go dalej sam.
+ */
+export async function preloadAll() {
+  // Pierwszy model leci sam - pociagnie za soba colormap.png do THREE.Cache,
+  // dzieki czemu reszta partii juz nie walczy o te sama teksture.
+  await loadArcade('floor');
+  const names = ['wall', 'wall-corner', 'column', ...MACHINE_KEYS];
+  await inBatches(names, 4, (n) => loadArcade(n));
+  await loadDungeon('coin');
+}
+
+export function getCachedArcadeScene(name) {
+  const p = cache.get(`${ARCADE_PATH}${name}.glb`);
+  return p;
+}
