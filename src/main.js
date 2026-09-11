@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { createScene, buildRoom } from './scene.js';
-import { preloadAll } from './assets.js';
+import { preloadAll, setTextureQuality } from './assets.js';
 import { Machine } from './machine.js';
 import { WorkerManager, parseMovementDirection } from './workers.js';
 import { CoinPool } from './coins.js';
@@ -24,6 +24,10 @@ async function main() {
   // Ewentualny blad pojedynczego pliku jest tam obslugiwany osobno i nie moze
   // przerwac reszty preloadu ani startu gry.
   audio.preload().catch((err) => console.warn('[audio] Blad preloadu dzwiekow:', err));
+
+  // Jakosc filtrowania tekstur musi byc znana PRZED zaladowaniem modeli -
+  // fixMaterials nadaje anizotropie w chwili ladowania (patrz assets.js).
+  setTextureQuality(renderer);
 
   await preloadAll();
   await buildRoom(scene);

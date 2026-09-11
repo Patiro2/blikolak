@@ -54,6 +54,11 @@ export function createScene(canvas) {
   dir.castShadow = true;
   dir.shadow.mapSize.set(2048, 2048);
   dir.shadow.bias = -0.0004;
+  // normalBias odsuwa punkt probkowania mapy cieni wzdluz normalnej powierzchni.
+  // Bez niego duze plaskie powierzchnie (posadzka areny) potrafia rzucac cien
+  // same na siebie - shadow acne, widoczne jako migoczace ciemne pasy zmieniajace
+  // sie przy ruchu kamery. Sam ujemny bias tego nie rozwiazuje.
+  dir.shadow.normalBias = 0.02;
   dir.shadow.radius = 2.2;
   dir.shadow.camera.near = 0.5;
   dir.shadow.camera.far = 20;

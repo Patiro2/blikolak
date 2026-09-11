@@ -7,6 +7,18 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 THREE.Cache.enabled = true;
 
 const loader = new GLTFLoader();
+
+// Maksymalna anizotropia karty - ustawiana raz z main.js (patrz setTextureQuality),
+// bo fixMaterials nie ma dostepu do renderera.
+let maxAnisotropy = 1;
+
+/** Podaje rendererowi zaleznej jakosci filtrowania tekstur. Wolac przed preloadAll(). */
+export function setTextureQuality(renderer) {
+  if (renderer && renderer.capabilities && typeof renderer.capabilities.getMaxAnisotropy === 'function') {
+    maxAnisotropy = renderer.capabilities.getMaxAnisotropy();
+  }
+  return maxAnisotropy;
+}
 const cache = new Map(); // path -> Promise<GLTF>
 
 export const CHARACTER_KEYS = [
@@ -33,6 +45,14 @@ function fixMaterials(root) {
         if (mat.map) {
           mat.map.colorSpace = THREE.SRGBColorSpace;
           mat.map.magFilter = THREE.NearestFilter;
+          // Filtrowanie anizotropowe. Atlas palety (colormap.png) jest probkowany
+          // plaskimi swatchami, wiec przy plaskim kacie patrzenia na posadzke
+          // mipmapy potrafia mieszac sasiadujace barwy z atlasu - to widac jako
+          // migotanie/przelewanie sie koloru przy ruchu kamery, najsilniej na
+          // ciemnych polach (najwiekszy kontrast wzgledem sasiada w atlasie).
+          // Anizotropia mocno ogranicza ten efekt na powierzchniach ogladanych
+          // pod ostrym katem. Wartosc ustawia main.js przez setTextureQuality().
+          if (maxAnisotropy > 1) mat.map.anisotropy = maxAnisotropy;
           mat.map.needsUpdate = true;
         }
       }
