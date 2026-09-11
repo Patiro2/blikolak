@@ -230,11 +230,18 @@ export class CityBackground {
     scene.add(mesh);
     this.plazaMesh = mesh;
 
-    // Cienki neonowy pasek Kicka na krawedzi placu, na wysokosci wierzchu
+    // Cienki neonowy pasek Kicka na krawedzi placu, tuz PONIZEJ wierzchu placu.
+    // Uwaga (naprawa Z-fightingu): pasek jest szerszy od placu tylko o 0.06, wiec
+    // jego gorna sciana lezy nad CALA powierzchnia placu. Gdy obie byly na
+    // dokladnie tej samej wysokosci (y = 0), caly plac wokol areny migotal przy
+    // ruchu kamery - dwie nieprzezroczyste, wspolplaszczyznowe sciany walczyly
+    // o glebie. Zepchniecie paska o EDGE_DROP w dol usuwa konflikt, a widoczna
+    // z gory pozostaje dokladnie ta obwodka, o ktora chodzilo.
+    const EDGE_DROP = 0.012;
     const edgeGeo = new THREE.BoxGeometry(PLAZA_HALF * 2 + 0.06, 0.06, PLAZA_HALF * 2 + 0.06);
     const edgeMat = new THREE.MeshBasicMaterial({ color: 0x53fc18 });
     const edge = new THREE.Mesh(edgeGeo, edgeMat);
-    edge.position.set(0, CITY_GROUND_Y + PLAZA_HEIGHT - 0.03, 0);
+    edge.position.set(0, CITY_GROUND_Y + PLAZA_HEIGHT - 0.03 - EDGE_DROP, 0);
     scene.add(edge);
     this.plazaEdgeMesh = edge;
   }

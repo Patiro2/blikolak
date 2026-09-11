@@ -228,15 +228,25 @@ function createFloorGridMesh(size, divisions) {
   texture.wrapT = THREE.ClampToEdgeWrapping;
 
   const geo = new THREE.PlaneGeometry(size, size);
+  // polygonOffset przesuwa siatke w buforze glebi w strone kamery niezaleznie od
+  // jej fizycznej wysokosci - to samo zabezpieczenie, co przy wskazniku pod zlota
+  // moneta (patrz goldcoin.js). Bez niego siatka leżała 0.003 j. nad wierzchem
+  // kafla podlogi (0.025) - margines zbyt cienki, zeby bezpiecznie przetrwac
+  // na kazdej karcie graficznej przy ruchu kamery.
   const mat = new THREE.MeshBasicMaterial({
     map: texture,
     transparent: true,
     opacity: 0.75,
     depthWrite: false,
+    polygonOffset: true,
+    polygonOffsetFactor: -4,
+    polygonOffsetUnits: -4,
   });
 
   const mesh = new THREE.Mesh(geo, mat);
   mesh.rotation.x = -Math.PI / 2;
-  mesh.position.set(0, 0.028, 0);
+  // 0.035 zamiast 0.028: wyrazniejszy odstep od wierzchu kafla (0.025), wciaz
+  // ponizej wskaznika monety (0.048).
+  mesh.position.set(0, 0.035, 0);
   return mesh;
 }
