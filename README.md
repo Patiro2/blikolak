@@ -26,11 +26,13 @@ Port można podać jako argument: `python serve.py 8080`.
   tylko łączny dorobek całego czatu. Każdy `klik` widza dokłada do tej puli
   ORAZ do indywidualnego dorobku tego widza w rankingu Top 10.
 - **Automatyczny awans tieru bankomatu** — bankomat sam awansuje na kolejny
-  model, gdy łączna liczba klików z czatu przekroczy próg (0 / 100 / 500 /
-  2000 / 8000 / 25000 — patrz `MACHINE_TIER_CLICK_THRESHOLDS` w
-  `src/economy.js`). Awans podmienia model 3D i pokazuje baner na górze ekranu.
-  Klikniecia gracza (streamera) bezpośrednio w model NIE liczą się do progu —
-  tylko klikniecia z czatu.
+  model, gdy łączna liczba klików przekroczy próg (0 / 100 / 500 / 2000 /
+  8000 / 25000 — patrz `MACHINE_TIER_CLICK_THRESHOLDS` w `src/economy.js`).
+  Awans podmienia model 3D i pokazuje baner na górze ekranu. Do progu liczą się
+  kliki z czatu **oraz** kliknięcia streamera myszką w model — obie drogi idą
+  przez tę samą funkcję `obsluzAwansTieru()` w `main.js`, więc tak samo odpalają
+  banery i walki z bossem. Uwaga: streamer może więc sam wyklikać awans i
+  wywołać bossa bez udziału czatu.
 - **Złotówki wyłącznie z kliknięć** — w grze NIE MA żadnego dochodu
   pasywnego. Bankomat sam z siebie nie produkuje nic; pula rośnie tylko
   wtedy, gdy ktoś naprawdę kliknie (komenda `klik` na czacie albo kliknięcie
@@ -86,6 +88,8 @@ Stan zapisuje się sam do `localStorage` co 5 s i przy zamykaniu karty.
 | `src/format.js` | skrócona notacja liczb (1.5K, 2.3M) |
 | `src/city.js` | proceduralne miasto w tle areny (budynki, ulice, jeżdżące samochody) |
 | `src/audio.js` | dźwięki gry - `AudioManager` na Web Audio API, mapa zdarzeń `SOUND_MAP`, limitowanie głosów, wyciszenie/głośność (patrz sekcja "Dźwięki" niżej) |
+| `src/realtime.js` | klient WebSocket przekaźnika - stała `URL_RELAYA`, auto-reconnect, cichy fallback (patrz "Synchronizacja w czasie rzeczywistym") |
+| `server/server.js` | samodzielny serwer-przekaźnik (Node + `ws`) - NIE symuluje gry, tylko rozgłasza stan hosta widzom; własne `server/README.md` |
 
 Assety są skopiowane do `assets/arcade/` i `assets/dungeon/` — **osobno**, bo
 oba pakiety mają plik `Textures/colormap.png` o tej samej nazwie i różnej treści,
@@ -212,7 +216,44 @@ window.__game.vanessa.clearLog();     // wyczyszczenie
 window.__game.vanessa.logToConsole = false;  // tylko panel, bez konsoli
 ```
 
-## Synchronizacja: dlaczego wszyscy widzą to samo
+## Synchronizacja w czasie rzeczywistym (relay)
+
+Karta właściciela jest **autorytetem**: pcha stan przez WebSocket do własnego
+serwera-przekaźnika (`server/`), a ten rozgłasza go wszystkim widzom. Zdarzenia
+(`klik`, `awans-tieru`, `reset`) lecą natychmiast, pełny snapshot idzie co 2 s
+i prostuje ewentualny dryf. Nowy widz dostaje ostatni snapshot od razu po
+podłączeniu, więc wchodzący w trakcie streamu nie ogląda pustej planszy.
+
+Serwer **nie symuluje gry** - tylko przekazuje ramki i trzyma ostatni snapshot.
+Dzięki temu jest mały (~270 linii), nie duplikuje logiki i nie wymaga
+przepisywania gry. Szczegóły uruchomienia i wdrożenia: `server/README.md`.
+
+- Rola `host` wymaga `HOST_TOKEN`; przy pustym tokenie rola jest **całkowicie
+  zablokowana** (fail-closed), a porównanie jest stało-czasowe.
+- Widz nie może niczego wstrzyknąć - ramki od widzów są ignorowane na wejściu.
+- Ostatni snapshot ląduje na dysku (`ostatni-stan.json`) i wraca po restarcie
+  serwera, także po twardym ubiciu procesu.
+- Adres serwera to jedna stała `URL_RELAYA` na górze `src/realtime.js`.
+  **Pusty string całkowicie wyłącza tę warstwę** - gra działa wtedy dokładnie
+  jak wcześniej, bez żadnych błędów w konsoli (tak jest domyślnie i tak działa
+  lokalny `python serve.py`).
+- Gdy relay działa, karty widzów **przestają odpytywać `/api/state`**; gdy
+  padnie, odpytywanie wraca samo jako zapasowe. Zapis do KV co 5 s zostaje -
+  to trwała pamięć i bootstrap, gdy przekaźnik jest pusty po restarcie.
+- `GET /zdrowie` zwraca status (czy jest host, ilu widzów, wiek snapshotu).
+
+Odczyt `GET /api/state` ma `Cache-Control: s-maxage=5`, więc CDN Vercela scala
+identyczne zapytania widzów. Bez tego koszt rósł liniowo z widownią (200 widzów
+przez 4 h to ~288 tys. odczytów Redisa - darmowy limit Upstash kończył się w
+trakcie streamu). Z cache do funkcji dociera najwyżej 12 zapytań na minutę,
+niezależnie od liczby widzów.
+
+## Determinizm ze wspólnego ziarna (warstwa zapasowa)
+
+Poniższy mechanizm powstał przed relayem i **nadal działa** - to on utrzymuje
+zgodność bossa, Vanessy i złotej monety, których stan nie jest jeszcze
+rozgłaszany zdarzeniami, oraz ratuje sytuację, gdy przekaźnik jest wyłączony
+albo niedostępny.
 
 Każda otwarta karta gry prowadzi własną symulację - sama łączy się z czatem
 Kicka i sama liczy rozgrywkę. Gdyby losowała niezależnie, każdy widz miałby
