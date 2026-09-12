@@ -133,7 +133,7 @@ export function makeDraggable(panelEl, handleEl, storageKey = null) {
   // Wysunięcie aktywnego okna na wierzch (z-index)
   const bringToFront = () => {
     let maxZ = 20;
-    document.querySelectorAll('#leaderboard-panel, #kick-panel, #kick-embed-panel').forEach((el) => {
+    document.querySelectorAll('#leaderboard-panel, #kick-panel').forEach((el) => {
       const z = parseInt(window.getComputedStyle(el).zIndex || '10', 10);
       if (!isNaN(z) && z > maxZ) maxZ = z;
     });
@@ -319,99 +319,43 @@ export class KickUI {
 }
 
 const KICK_EMBED_SRC = 'https://kick.com/popout/patiro/chat';
-const KICK_EMBED_COLLAPSED_KEY = 'bankomat-clicker-kick-embed-collapsed';
 
 /**
- * Wbudowany, PISZACY czat Kicka (oficjalny popout w iframe) - w odroznieniu
- * od #kick-panel (KickUI wyzej), ktory jest tylko-do-odczytu i pokazuje
- * wiadomosci wciagniete do gry. Ten panel pozwala widzowi pisac na czacie
- * bez przelaczania sie na kick.com.
+ * Guzik otwierajacy oficjalny popout czatu Kicka w osobnym oknie - w
+ * odroznieniu od #kick-panel (KickUI wyzej), ktory jest tylko-do-odczytu i
+ * pokazuje wiadomosci wciagniete do gry.
  *
- * Iframe jest CROSS-ORIGIN (kick.com), wiec nie da sie odczytac ani ruszyc
- * jego zawartosci z JS - i nie trzeba, to tylko osadzenie oficjalnego popoutu.
+ * Wczesniej ta klasa obslugiwala caly osadzony panel z iframe (leniwe
+ * ladowanie, zwijanie, przeciaganie) - wlasciciel uznal ramke za zbedna i
+ * zostal tylko link/guzik w #hud (patrz index.html, #kick-chat-btn). Nazwa
+ * klasy zostaje bez zmian, bo main.js (edytowany rownolegle przez inny
+ * proces pracy) importuje ja jako KickEmbedUI i wola bezargumentowy
+ * konstruktor - zmiana nazwy oznaczalaby konflikt z ta praca.
  *
- * src ustawiamy DOPIERO przy pierwszym rozwinieciu panelu (leniwe ladowanie) -
- * czat Kicka ciagnie wlasny websocket i zasoby, a strona rownolegle startuje
- * scene Three.js i wlasne polaczenie z czatem (kick.js). Ktos, kto nigdy nie
- * otworzy panelu, nie powinien tego pobierac. Po pierwszym ustawieniu src juz
- * go nie zerujemy przy zwijaniu - przeladowywanie czatu za kazdym zwinieciem
- * byloby gorsze niz zostawienie go zaladowanego w tle.
- *
- * PISANIE w ramce jest zawodne: sesja logowania Kicka w kontekscie iframe
- * (third-party) jest partycjonowana per strona nadrzedna, wiec po zalogowaniu
- * ciasteczko ladowania nie jest widoczne w ramce i Kick prosi o logowanie w
- * kolko. Atrybut allow="storage-access" na iframe to jedyna rzecz, ktora
- * nasz kod moze zrobic - pozwala stronie Kicka POROSIC o dostep do wlasnego
- * magazynu (document.requestStorageAccess()), ale to Kick musi o niego
- * zawolac po swojej stronie. Dlatego zamiast liczyc na ramke, przycisk
- * "Napisz na czacie" otwiera oficjalny popout jako osobne okno, gdzie
- * kick.com jest strona pierwsza i sesja trzyma sie normalnie.
+ * Element w HTML to <a href="..." target="kick-czat-patiro">, wiec dziala
+ * sam z siebie (bez JS) i nazwane okno docelowe sprawia, ze kolejne
+ * klikniecia wracaja do tego samego okna. JS doklada tu tylko wymiar okienka
+ * przez window.open - i tylko wtedy blokuje domyslna nawigacje linku (e.
+ * preventDefault), gdy window.open faktycznie zwrocilo obiekt okna. Gdy
+ * przegladarka zablokuje wyskakujace okno (zwroci falsy), nie blokujemy
+ * zdarzenia - <a> i tak otworzy popout normalnym kliknieciem/nawigacja.
  */
 export class KickEmbedUI {
   constructor() {
-    this.panel = document.getElementById('kick-embed-panel');
-    this.header = document.getElementById('kick-embed-header');
-    this.frame = document.getElementById('kick-embed-frame');
-    this.toggleBtn = document.getElementById('kick-embed-toggle-btn');
-    this.writeBtn = document.getElementById('kick-embed-write-btn');
-    this.popoutLink = document.getElementById('kick-embed-popout-link');
-
-    this._loaded = false;
-
-    this._restoreCollapsedState();
-    this._bindEvents();
-    this._bindWriteButton();
-
-    if (this.panel && this.header) {
-      makeDraggable(this.panel, this.header, 'bankomat-clicker-kick-embed-pos');
-    }
+    this.btn = document.getElementById('kick-chat-btn');
+    this._bindClick();
   }
 
-  _restoreCollapsedState() {
-    if (!this.panel || !this.toggleBtn) return;
-    let collapsed = true; // domyslnie zwiniety - patrz uzasadnienie w opisie klasy
-    try {
-      const saved = localStorage.getItem(KICK_EMBED_COLLAPSED_KEY);
-      if (saved !== null) collapsed = saved === '1';
-    } catch (_) {}
-
-    this.panel.classList.toggle('collapsed', collapsed);
-    this.toggleBtn.textContent = collapsed ? '+' : '–';
-
-    if (!collapsed) this._ensureLoaded();
-  }
-
-  _bindEvents() {
-    if (!this.toggleBtn || !this.panel) return;
-    this.toggleBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const collapsed = this.panel.classList.toggle('collapsed');
-      this.toggleBtn.textContent = collapsed ? '+' : '–';
-
-      try {
-        localStorage.setItem(KICK_EMBED_COLLAPSED_KEY, collapsed ? '1' : '0');
-      } catch (_) {}
-
-      if (!collapsed) this._ensureLoaded();
-    });
-  }
-
-  _ensureLoaded() {
-    if (this._loaded || !this.frame) return;
-    this._loaded = true;
-    this.frame.src = KICK_EMBED_SRC;
-  }
-
-  _bindWriteButton() {
-    if (!this.writeBtn) return;
-    this.writeBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      // nazwane okno - kolejne klikniecia wracaja do tego samego okna zamiast mnozyc je
+  _bindClick() {
+    if (!this.btn) return;
+    this.btn.addEventListener('click', (e) => {
       const popup = window.open(KICK_EMBED_SRC, 'kick-czat-patiro', 'width=420,height=700');
-      if (!popup && this.popoutLink) {
-        // window.open zablokowany przez blokade wyskakujacych okien - uzyj zwyklego linku
-        this.popoutLink.click();
+      if (popup) {
+        // udalo sie otworzyc okienko o zadanym rozmiarze - zwykla nawigacja linku juz niepotrzebna
+        e.preventDefault();
       }
+      // w przeciwnym razie (blokada wyskakujacych okien) zostawiamy domyslne
+      // zachowanie <a> - otworzy popout jako zwykla nawigacje/nowa karte
     });
   }
 }

@@ -75,26 +75,18 @@
     </div>
   </div>
 
-  <div id="kick-embed-panel" class="collapsed">
-    <div id="kick-embed-header" class="floating-header" title="Chwyć i przeciągnij okno czatu Kicka">
-      <div id="kick-embed-title"><span class="drag-grip">⋮⋮</span> 💬 CZAT KICKA</div>
-      <div id="kick-embed-actions">
-        <button id="kick-embed-write-btn" title="Otwórz czat Kicka w osobnym oknie, zeby pisac (logowanie trzyma sie tam niezawodnie)" style="cursor: pointer; background: rgba(83, 252, 24, 0.14); color: #53fc18; border: 1px solid rgba(83, 252, 24, 0.45); border-radius: 4px; padding: 2px 6px; font-size: 10px; font-weight: 700; white-space: nowrap; line-height: 1.4;">✍️ Napisz</button>
-        <a href="https://kick.com/popout/patiro/chat" target="_blank" rel="noopener" id="kick-embed-popout-link" title="Zapasowy link, gdyby okno powyzej zostalo zablokowane przez przegladarke">Okno ↗</a>
-        <button id="kick-embed-toggle-btn" title="Zwiń / Rozwiń czat">+</button>
-      </div>
-    </div>
-    <!-- flex w stylu inline, a nie w style.css, bo rownolegle trwa tam inna
-         zmiana; docelowo do przeniesienia do arkusza. Bez tego iframe (height
-         100% rodzica o stalej wysokosci) plus tekst informacyjny nad nim daja
-         razem WIECEJ niz wysokosc panelu, a panel ma overflow:hidden - dolne
-         38 px iframe'a byly obcinane, czyli dokladnie pole do pisania i
-         przycisk "Czat". -->
-    <div id="kick-embed-body" style="display: flex; flex-direction: column;">
-      <div id="kick-embed-info" style="font-size: 11px; opacity: 0.75; padding: 4px 8px;">Pisanie w tej ramce bywa blokowane przez ustawienia ciasteczek przegladarki - dlatego otwiera sie osobne okno.</div>
-      <iframe id="kick-embed-frame" style="flex: 1 1 auto; height: auto; min-height: 0;" title="Czat Kicka - kanal patiro" allow="clipboard-write; storage-access" referrerpolicy="strict-origin-when-cross-origin"></iframe>
-    </div>
-  </div>
+  <!-- Zastepuje dawny osadzony panel czatu (iframe) - wlasciciel uznal ramke
+       za zbedna. Zostaje wylacznie link otwierajacy oficjalny popout Kicka w
+       osobnym oknie. To <a>, nie <button>: dziala nawet bez JS (href sam w
+       sobie otwiera popout), a JS tylko dokleja rozmiar okienka i, gdy sie
+       uda, podmienia domyslna nawigacje na window.open. target z nazwa
+       ('kick-czat-patiro') sprawia, ze kolejne kliknicia wracaja do tego
+       samego okna zamiast mnozyc karty/okna. -->
+  <a id="kick-chat-btn" href="https://kick.com/popout/patiro/chat" target="kick-czat-patiro" rel="noopener"
+     title="Otworz czat Kicka (kanal patiro) w osobnym oknie"
+     style="position: absolute; top: 16px; right: 16px; pointer-events: auto; display: inline-flex; align-items: center; gap: 6px; background: rgba(83, 252, 24, 0.14); color: #53fc18; border: 1px solid rgba(83, 252, 24, 0.45); border-radius: 8px; padding: 8px 14px; font-size: 13px; font-weight: 700; text-decoration: none; white-space: nowrap; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5), 0 0 10px rgba(83, 252, 24, 0.08); backdrop-filter: blur(6px);">
+    💬 Czat Kicka
+  </a>
 
   <div id="vanessa-log-panel" class="collapsed">
     <div id="vanessa-log-header" class="floating-header" title="Chwyć i przeciągnij okno logu">
