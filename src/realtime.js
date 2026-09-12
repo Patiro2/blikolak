@@ -7,8 +7,15 @@
 
 // JEDYNE miejsce do edycji przy wdrozeniu serwera relay. Pusty string =
 // funkcja realtime jest wylaczona i gra dziala jak dotychczas (KV + odpytywanie).
-// Przyklad po wdrozeniu na Render: 'wss://twoja-nazwa.onrender.com'
-export const URL_RELAYA = '';
+//
+// Musi byc wss:// (nie ws://) - strona na Vercelu chodzi po https, a przegladarki
+// blokuja niezaszyfrowane polaczenia z takiej strony.
+//
+// Uwaga: darmowy plan Rendera usypia usluge po ok. 15 minutach bezczynnosci,
+// wiec pierwsze polaczenie po przerwie moze trwac kilkadziesiat sekund. Gra
+// dziala w tym czasie na zapasowym odpytywaniu /api/state i przelacza sie na
+// realtime sama, gdy przekaznik wstanie.
+export const URL_RELAYA = 'wss://bankomat-relay.onrender.com';
 
 const OPOZNIENIE_START_MS = 1000;
 const OPOZNIENIE_MAX_MS = 15000;
@@ -96,6 +103,23 @@ export class Realtime {
       } else if (wiadomosc.typ === 'host-offline' || wiadomosc.typ === 'brak-hosta') {
         this.hostOnlineFlag = false;
         this._zglosStatus();
+      } else if (wiadomosc.typ === 'zly-token') {
+        // Serwer odrzucil nas jako hosta - HOST_TOKEN na przekazniku nie zgadza
+        // sie z ADMIN_TOKEN uzytym przez ta karte. Kod zamkniecia 4001 nie
+        // przechodzi przez proxy hostingow (Render zamienia go na 1006), wiec
+        // serwer wysyla najpierw te ramke - inaczej blad bylby nie do
+        // odroznienia od zwyklej awarii sieci i karta ponawialaby w nieskonczonosc
+        // bez slowa wyjasnienia.
+        this.zlyToken = true;
+        this.zamkniete = true; // nie ma sensu ponawiac - haslo sie nie zmieni samo
+        console.error(
+          '[realtime] Przekaznik odrzucil haslo hosta. HOST_TOKEN na serwerze relay musi byc IDENTYCZNY ' +
+            'z ADMIN_TOKEN w projekcie na Vercelu. Synchronizacja w czasie rzeczywistym jest wylaczona - ' +
+            'gra dziala dalej na zapasowym odpytywaniu /api/state.',
+        );
+        try {
+          ws.close();
+        } catch (_) {}
       } else if (wiadomosc.typ === 'zastapiony') {
         // Inny host przejal role (np. druga zalogowana karta wlasciciela).
         // Nie probujemy sie odlaczac agresywnie - po prostu przestajemy byc hostem.

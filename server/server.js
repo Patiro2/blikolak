@@ -130,7 +130,16 @@ wss.on('connection', (ws, req) => {
   if (rola === 'host') {
     if (!tokenPoprawny(token)) {
       log('Odrzucono polaczenie hosta - zly token');
-      ws.close(4001, 'zly token');
+      // Kod 4001 nie przechodzi przez proxy hostingow (Render zamienia go na
+      // 1006), wiec klient nie odroznilby zlego hasla od awarii sieci i
+      // ponawialby w nieskonczonosc. Wysylamy wiec najpierw zwykla ramke -
+      // ta przechodzi zawsze - i dopiero potem zamykamy polaczenie.
+      wyslij(ws, { typ: 'zly-token' });
+      setTimeout(() => {
+        try {
+          ws.close(4001, 'zly token');
+        } catch (_) {}
+      }, 50);
       return;
     }
     if (hostWs) {
