@@ -81,7 +81,8 @@ Stan zapisuje się sam do `localStorage` co 5 s i przy zamykaniu karty.
 | `src/ui.js` | HUD (pula, postęp do awansu, kombo, reset), widget czatu Kick, ranking, feed powiadomień bossa (`showBossNotification`) |
 | `src/kick.js` | integracja z czatem Kick.com (Pusher WebSocket), detekcja komendy "klik", eliminacje bossa, `normalizeNick`/`stripNickPrefix` (współdzielone przez cały kod) |
 | `src/vanessa.js` | złodziejka Vanessa - FSM, kradzież zł, przepędzanie, `normalizePolish`/`showTopAnnouncement` (współdzielone też przez bossa) |
-| `src/boss.js` | boss "Kamil Kovalenko" - cutscenka, walka matematyczna, omdlenia, tryb awaryjny odpowiedzi, `BOSS_DEFS` |
+| `src/boss.js` | boss "Kamil Kovalenko" - cutscenka, walka matematyczna, ataki na pola, tryb awaryjny odpowiedzi, `BOSS_DEFS` |
+| `src/bossattack.js` | efekty ataków obszarowych bossa - znaczniki pól, pociski po łuku, spadające rakiety, kałuże i dym |
 | `src/format.js` | skrócona notacja liczb (1.5K, 2.3M) |
 | `src/city.js` | proceduralne miasto w tle areny (budynki, ulice, jeżdżące samochody) |
 | `src/audio.js` | dźwięki gry - `AudioManager` na Web Audio API, mapa zdarzeń `SOUND_MAP`, limitowanie głosów, wyciszenie/głośność (patrz sekcja "Dźwięki" niżej) |
@@ -143,15 +144,28 @@ mini-characters) + `character-male-f`, złożone w jedną grupę i wyskalowane
   boss przełącza się w **tryb awaryjny** i przyjmuje odpowiedź od KAŻDEGO
   widza czatu, żeby walka nigdy nie zaklinowała się na amen - w feedzie
   bossa pojawia się wtedy widoczny komunikat "⚠️ TRYB AWARYJNY!".
-- **Kara za brak odpowiedzi**: po 8 s boss "zabija" losowego widza z Top 10 -
-  traci CAŁY dorobek (`totalEarned`) i znika z rankingu (`kickChat.eliminateUser`),
-  jego awatar gra `die` i po ~2,5 s znika ze sceny. Ofiara nie wraca do rankingu,
-  dopóki trwa walka (`kickChat.eliminated`).
-- **Omdlenia**: co 12-22 s boss omdlewa losowego widza z Top 10 (leży, plakietka
-  dostaje 💤, jego `klik` i odpowiedzi są ignorowane - bez utraty pieniędzy).
+- **Kara za brak odpowiedzi - ostrzał rakietowy**: po 8 s boss wyciąga wyrzutnik
+  (`blaster-e` doczepiony do kości `arm-right`, klip `holding-right-shoot`),
+  strzela w górę i **10 pól planszy zostaje oznaczonych na czerwono**. Po 2,6 s
+  spadają na nie rakiety - ginie każdy, kto w chwili uderzenia stoi na
+  oznaczonym polu: traci CAŁY dorobek i znika z rankingu
+  (`kickChat.eliminateUser`), awatar gra `die` i po ~2,5 s znika ze sceny.
+  **Nie ma tu losowania ofiary** - o śmierci decyduje wyłącznie pozycja.
+  Wzory pól też nie są losowe: cztery stałe układy (krzyż, przekątne, pierścień,
+  brzegi - `WZORY_RAKIET` w `src/boss.js`) idą cyklicznie po kolei, więc widzowie
+  mogą się ich nauczyć i świadomie uciekać.
+- **Omdlenia - atak na pole**: co 12-22 s boss bierze na cel **jedno pole**
+  (pole lidera rankingu stojącego na planszy - też bez losowania), oznacza je na
+  zielono na 1,9 s, po czym pluje na nie pociskiem. W chwili uderzenia omdlewa
+  każdy, kto na tym polu stoi; kto zdążył odejść komendą ruchu, jest bezpieczny
+  (w feedzie pojawia się wtedy "PUDŁO!"). Omdlały leży, plakietka dostaje 💤,
+  jego `klik` i odpowiedzi są ignorowane - bez utraty pieniędzy.
   Ratunek: inny widz pisze `pomoc` (lub `!pomoc`, wielkość liter/polskie znaki
   bez znaczenia) - podnosi najdłużej leżącą osobę. Po pokonaniu bossa wszyscy
   omdleni są automatycznie ocucani.
+- Efekty obu ataków (znaczniki pól, pociski, rakiety, kałuże, dym) żyją w
+  `src/bossattack.js`; modele wyrzutnika, rakiety i dymu pochodzą z
+  `kenney_blaster-kit` i leżą w `assets/blaster/` (własny `colormap.png`).
 - **Pokonanie**: boss gra `die`, przechyla się i znika po ~3 s, bankomat wraca
   do pionu, DOPIERO WTEDY następuje właściwy awans tieru (ten sam baner
   "🎰 AWANS BANKOMATU!" co przy zwykłym awansie - tekst żyje w jednym miejscu,
@@ -267,7 +281,8 @@ window.__game.kickChat.simulate('Widz1', 'Pozdro dla czatu!'); // dymek wypowied
 
 window.__game.boss.start(1, { force: true });               // natychmiastowe odpalenie bossa (test)
 window.__game.boss.damage(5);                                // zadanie obrażeń bossowi z pominięciem czatu
-window.__game.boss.faintRandom();                             // natychmiastowe omdlenie losowego widza z Top 10
+window.__game.boss.faintRandom();                             // natychmiastowy atak na pole (omdlenie stojącego)
+window.__game.boss.rocketStrike();                            // natychmiastowa salwa 10 rakiet
 window.__game.boss.printLog();                                // log zdarzeń bossa jako tabela w konsoli
 window.__game.kickChat.simulate('Widz1', 'pomoc');            // ratunek omdlonego widza
 ```

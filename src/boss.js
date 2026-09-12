@@ -4,6 +4,7 @@ import { loadArcade } from './assets.js';
 import { fmtShort } from './format.js';
 import { normalizePolish } from './vanessa.js';
 import { showBossNotification } from './ui.js';
+import { BossAttackFx } from './bossattack.js';
 import { normalizeNick } from './kick.js';
 import { audio } from './audio.js';
 
@@ -27,6 +28,31 @@ export const BOSS_DEFS = [
 const HP_PER_HIT = 5;
 const ANSWER_WINDOW = 8.0; // sekund na odpowiedz
 const HIT_TO_NEXT_EQ_DELAY = 1.2; // sekund pauzy po trafieniu, zanim wyskoczy nowe dzialanie
+// Atak obszarowy "wymioty": boss celuje w JEDNO pole siatki areny. Pole jest
+// najpierw oznaczane (gracz ma czas uciec), potem leci pocisk, a omdlenie
+// dostaje ten, kto stoi na polu w chwili uderzenia.
+const VOMIT_OSTRZEZENIE = 1.9; // sekundy telegrafowania pola
+const VOMIT_LOT = 0.85; // czas lotu pocisku
+// Ostrzal rakietowy przy braku odpowiedzi: 10 pol, tez z wyprzedzeniem.
+const RAKIETY_OSTRZEZENIE = 2.6;
+const RAKIETY_LOT = 0.75;
+const RAKIET_NA_SALWE = 10;
+
+// Wzory pol dla ostrzalu rakietowego. Kolejnosc jest STALA i cyklicznie
+// powtarzana - nie ma tu zadnego losowania, wiec widzowie moga nauczyc sie
+// wzorow i swiadomie uciekac. Kazdy wzor ma dokladnie 10 pol i omija (0,0),
+// czyli pole bankomatu.
+const WZORY_RAKIET = [
+  // krzyz
+  [[0,-3],[0,-2],[0,-1],[0,1],[0,2],[0,3],[-3,0],[-1,0],[1,0],[3,0]],
+  // przekatne
+  [[-3,-3],[-2,-2],[-1,-1],[1,1],[2,2],[3,3],[-3,3],[-2,2],[2,-2],[3,-3]],
+  // pierscien wokol bankomatu
+  [[-2,-2],[-1,-2],[1,-2],[2,-2],[2,-1],[2,1],[2,2],[1,2],[-1,2],[-2,2]],
+  // brzegi areny
+  [[-3,-3],[0,-3],[3,-3],[-3,0],[3,0],[-3,3],[0,3],[3,3],[-3,-1],[3,1]],
+];
+
 const FAINT_MIN = 12;
 const FAINT_MAX = 22;
 const CUTSCENE_DURATION = 5.0;
@@ -106,11 +132,6 @@ const BOSS_TAUNTS_HIT = [
   'Czat zna tabliczkę mnożenia?! 😱',
 ];
 
-const BOSS_TAUNTS_KILL = [
-  'Kto następny nie policzy?! 😈',
-  'Matematyka to potęga! Hahaha! 🤣',
-  'Nikt mnie nie ogarnie! 👹',
-];
 
 export class BossManager {
   constructor(scene, camera, controls, machine, economy, coinPool, projectAndFloat) {
@@ -165,6 +186,12 @@ export class BossManager {
     this._emergencyAnnounced = false;
 
     this.faintedMap = new Map(); // username(lower) -> { username, slot, ts }
+
+    // Efekty atakow obszarowych (znaczniki pol, pociski, rakiety, dym)
+    this.fx = new BossAttackFx(scene);
+    this.bronObj = null; // wyrzutnik doczepiony do reki bossa na czas salwy
+    this._wzorRakiet = 0; // indeks kolejnego wzoru - rosnie o 1, bez losowania
+    this._timeryAtakow = []; // aktywne timery atakow - anulowane przy koncu walki
 
     this._headWorld = new THREE.Vector3();
     this._projected = new THREE.Vector3();
@@ -236,6 +263,7 @@ export class BossManager {
       loadArcade('wheelchair-deluxe'),
       loadArcade('character-male-f'),
     ]);
+    await this.fx.init();
     this.chairTemplate = chairGltf.scene;
     this.charTemplate = charGltf.scene;
     this.animations = charGltf.animations || [];
@@ -483,6 +511,7 @@ export class BossManager {
     if (this.state === 'IDLE') return;
 
     if (this.mixer) this.mixer.update(delta);
+    this.fx.update(delta);
 
     if (this.state === 'CUTSCENE') {
       this._updateCutscene(delta);
@@ -631,11 +660,11 @@ export class BossManager {
       }
     }
 
-    // Losowe omdlenia
+    // Atak obszarowy na pole - boss co jakis czas plunie na wybrane pole areny
     this.faintTimer -= delta;
     if (this.faintTimer <= 0) {
       this.faintTimer = this._randomFaintDelay();
-      this._faintRandomInternal();
+      this._startVomitAttack();
     }
   }
 
@@ -773,38 +802,22 @@ export class BossManager {
     });
     this.currentEq = null;
     if (this.bubbleEl) this.bubbleEl.style.display = 'none';
-    this._killRandomParticipant();
+    this._startRocketStrike();
     this._nextEquation();
   }
 
-  _pickVictimFromTop10({ requirePositive } = {}) {
-    if (!this.kickChat) return null;
-    const top10 = this.kickChat.getTopEarners(10);
-    const eligible = top10.filter((u) => {
-      const key = normalizeNick(u.username);
-      if (this.faintedMap.has(key)) return false;
-      if (requirePositive && !((u.totalEarned || 0) > 0)) return false;
-      return true;
-    });
-    if (eligible.length === 0) return null;
-    return eligible[Math.floor(Math.random() * eligible.length)];
-  }
 
-  _killRandomParticipant() {
-    let victim = this._pickVictimFromTop10({ requirePositive: true });
-    if (!victim) victim = this._pickVictimFromTop10({ requirePositive: false });
-
-    if (!victim) {
-      this._log('bad', 'Brak kogo "zabic" - ranking pusty. Tylko szyderczy dymek.');
-      if (this.eqTextEl) this.eqTextEl.textContent = pick(BOSS_TAUNTS_KILL);
-      return;
-    }
-
-    const username = victim.username;
+  /**
+   * Usmierca KONKRETNEGO widza - wolane wtedy, gdy rakieta trafi w pole, na
+   * ktorym stoi jego postac. Nie ma tu juz zadnego losowania ofiary: o tym,
+   * kto ginie, decyduje wylacznie to, gdzie kto stoi w chwili uderzenia.
+   */
+  _killUser(username) {
+    if (!username || !this.kickChat) return;
+    const wpis = this.kickChat.leaderboard[normalizeNick(username)];
     const workerIndex = this.kickChat.getWorkerForUser(username);
-    const lostAmount = Math.round(victim.totalEarned || 0);
+    const lostAmount = Math.round(wpis ? wpis.totalEarned || 0 : 0);
 
-    audio.play('boss-zabija');
     if (this.kickChat) this.kickChat.eliminateUser(username);
 
     if (workerIndex !== null && this.workerManager) {
@@ -828,8 +841,8 @@ export class BossManager {
 
     showBossNotification(
       'kill',
-      `💀 KAMIL KOVALENKO ZABIŁ @${username}!`,
-      `Brak odpowiedzi w 8 s! Stracił cały dorobek (<strong>${fmtShort(lostAmount)} zł</strong>) i wypadł z rankingu.`,
+      `💀 RAKIETA TRAFIŁA @${username}!`,
+      `Stał na oznaczonym polu. Stracił cały dorobek (<strong>${fmtShort(lostAmount)} zł</strong>) i wypadł z rankingu.`,
     );
 
     this._log('bad', `Boss "zabil" @${username} - stracil ${lostAmount} zl i wypadl z rankingu`, {
@@ -838,16 +851,175 @@ export class BossManager {
     });
   }
 
-  // ================= OMDLENIA =================
 
-  _faintRandomInternal() {
-    const victim = this._pickVictimFromTop10({ requirePositive: false });
-    if (!victim) {
-      this._log('info', 'Proba omdlenia - ranking pusty, pomijam');
+  // ================= ATAKI OBSZAROWE NA POLA =================
+
+  /** Postacie stojace na danym polu. Idaca postac liczy sie po polu DOCELOWYM. */
+  _workersOnTile(x, z) {
+    const out = [];
+    if (!this.workerManager) return out;
+    for (const e of this.workerManager.entries) {
+      if (!e || !e.obj) continue;
+      const gx = e.isMoving ? e.targetGridX : e.gridX;
+      const gz = e.isMoving ? e.targetGridZ : e.gridZ;
+      if (Number(gx) === x && Number(gz) === z) out.push(e);
+    }
+    return out;
+  }
+
+  /** Nick przypisany do postaci danego slotu (albo null). */
+  _userForWorker(entry) {
+    if (!entry || !this.kickChat) return null;
+    const u = this.kickChat.getUserForWorker(entry.typeIndex);
+    return u ? u.username : null;
+  }
+
+  /**
+   * Wybor pola pod atak "wymiotow" - BEZ losowania: boss bierze na cel pole
+   * lidera rankingu, ktory stoi na planszy i nie jest omdlaly. Gdy nie ma kogo
+   * scigac, pluje na pole przed soba.
+   */
+  _wybierzPoleAtaku() {
+    if (this.workerManager && this.kickChat) {
+      for (const u of this.kickChat.getTopEarners(10)) {
+        if (this.faintedMap.has(normalizeNick(u.username))) continue;
+        const slot = this.kickChat.getWorkerForUser(u.username);
+        if (slot === null) continue;
+        const e = this.workerManager.getWorkerType(slot);
+        if (!e || !e.obj) continue;
+        const gx = Number(e.isMoving ? e.targetGridX : e.gridX);
+        const gz = Number(e.isMoving ? e.targetGridZ : e.gridZ);
+        if (gx === 0 && gz === 0) continue;
+        return { x: gx, z: gz };
+      }
+    }
+    return { x: 0, z: 2 };
+  }
+
+  /** Rejestruje timer ataku, zeby dalo sie go anulowac przy koncu walki. */
+  _timerAtaku(fn, ms) {
+    const id = setTimeout(() => {
+      this._timeryAtakow = this._timeryAtakow.filter((t) => t !== id);
+      if (this.state !== 'FIGHT') return;
+      fn();
+    }, ms);
+    this._timeryAtakow.push(id);
+  }
+
+  /**
+   * Atak obszarowy: boss oznacza JEDNO pole, po chwili pluje na nie pociskiem,
+   * a w momencie uderzenia omdlewa kazdego, kto na tym polu stoi.
+   */
+  _startVomitAttack() {
+    if (this.state !== 'FIGHT' || !this.model) return;
+    const cel = this._wybierzPoleAtaku();
+
+    this.fx.oznaczPole(cel.x, cel.z, 0x86c232, VOMIT_OSTRZEZENIE + VOMIT_LOT);
+    this._log('bad', `Boss bierze na cel pole [${cel.x}, ${cel.z}]`, { pole: [cel.x, cel.z] });
+    showBossNotification(
+      'faint',
+      '🤢 BOSS CELUJE W POLE!',
+      `Pole <strong>[${cel.x}, ${cel.z}]</strong> - kto na nim stoi, zaraz zemdleje! Uciekaj komendą ruchu!`,
+    );
+
+    this._timerAtaku(() => {
+      // Pochylenie do przodu - najblizszy "wymiotom" klip w rigu Kenneya.
+      this.playAction('pick-up', { once: true });
+      const start = this.model.position.clone();
+      start.y += 1.7;
+      this.fx.wystrzelPocisk(start, cel.x, cel.z, VOMIT_LOT, () => this._onVomitImpact(cel.x, cel.z));
+    }, VOMIT_OSTRZEZENIE * 1000);
+  }
+
+  _onVomitImpact(x, z) {
+    this.fx.rozlejKaluze(x, z, 0x86c232, 7);
+    const trafieni = this._workersOnTile(x, z);
+    if (trafieni.length === 0) {
+      this._log('good', `Pocisk spadl na puste pole [${x}, ${z}] - nikt nie ucierpial`);
+      showBossNotification('help', '💨 PUDŁO!', `Pole <strong>[${x}, ${z}]</strong> było puste - nikt nie zemdlał.`);
       return;
     }
-    const username = victim.username;
+    audio.play('omdlenie');
+    for (const entry of trafieni) {
+      const nick = this._userForWorker(entry);
+      if (nick) this._faintUser(nick);
+    }
+  }
+
+  /**
+   * Kara za brak odpowiedzi: boss wyciaga wyrzutnik, strzela w gore, a po
+   * chwili na 10 oznaczonych pol spadaja rakiety. Ginie ten, kto na nich stoi.
+   * Wzory pol sa STALE i cyklicznie powtarzane - zadnego losowania.
+   */
+  _startRocketStrike() {
+    if (this.state !== 'FIGHT') return;
+    const wzor = WZORY_RAKIET[this._wzorRakiet % WZORY_RAKIET.length];
+    this._wzorRakiet += 1;
+
+    this._zalozBron();
+    this.playAction('holding-right-shoot', { once: true });
+    audio.play('boss-zabija');
+
+    for (const [x, z] of wzor) {
+      this.fx.oznaczPole(x, z, 0xff3b30, RAKIETY_OSTRZEZENIE + RAKIETY_LOT);
+    }
+    this._log('bad', `Ostrzal rakietowy - wzor ${(this._wzorRakiet - 1) % WZORY_RAKIET.length}`, { pola: wzor });
+    showBossNotification(
+      'kill',
+      '🚀 OSTRZAŁ RAKIETOWY!',
+      `Brak odpowiedzi! Za chwilę na <strong>${RAKIET_NA_SALWE}</strong> oznaczonych pól spadną rakiety - UCIEKAJCIE!`,
+    );
+
+    this._timerAtaku(() => {
+      wzor.forEach(([x, z], i) => {
+        this.fx.zrzucRakiete(x, z, RAKIETY_LOT + i * 0.03, () => this._onRocketImpact(x, z));
+      });
+      this._zdejmijBron();
+    }, RAKIETY_OSTRZEZENIE * 1000);
+  }
+
+  _onRocketImpact(x, z) {
+    this.fx.wybuch(x, z);
+    this._camShakeT = Math.max(this._camShakeT || 0, 0.22);
+    const trafieni = this._workersOnTile(x, z);
+    for (const entry of trafieni) {
+      const nick = this._userForWorker(entry);
+      if (nick) this._killUser(nick);
+    }
+  }
+
+  /** Doczepia wyrzutnik do kosci prawej reki bossa (rig Kenneya: 'arm-right'). */
+  _zalozBron() {
+    if (this.bronObj || !this.charObj) return;
+    const bron = this.fx.stworzBron();
+    if (!bron) return;
+    const reka = this.charObj.getObjectByName('arm-right');
+    if (!reka) {
+      this._log('info', 'Nie znaleziono kosci arm-right - salwa bez modelu broni');
+      return;
+    }
+    // blaster-e ma 1.64 j. dlugosci przy postaci wysokiej 0.77 - bez zmniejszenia
+    // wyrzutnik bylby dwa razy wyzszy od samego bossa.
+    bron.scale.setScalar(0.45);
+    bron.position.set(0.05, -0.2, 0.05);
+    bron.rotation.set(-Math.PI / 2.4, 0, 0);
+    reka.add(bron);
+    this.bronObj = bron;
+  }
+
+  _zdejmijBron() {
+    if (!this.bronObj) return;
+    if (this.bronObj.parent) this.bronObj.parent.remove(this.bronObj);
+    this.bronObj = null;
+  }
+
+  // ================= OMDLENIA =================
+
+  /** Omdlewa KONKRETNEGO widza - wolane, gdy pocisk trafi w pole, na ktorym stoi. */
+  _faintUser(username) {
+    if (!username) return;
     const key = normalizeNick(username);
+    if (this.faintedMap.has(key)) return;
     const workerIndex = this.kickChat ? this.kickChat.getWorkerForUser(username) : null;
 
     this.faintedMap.set(key, { username, slot: workerIndex, ts: Date.now() });
@@ -867,10 +1039,17 @@ export class BossManager {
     this._refreshFaintedNameplate(workerIndex, true);
   }
 
-  /** Publiczna metoda testowa - wywoluje omdlenie natychmiast (patrz README/debug). */
+  /** Publiczna metoda testowa - natychmiastowy atak na pole (patrz README/debug). */
   faintRandom() {
     if (this.state !== 'FIGHT') return false;
-    this._faintRandomInternal();
+    this._startVomitAttack();
+    return true;
+  }
+
+  /** Publiczna metoda testowa - natychmiastowa salwa rakiet (patrz README/debug). */
+  rocketStrike() {
+    if (this.state !== 'FIGHT') return false;
+    this._startRocketStrike();
     return true;
   }
 
@@ -1018,6 +1197,10 @@ export class BossManager {
   }
 
   _teardown() {
+    for (const id of this._timeryAtakow) clearTimeout(id);
+    this._timeryAtakow = [];
+    this._zdejmijBron();
+    this.fx.clear();
     if (this.model) {
       this.scene.remove(this.model);
       this.model = null;

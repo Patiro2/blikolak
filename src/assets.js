@@ -39,6 +39,7 @@ const DUNGEON_PATH = 'assets/dungeon/';
 const FOREST_PATH = 'assets/forest/';
 const PIRATE_PATH = 'assets/pirate/';
 const ARENA_PATH = 'assets/arena/';
+const BLASTER_PATH = 'assets/blaster/';
 
 function fixMaterials(root) {
   root.traverse((node) => {
@@ -176,6 +177,12 @@ export function loadPirate(name) {
 // kenney_mini-arena ma rowniez WLASNY Textures/colormap.png - osobny katalog assets/arena/.
 export function loadArena(name) {
   return loadGltf(`${ARENA_PATH}${name}.glb`);
+}
+
+// kenney_blaster-kit ma WLASNY Textures/colormap.png - osobny katalog assets/blaster/.
+// Stad pochodzi wyrzutnik bossa i glowice rakiet (patrz boss.js).
+export function loadBlaster(name) {
+  return loadGltf(`${BLASTER_PATH}${name}.glb`);
 }
 
 /**
