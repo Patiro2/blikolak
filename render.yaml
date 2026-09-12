@@ -1,0 +1,19 @@
+# Blueprint dla Render - pozwala wdrozyc przekaznik bez recznego wyklikiwania
+# ustawien. W panelu Render: New -> Blueprint -> wskaz to repozytorium.
+#
+# HOST_TOKEN celowo ma sync: false - Render zapyta o wartosc przy wdrozeniu i
+# nie trzyma jej w repozytorium (repo jest publiczne). Ta wartosc MUSI byc
+# identyczna z ADMIN_TOKEN ustawionym w projekcie na Vercelu, bo klient wysyla
+# jako token hasla admina (patrz src/main.js, realtime.ustawRole).
+services:
+  - type: web
+    name: bankomat-relay
+    runtime: node
+    plan: free
+    rootDir: server
+    buildCommand: npm install
+    startCommand: node server.js
+    healthCheckPath: /zdrowie
+    envVars:
+      - key: HOST_TOKEN
+        sync: false

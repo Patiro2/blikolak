@@ -43,6 +43,13 @@ Polaczenie: `wss://adres-serwera?rola=host&token=...` albo `wss://adres-serwera?
 
 ## Wdrozenie na Render (darmowy web service)
 
+**Najprosciej:** w repozytorium lezy gotowy `render.yaml` (blueprint). W panelu
+Render wybierz *New -> Blueprint*, wskaz repozytorium `Patiro2/blikolak`, a
+Render sam ustawi typ uslugi, katalog `server`, komendy i health check. Zapyta
+tylko o wartosc `HOST_TOKEN`.
+
+Recznie, gdyby blueprint nie zadzialal:
+
 1. Wrzuc katalog `server/` jako osobne repo albo wskaz Renderowi podkatalog
    `server` w istniejacym repo (Root Directory: `server`).
 2. Typ uslugi: **Web Service**, srodowisko: Node.
@@ -51,6 +58,13 @@ Polaczenie: `wss://adres-serwera?rola=host&token=...` albo `wss://adres-serwera?
    `PORT` - Render sam narzuca `PORT`, wiec zwykle nie trzeba go ustawiac).
 5. Adres uslugi (np. `wss://twoja-nazwa.onrender.com`) wklej do
    `URL_RELAYA` w `src/realtime.js`.
+
+**Uwaga - dysk jest ulotny.** Na darmowym planie Renderu system plikow znika
+przy kazdym restarcie i wdrozeniu, wiec `ostatni-stan.json` NIE przetrwa
+redeployu. To akceptowalne: trwala pamiec gry to i tak Vercel KV, a przekaznik
+odbuduje snapshot z pierwszej ramki hosta w ciagu 2 sekund od podlaczenia
+karty wlasciciela. Plik ratuje tylko sytuacje, w ktorej przekaznik sie
+restartuje, a hosta akurat nie ma.
 
 **Uwaga:** darmowy plan Renderu usypia usluge po ok. 15 minutach bezczynnosci
 i pierwsze polaczenie po usypianiu trwa kilkanascie-kilkadziesiat sekund
