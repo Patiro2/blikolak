@@ -558,33 +558,55 @@ export class KickChatClient {
       createdAt: msg.created_at || new Date().toISOString(),
     };
 
+    // NAPRAWA: onKlik/onTopWorkerChat/onMessage sa callbackami zdefiniowanymi
+    // w main.js i spinaja razem boss.js/vanessa.js/flagbattle.js/workers.js -
+    // przed ta zmiana caly ten łańcuch szedł bez zadnego try/catch. Wyjatek w
+    // KTORYMKOLWIEK z nich (np. boss.onChatMessage przy nietypowej tresci)
+    // przerywal reszte obsluzenia TEJ wiadomosci "w polowie" - kolejne
+    // callbacki w łańcuchu (w tym flagBattle.onChatMessage i samo
+    // kickUI.addMessage w onMessage) nigdy by sie nie wykonaly dla tej
+    // wiadomosci, a blad lecialby jako nieobsluzony wyjatek w konsoli. Kazdy
+    // callback jest wiec teraz izolowany osobno - blad jednego nie kasuje
+    // pozostalych, ani nie blokuje obslugi KOLEJNYCH wiadomosci z czatu.
     if (isKlik) {
       this.stats.kliksReceived += 1;
-      this.onKlik(sender, chatItem);
+      try {
+        this.onKlik(sender, chatItem);
+      } catch (err) {
+        console.error('[KickChat] Blad w onKlik:', err);
+      }
     }
 
     // Jeśli autor wiadomości jest w Top 10 i posiada przypisanego pracownika,
     // wywołujemy zdarzenie dymka wypowiedzi nad głową jego postaci w 3D.
     // Filtrujemy wiadomości tak, aby słowo "klik" nigdy nie pojawiało się nad głowami postaci.
-    const assignedWorkerIdx = this.getWorkerForUser(username);
-    if (assignedWorkerIdx !== null) {
-      const filteredContent = content
-        .replace(/(?:^|\s)[!/]*klik+[!.,?*~]*(?=\s|$)/gi, '')
-        .replace(/(?:^|\s)[!/]*click+[!.,?*~]*(?=\s|$)/gi, '')
-        .replace(/\s{2,}/g, ' ')
-        .trim();
+    try {
+      const assignedWorkerIdx = this.getWorkerForUser(username);
+      if (assignedWorkerIdx !== null) {
+        const filteredContent = content
+          .replace(/(?:^|\s)[!/]*klik+[!.,?*~]*(?=\s|$)/gi, '')
+          .replace(/(?:^|\s)[!/]*click+[!.,?*~]*(?=\s|$)/gi, '')
+          .replace(/\s{2,}/g, ' ')
+          .trim();
 
-      if (filteredContent.length > 0) {
-        this.onTopWorkerChat({
-          workerIndex: assignedWorkerIdx,
-          username,
-          content: filteredContent,
-          color: userColor,
-        });
+        if (filteredContent.length > 0) {
+          this.onTopWorkerChat({
+            workerIndex: assignedWorkerIdx,
+            username,
+            content: filteredContent,
+            color: userColor,
+          });
+        }
       }
+    } catch (err) {
+      console.error('[KickChat] Blad w onTopWorkerChat:', err);
     }
 
-    this.onMessage(chatItem);
+    try {
+      this.onMessage(chatItem);
+    } catch (err) {
+      console.error('[KickChat] Blad w onMessage:', err);
+    }
   }
 
   /**

@@ -35,6 +35,7 @@ const PLIK_STANU = process.env.PLIK_STANU || path.join(__dirname, 'ostatni-stan.
 
 const LIMIT_RAMKI_BAJTOW = 256 * 1024; // 256 KB
 const LIMIT_RAMEK_NA_SEKUNDE = 60;
+const LIMIT_WIDZOW = 2000; // gorny limit rownoczesnych widzow - ochrona pamieci na darmowym planie Rendera
 const INTERWAL_ZAPISU_MS = 30000;
 const INTERWAL_HEARTBEAT_MS = 30000;
 
@@ -120,7 +121,16 @@ const httpServer = http.createServer((req, res) => {
   res.end('Not found');
 });
 
-const wss = new WebSocketServer({ server: httpServer });
+// NAPRAWA: bez maxPayload biblioteka ws przyjmuje domyslnie ramki do 100 MB -
+// i to ZANIM aplikacyjny LIMIT_RAMKI_BAJTOW nizej w ogole zobaczy dlugosc,
+// bo 'message' odpala sie dopiero po zbudowaniu calej ramki w pamieci.
+// Kilka rownoczesnych polaczen (widz nie potrzebuje zadnego tokenu, wiec
+// polaczyc sie moze kazdy) wysylajacych taka ramke wystarczy, zeby zajac
+// cala pamiec darmowej instancji na Renderze i zabic przekaznik razem
+// z hostem. maxPayload tnie to na poziomie samej biblioteki, przed
+// zbudowaniem ramki - polaczenie przekraczajace limit jest zamykane
+// kodem 1009 (Message Too Big).
+const wss = new WebSocketServer({ server: httpServer, maxPayload: LIMIT_RAMKI_BAJTOW });
 
 wss.on('connection', (ws, req) => {
   const url = new URL(req.url, 'http://localhost');
@@ -153,6 +163,16 @@ wss.on('connection', (ws, req) => {
     log('Host polaczony');
     rozgloszWszystkim({ typ: 'host-online' });
   } else {
+    if (widzowie.size >= LIMIT_WIDZOW) {
+      // Ochrona przed zalaniem przekaznika polaczeniami (rola widza nie
+      // wymaga zadnego tokenu - kazdy moze sprobowac). Zamykamy od razu,
+      // zanim dolaczymy do zbioru rozgloszen.
+      log(`Odrzucono widza - osiagnieto limit ${LIMIT_WIDZOW} rownoczesnych polaczen`);
+      try {
+        ws.close(1013, 'za duzo polaczen');
+      } catch (_) {}
+      return;
+    }
     ws._rola = 'widz';
     widzowie.add(ws);
     log(`Widz polaczony (lacznie: ${widzowie.size})`);

@@ -99,7 +99,7 @@ async function main() {
   const goldCoin = new GoldenCoinManager(scene);
   await goldCoin.init();
 
-  const flagBattle = new FlagBattleManager(scene);
+  const flagBattle = new FlagBattleManager(scene, renderer);
   let flagBattleBledy = 0;
   let flagBattleZepsuta = false;
 
@@ -190,6 +190,7 @@ async function main() {
       assignments: kickChat.assignments,
       boss: boss.getSyncState(),
       workers: workerManager.getSyncState(),
+      flagBattle: flagBattle.getSyncState(),
     };
   }
 
@@ -283,6 +284,11 @@ async function main() {
     if (stan.workers && !remote.czyAdmin()) {
       workerManager.applySync(stan.workers);
     }
+    // Minigra "Bitwa o flagi" - patrz komentarz przy isHost w flagbattle.js:
+    // widz nie losuje juz nic sam, tylko odgrywa to, co przyslal host.
+    if (!remote.czyAdmin()) {
+      flagBattle.applySync(stan.flagBattle || null);
+    }
     try {
       await syncLeaderboardAndOverlays();
     } catch (err) {
@@ -349,6 +355,12 @@ async function main() {
       // i tak wyrówna liczby - to tylko natychmiastowa reakcja wizualna.
       const nick = dane && typeof dane.nick === 'string' ? dane.nick : null;
       if (nick) boss.killUserManual(nick);
+    } else if (nazwa === 'flaga-info') {
+      // Natychmiastowa narracja bitwy o flagi (patrz flagBattle.onAnnounce
+      // powyzej) - stan (kafelek/flaga/wynik) i tak przyjdzie osobno snapshotem,
+      // to tylko dopisuje ten sam tekst do #kick-messages bez czekania.
+      const text = dane && typeof dane.text === 'string' ? dane.text : null;
+      if (text) flagBattle.announce(text);
     }
   }
 
@@ -753,7 +765,18 @@ async function main() {
     workerManager,
     kickChat,
     economy,
+    isHost: remote.czyAdmin(),
   });
+  // Narracja bitwy ("Bitwa o flagi! X vs Y!", "X wygrywa!"...) dociera do
+  // widza z hostowej karty natychmiast przez kanal realtime, zamiast czekac
+  // do najblizszego snapshotu co 2 s. U widza announce() (wywolane z
+  // zastosujZdarzenieZdalne nizej) i tak dopisuje ten sam tekst lokalnie -
+  // onAnnounce tam jest no-op (bo isHost=false), wiec nie ma petli.
+  flagBattle.onAnnounce = (text) => {
+    if (remote.czyAdmin()) {
+      realtime.wyslijZdarzenie('flaga-info', { text });
+    }
+  };
 
   // Widz otwierajacy karte w trakcie walki z bossem podejmuje ja od razu, bez
   // cutscenki, z tym samym hp/licznikami co u admina (patrz boss.applySync).
