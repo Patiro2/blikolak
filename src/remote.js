@@ -5,11 +5,23 @@
 //   stan (tryb widza, tylko do odczytu).
 // - Zapis i kasowanie wymagaja hasla admina. Haslo idzie w naglowku
 //   Authorization i jest trzymane w localStorage tej jednej przegladarki.
-// - Gdy API nie odpowiada (np. lokalne uruchomienie przez serve.py, bez
-//   Vercela), gra dziala jak dotad: stan w localStorage i PELNE uprawnienia.
-//   Dzieki temu praca lokalna niczego nie wymaga.
+// - Pelne uprawnienia bez logowania przysluguja WYLACZNIE przy uruchomieniu
+//   lokalnym (localhost / plik z dysku) - patrz czyLokalnie(). Na publicznym
+//   adresie brak odpowiedzi z API oznacza BRAK uprawnien, nie pelne. Tryb
+//   lokalny dziala dalej na localStorage, wiec praca lokalna niczego nie wymaga.
 
 const KLUCZ_TOKENU = 'bankomat-clicker-admin-token';
+
+/**
+ * Czy gra jest uruchomiona lokalnie (serve.py, plik z dysku). Tylko wtedy
+ * wolno dzialac bez logowania - na publicznym adresie nigdy.
+ */
+export function czyLokalnie() {
+  if (typeof location === 'undefined') return true;
+  if (location.protocol === 'file:') return true;
+  const h = location.hostname;
+  return h === 'localhost' || h === '127.0.0.1' || h === '::1' || h === '';
+}
 
 export class RemoteState {
   constructor() {
@@ -28,11 +40,18 @@ export class RemoteState {
   }
 
   /**
-   * Uprawnienia do resetu i spawnowania. Offline (brak API) = pelne uprawnienia,
-   * bo wtedy gra i tak zyje tylko w tej jednej przegladarce.
+   * Uprawnienia do resetu i spawnowania.
+   *
+   * UWAGA (naprawa dziury): wczesniej brak odpowiedzi z API oznaczal "pelne
+   * uprawnienia". To jest fail-open - na publicznym adresie kazda awaria
+   * backendu (albo zwykly brak skonfigurowanego magazynu) rozdawala przyciski
+   * admina wszystkim odwiedzajacym. Teraz jest odwrotnie: pelne uprawnienia
+   * bez logowania przysluguja WYLACZNIE przy uruchomieniu lokalnym, a na
+   * kazdym innym adresie trzeba sie zalogowac. Gdy nie da sie zweryfikowac
+   * hasla, uprawnien NIE MA.
    */
   czyAdmin() {
-    if (this.dostepne === false) return true;
+    if (czyLokalnie()) return true;
     return this.zalogowany;
   }
 

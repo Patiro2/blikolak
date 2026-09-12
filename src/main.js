@@ -6,7 +6,7 @@ import { WorkerManager, parseMovementDirection } from './workers.js';
 import { CoinPool } from './coins.js';
 import { GoldenCoinManager } from './goldcoin.js';
 import { Economy, WORKER_TYPE_DEFS, MACHINE_TIERS, SAVE_KEY } from './economy.js';
-import { remote } from './remote.js';
+import { remote, czyLokalnie } from './remote.js';
 import { LEADERBOARD_KEY, ASSIGNMENTS_KEY } from './kick.js';
 import { UI, KickUI, LeaderboardUI, WorkerOverlayManager, VanessaLogUI } from './ui.js';
 import { KickChatClient } from './kick.js';
@@ -142,6 +142,9 @@ async function main() {
   const spawnVanessaBtn = document.getElementById('btn-spawn-vanessa');
   if (spawnVanessaBtn) {
     spawnVanessaBtn.addEventListener('click', () => {
+      // Straz niezalezna od ukrycia przycisku w CSS - ukrycie jest kosmetyka,
+      // a to jest faktyczny warunek wykonania akcji.
+      if (!remote.czyAdmin()) return;
       vanessa.spawn(true);
     });
   }
@@ -259,7 +262,7 @@ async function main() {
     const admin = remote.czyAdmin();
     document.body.classList.toggle('tryb-widza', !admin);
     if (!adminBtn) return;
-    if (!remote.czyOnline()) {
+    if (czyLokalnie()) {
       // Lokalnie nie ma sie gdzie logowac - chowamy przycisk.
       adminBtn.style.display = 'none';
       return;
@@ -295,6 +298,7 @@ async function main() {
   const spawnBossBtn = document.getElementById('btn-spawn-boss');
   if (spawnBossBtn) {
     spawnBossBtn.addEventListener('click', () => {
+      if (!remote.czyAdmin()) return;
       boss.start(1, { force: true });
     });
   }
@@ -482,6 +486,7 @@ async function main() {
 
   ui = new UI(economy, {
     onReset: async () => {
+      if (!remote.czyAdmin()) return;
       economy.reset();
       kickChat.reset();
       kickUI.updateKliksCount(0);
