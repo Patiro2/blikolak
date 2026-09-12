@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { COUNTRIES, COUNTRY_CODES, normalizeCountryName } from './countries.js';
+import { COUNTRIES, COUNTRY_CODES, tokenizujOdpowiedz, INDEKS_WARIANTOW } from './countries.js';
 import { usunTagiEmotek } from './kick.js';
 import { loadForest } from './assets.js';
 import { strumien, losujZ } from './rng.js';
@@ -65,6 +65,74 @@ let szablonPlotkiPromise = null;
 function pobierzSzablonPlotki() {
   if (!szablonPlotkiPromise) szablonPlotkiPromise = loadForest('fence');
   return szablonPlotkiPromise;
+}
+
+/**
+ * Dopasowanie odpowiedzi z czatu do kraju: PO CALYCH SLOWACH, z rozstrzyganiem
+ * konfliktow najdluzszym dopasowaniem - patrz zawieraSekwencje/najlepszyKodDlaOdpowiedzi.
+ *
+ * Historia tego kodu (dla przyszlych zmian): pierwsza wersja porownywala
+ * "ans === expected || ans.includes(expected)" - zle lapala podciagi bez
+ * spacji ("somalia" zawiera "mali", "nigeria" zawiera "niger"). Druga wersja
+ * scinala "wypelniacze" ("to jest", "chyba") i porownywala CALY rdzen
+ * odpowiedzi z CALYM wariantem - to naprawilo podciagi, ALE bylo zbyt kruche
+ * na prawdziwym czacie: "polska xd", "Polska 🇵🇱", "polska!!! xD" nie mialy
+ * szans trafic, bo nigdy nie da sie przewidziec kazdego dopisku widza.
+ *
+ * Ta wersja NIE wymaga, zeby caly rdzen byl rowny wariantowi - wystarczy, ze
+ * WARIANT wystepuje w odpowiedzi jako CIAGLA sekwencja PELNYCH SLOW (stad
+ * najpierw tokenizacja - patrz tokenizujOdpowiedz w countries.js, ktora
+ * zamienia kazdy znak spoza [a-z0-9] na spacje, wiec emotki/interpunkcja
+ * znikaja same, bez osobnej listy wypelniaczy). To samo zalatwia "somalia"
+ * nie zawiera slowa "mali" (nie ma tam takiego tokenu), a przy dopisku "polska
+ * xd" slowo "polska" nadal jest osobnym, pelnym tokenem.
+ *
+ * Pozostaje jednak przypadek, ktorego samo dopasowanie PELNYCH SLOW nie
+ * rozwiazuje: "sudan poludniowy" zawiera slowo "sudan" w calosci - to
+ * legalne dopasowanie do kraju Sudan, ale odpowiedz w rzeczywistosci opisuje
+ * INNY kraj (Sudan Poludniowy), ktorego WLASNA nazwa tez tu pasuje i jest
+ * DLUZSZA. Rozstrzygamy to bioracc pod uwage WSZYSTKIE dopasowania (wszystkich
+ * krajow) w odpowiedzi i wybierajac NAJDLUZSZE (w slowach) - "sudan poludniowy"
+ * (2 slowa, kraj Sudan Poludniowy) wygrywa z "sudan" (1 slowo, kraj Sudan).
+ * Odpowiedz liczy sie tylko, gdy TEN dluzszy wynik nalezy do biezacej flagi,
+ * i tylko gdy jest jednoznaczny (dwa rozne kraje z tą sama najwieksza
+ * dlugoscia = remis = pudlo, np. "niemcy albo polska" - inaczej dalby sie
+ * "strzelac" cala lista panstw na raz).
+ */
+function zawieraSekwencje(tokeny, wzorzec) {
+  if (wzorzec.length === 0 || wzorzec.length > tokeny.length) return false;
+  szukanie: for (let i = 0; i + wzorzec.length <= tokeny.length; i++) {
+    for (let j = 0; j < wzorzec.length; j++) {
+      if (tokeny[i + j] !== wzorzec[j]) continue szukanie;
+    }
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Zwraca kod kraju, ktorego wariant jest NAJDLUZSZYM jednoznacznym
+ * dopasowaniem w tokenach odpowiedzi, albo null (brak dopasowania lub remis
+ * miedzy dwoma roznymi krajami tej samej dlugosci). Przechodzi caly
+ * INDEKS_WARIANTOW (zbudowany RAZ przy ladowaniu modulu countries.js, nie
+ * tutaj) - przy ~150 krajach i garstce slow na wiadomosc to tania petla,
+ * wywolywana tylko dla wiadomosci graczy aktualnie w bitwie.
+ */
+function najlepszyKodDlaOdpowiedzi(tokeny) {
+  let najlepszaDlugosc = 0;
+  let kodyNajlepsze = null;
+  for (const { kod, slowa } of INDEKS_WARIANTOW) {
+    if (slowa.length < najlepszaDlugosc) continue;
+    if (!zawieraSekwencje(tokeny, slowa)) continue;
+    if (slowa.length > najlepszaDlugosc) {
+      najlepszaDlugosc = slowa.length;
+      kodyNajlepsze = new Set([kod]);
+    } else {
+      kodyNajlepsze.add(kod);
+    }
+  }
+  if (!kodyNajlepsze || kodyNajlepsze.size !== 1) return null;
+  return [...kodyNajlepsze][0];
 }
 
 // kod kraju -> Promise<THREE.CanvasTexture>. Modul jest singletonem na karte
@@ -354,12 +422,36 @@ export class FlagBattleManager {
       return !this.players.some(p => p.typeIndex === typeIndex);
     }
     
-    if (this.state === 'REWARD') {
-      // Tylko zwycięzca ma prawo być na tym polu
-      return !this.winner || this.winner.typeIndex !== typeIndex;
-    }
-    
+    // REWARD: pole nie jest juz oznaczone (patrz endBattle/reset - znaczniki
+    // gasna natychmiast po wygranej), wiec blokowanie go dla postronnych
+    // bylby niezrozumiale dla widzow (niewidoczna sciana). Ruch jest juz i tak
+    // swobodny - zwyciezca stoi tam z wlasnej woli, nikt inny nie ma powodu
+    // tam wchodzic.
+
     return false;
+  }
+
+  /**
+   * Blokada RUCHU DLA DWOJGA WALCZACYCH w trakcie BATTLE (zadanie: "gdy
+   * bitwa trwa, obaj nie moga sie ruszyc, dopoki ktorys nie wygra") - w
+   * odroznieniu od isTileLocked() powyzej, ktora chroni pole PRZED WEJSCIEM
+   * OBCYCH, ale nie trzyma samych walczacych. Woluje ja moveWorker() w
+   * workers.js PRZED policzeniem docelowego pola, wiec blokuje KAZDY krok
+   * (w tym obrot w miejscu) - decyzja projektowa: dwaj gracze stoja juz
+   * naprzeciw siebie (patrz checkPlayersEntry) i sa w trakcie walki, wiec
+   * kreca sie w miejscu na komende ruchu wygladaloby dziwniej niz calkowity
+   * bezruch do konca starcia.
+   *
+   * Zwraca false (odblokowane), gdy boss jest aktywny - dokladnie ta sama
+   * gwarancja co w isTileLocked, tym samym mechanizmem: gracz nigdy nie moze
+   * utknac zablokowany, gdy plansza jest pod ostrzalem bossa (_przerwijPrzezBossa
+   * i tak zaraz przerwie bitwe, ale ruch ma wrocic natychmiast, nie dopiero
+   * po nastepnym ticku hosta).
+   */
+  isPlayerLocked(typeIndex) {
+    if (this.boss && this.boss.isActive()) return false;
+    if (this.state !== 'BATTLE') return false;
+    return this.players.some((p) => p.typeIndex === typeIndex);
   }
 
   tick(dt) {
@@ -440,6 +532,9 @@ export class FlagBattleManager {
     }
     else if (this.state === 'WAITING') {
       this.checkPlayersEntry();
+    }
+    else if (this.state === 'BATTLE') {
+      this._sprawdzWyjscieAwaryjne();
     }
     else if (this.state === 'REWARD') {
       this.rewardTimer += dt;
@@ -552,6 +647,42 @@ export class FlagBattleManager {
     }
   }
   
+  /**
+   * Wyjscie awaryjne: jesli ktorykolwiek z dwoch walczacych straci awatar W
+   * TRAKCIE bitwy (wypadnie z Top 10 -> usuniety z workerManager.entries,
+   * zostanie wyeliminowany z panelu -> to samo, albo omdleje od ataku bossa
+   * -> entry.isFainted), isPlayerLocked() trzymalby DRUGIEGO gracza
+   * zablokowanego na polu w nieskonczonosc (przeciwnik, ktorego czeka, juz
+   * nigdy nie odpowie). Wywolywane co tick hosta w stanie BATTLE (patrz
+   * tick()) - host wykrywa zagniecie i orzeka walkower: ocalaly gracz
+   * dostaje wygrana (te sama nagrode i sciezke co zwykle zwyciestwo w
+   * endBattle - to jednak jego zasluga, ze przetrwal). Jesli obaj strace
+   * awatar naraz (np. oboje trafieni tym samym atakiem bossa - choc to i tak
+   * nie powinno sie zdarzyc, bo _przerwijPrzezBossa przerywa bitwe wczesniej
+   * w tym samym ticku), po prostu resetujemy bez zwyciezcy zamiast
+   * przyznawac wygrana nikomu.
+   *
+   * Celowo BEZ limitu czasu bitwy - to nie jest sposob na wymuszenie konca
+   * starcia, tylko obsluga wyjatkowego zdarzenia (zniknal jeden z uczestnikow).
+   */
+  _sprawdzWyjscieAwaryjne() {
+    const zaginieni = this.players.filter((p) => {
+      const w = this.workerManager && this.workerManager.getWorkerType(p.typeIndex);
+      return !w || w.isFainted;
+    });
+    if (zaginieni.length === 0) return;
+
+    const ocalali = this.players.filter((p) => !zaginieni.includes(p));
+    if (ocalali.length === 1) {
+      this.announce(`${zaginieni[0].username} traci awatara w trakcie bitwy - walkower dla ${ocalali[0].username}!`);
+      this.endBattle(ocalali[0]);
+    } else {
+      // Obaj strace awatar w tym samym ticku - nikt nie wygrywa, pole wraca do IDLE.
+      this.announce('Obaj walczacy tracą awatara w trakcie bitwy - bitwa o flagi anulowana.');
+      this.reset();
+    }
+  }
+
   // Ograniczenie prob przy unikaniu powtorki - przy 232 flagach i realistycznie
   // max kilkunastu rundach na bitwe to praktycznie nigdy nie powinno wystrzelic,
   // ale petla NIE MOZE zostac nieograniczona (zawiesilaby klatke).
@@ -637,10 +768,10 @@ export class FlagBattleManager {
     const player = this.players.find(p => p.username.toLowerCase() === username.toLowerCase());
     if (!player) return; // Tylko gracze na polu mogą odpowiadać
     
-    const ans = normalizeCountryName(usunTagiEmotek(content));
-    const expected = normalizeCountryName(COUNTRIES[this.currentFlag]);
-    
-    if (ans === expected || ans.includes(expected)) {
+    const tokeny = tokenizujOdpowiedz(usunTagiEmotek(content));
+    const dopasowanyKod = najlepszyKodDlaOdpowiedzi(tokeny);
+
+    if (dopasowanyKod && dopasowanyKod === this.currentFlag) {
       player.score += 1;
       this.flagsGuessed += 1;
       const properName = COUNTRIES[this.currentFlag];
@@ -671,7 +802,17 @@ export class FlagBattleManager {
     this._lastRewardTime = 0;
     this.winner = winnerPlayer;
     this.flagSprite.visible = false;
-    
+
+    // Zadanie: oznaczenie pola (pierscien, wypelnienie, podswiecenie i
+    // plotki) ma zniknac CALKOWICIE w chwili wygranej, nie dopiero po 30 s
+    // REWARD - nagroda (2 zl/s) i tak nie zalezy od pozycji (patrz tick()
+    // galaz REWARD), wiec nic wizualnego nie musi juz oznaczac pola.
+    // _usunPlotki() usuwa je od razu (bez animowanego chowania - to samo
+    // wzorzec co reset()/_przerwijPrzezBossa), highlightMesh.visible=false
+    // gasi pierscien+wypelnienie w jednym kroku (to Group, patrz konstruktor).
+    this.highlightMesh.visible = false;
+    this._usunPlotki();
+
     // Zatrzymujemy animacje walki
     this.players.forEach(p => {
       const w = this.workerManager.getWorkerType(p.typeIndex);
@@ -700,7 +841,7 @@ export class FlagBattleManager {
       }
     }
 
-    this.announce(`🎉 ${winnerPlayer.username} WYGRYWA! Przez 30 sekund dostaje 2 zł/s pasywnie, stojąc na polu chwały!`);
+    this.announce(`🎉 ${winnerPlayer.username} WYGRYWA! Przez 30 sekund dostaje 2 zł/s pasywnie!`);
   }
 
   /**
@@ -938,8 +1079,19 @@ export class FlagBattleManager {
 
     this.highlightMesh.position.x = this.tile.x;
     this.highlightMesh.position.z = this.tile.z;
-    this.highlightMesh.visible = true;
     this.flagSprite.position.set(this.tile.x, 2.5, this.tile.z);
+
+    if (this.state === 'REWARD') {
+      // Zadanie: oznaczenie pola znika CALKOWICIE w chwili wygranej, tez u
+      // widza - w tym u widza, ktory dopiero wszedl w trakcie REWARD (ta
+      // galaz jest bezwarunkowa wzgledem prevState, nie tylko "przy zmianie
+      // na REWARD"). _usunPlotki() jest no-op, jesli plotek juz nie ma (np.
+      // host je usunal wczesniej niz przyszedl ten snapshot).
+      this.highlightMesh.visible = false;
+      this._usunPlotki();
+    } else {
+      this.highlightMesh.visible = true;
+    }
 
     if (this.state === 'BATTLE' && this.currentFlag) {
       if (this.currentFlag !== this._loadedFlag) {

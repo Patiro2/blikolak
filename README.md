@@ -47,7 +47,9 @@ Port można podać jako argument: `python serve.py 8080`.
   krótkim oknie czasu) podbijają wspólny mnożnik zarobku. Wygasa po przerwie
   w klikaniu.
 - **Złota moneta** — pojawia się co 10 s na losowym, wolnym polu siatki areny
-  (znika po 25 s, jeśli nikt jej nie zbierze). NIE jest klikalna myszką -
+  (znika po 25 s, jeśli nikt jej nie zbierze). Po zebraniu kolejna pojawia się
+  najwcześniej po 10 s (spawn w najbliższym cyklu po zebraniu jest pomijany).
+  NIE jest klikalna myszką -
   zbiera ją pierwszy awatar Top 10, który do niej dobiegnie (patrz "Chodzenie
   po siatce" niżej), i zgarnia 25 zł do wspólnej puli oraz do swojego dorobku
   w rankingu. Zebranie monety NIE liczy się jako komenda "klik" - licznik

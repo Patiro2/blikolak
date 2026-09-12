@@ -450,6 +450,16 @@ export class WorkerManager {
 
     if (entry.isFainted || entry.isMoving || entry.isRobbed) return false;
 
+    // Bitwa o flagi: dwaj walczacy nie moga sie ruszyc W OGOLE (nawet obrot w
+    // miejscu), dopoki ktorys nie wygra - patrz isPlayerLocked() w
+    // flagbattle.js po uzasadnienie. To ODREBNA blokada od isTileLocked()
+    // nizej (ta chroni pole PRZED WEJSCIEM obcych, nie trzyma samych
+    // walczacych) i musi byc sprawdzona PRZED policzeniem docelowego pola,
+    // zeby zwrocic false zamiast (jak isTileLocked) "true ale z obrotem".
+    if (this.flagBattleRef && typeof this.flagBattleRef.isPlayerLocked === 'function' && this.flagBattleRef.isPlayerLocked(typeIndex)) {
+      return false;
+    }
+
     // Jeśli była odgrywana animacja uderzenia w bankomat, przerywamy ją natychmiast na rzecz chodu
     if (entry.interactAction && entry.playingInteract) {
       entry.interactAction.stop();

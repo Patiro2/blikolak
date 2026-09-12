@@ -4,8 +4,12 @@ import { showTopAnnouncement } from './vanessa.js';
 import { audio } from './audio.js';
 import { strumien, losujInt } from './rng.js';
 
-const SPAWN_INTERVAL = 10; // sekundy do pojawienia się kolejnej monety
+const SPAWN_INTERVAL = 10; // dlugosc jednego cyklu (sekundy) - patrz komentarz przy update()/_pominSpawnWCyklu
 const SPAWN_INTERVAL_MS = SPAWN_INTERVAL * 1000;
+// Moneta zyje DLUZEJ niz jeden cykl (25s > 10s) - moze przetrwac na planszy
+// przez czesc kolejnego cyklu, jesli nikt jej nie zbierze. Dzieki temu, gdy
+// zostanie zebrana, kolejna NIE pojawia sie wczesniej niz po pelnym cyklu -
+// patrz _pominSpawnWCyklu nizej.
 const LIFETIME = 25; // maksymalny czas obecności monety na planszy, jeśli nikt do niej nie dobiegnie
 const COIN_REWARD = 25; // nagroda 25 zł dla pierwszego gracza, który dobiegnie
 
@@ -34,6 +38,11 @@ export class GoldenCoinManager {
     // Numer ostatnio sprawdzonego cyklu wspolnej osi czasu (patrz update()) -
     // null oznacza "jeszcze nie sprawdzono ani razu" (pierwsza klatka po starcie).
     this._ostatniCykl = null;
+    // Numer cyklu, w ktorym spawn ma zostac POMINIETY - ustawiany w
+    // _collectByWorker() na "cykl zebrania + 1", zeby zagwarantowac co
+    // najmniej 10 s przerwy miedzy zebraniem a kolejna moneta (patrz komentarz
+    // przy update() nizej). null = brak pominiecia w toku.
+    this._pominSpawnWCyklu = null;
     this.life = 0;
     this.bobT = 0;
     this._arcRebuildAcc = 0;
@@ -265,6 +274,17 @@ export class GoldenCoinManager {
       this.save();
     }
 
+    // Gwarancja "min. 10 s od zebrania do kolejnej monety" - patrz komentarz
+    // przy update() i _pominSpawnWCyklu w konstruktorze. Liczymy cykl, w ktorym
+    // WLASNIE NASTAPILO zebranie (nie cykl spawnu tej monety - moneta zyje
+    // dluzej niz jeden cykl, wiec mogla zostac zebrana w pozniejszym cyklu niz
+    // ten, w ktorym powstala) i pomijamy spawn w NASTEPNYM cyklu po nim.
+    if (this.economy) {
+      const epoka = this.economy.state.epokaStartu || 0;
+      const cyklZebrania = Math.floor((Date.now() - epoka) / SPAWN_INTERVAL_MS);
+      this._pominSpawnWCyklu = cyklZebrania + 1;
+    }
+
     audio.play('moneta-zebrana');
 
     // 2. Efekt wybuchu monet Three.js
@@ -300,6 +320,7 @@ export class GoldenCoinManager {
     // Nowy reset gry losuje tez nowe seedGry/epokaStartu (patrz economy.js),
     // wiec numeracja cykli zaczyna sie efektywnie od nowa.
     this._ostatniCykl = null;
+    this._pominSpawnWCyklu = null;
   }
 
   update(delta) {
@@ -347,6 +368,17 @@ export class GoldenCoinManager {
     }
     if (cykl !== this._ostatniCykl) {
       this._ostatniCykl = cykl;
+      // Pomijamy DOKLADNIE jeden cykl po zebraniu poprzedniej monety (patrz
+      // _collectByWorker) - moneta nr `cykl` normalnie powstalaby TERAZ, ale
+      // skoro poprzednia zebrano w cyklu tuz przed tym, minimalna przerwa 10 s
+      // jeszcze nie minela. Kolejna zmiana cyklu (cykl+1 wzgledem tego) juz
+      // spawnuje normalnie. Kazda karta liczy to samo (ten sam epokaStartu +
+      // ten sam moment zebrania w obrebie tego samego 10-sekundowego okna),
+      // wiec wynik jest wspolny.
+      if (this._pominSpawnWCyklu !== null && cykl === this._pominSpawnWCyklu) {
+        this._pominSpawnWCyklu = null;
+        return;
+      }
       this._spawn(null, cykl);
     }
   }
