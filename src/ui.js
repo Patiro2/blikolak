@@ -55,11 +55,14 @@ export class UI {
     this.moneyEl.textContent = `${fmt(this.economy.state.money)} zł`;
 
     // W grze nie ma dochodu pasywnego, wiec zamiast "zl/s" pokazujemy licznik
-    // klikow czatu i postep do kolejnego tieru - to jedyne, co napedza progresje.
+    // klikow i postep do kolejnego tieru - to jedyne, co napedza progresje.
+    // Licznik obejmuje kliki z czatu ORAZ klikniecia wlasciciela myszka w model
+    // (pole nazywa sie historycznie totalChatClicks - nie zmieniamy nazwy, bo
+    // siedzi w zapisanym stanie w localStorage i KV).
     const kliki = this.economy.state.totalChatClicks;
     const prog = this.economy.nextTierThreshold();
     this.incomeEl.textContent = prog === null
-      ? `${fmt(kliki)} klików czatu • maksymalny bankomat`
+      ? `${fmt(kliki)} klików • maksymalny bankomat`
       : `${fmt(kliki)} / ${fmt(prog)} klików do awansu`;
     if (this.comboEl) {
       const combo = this.economy.comboCount();

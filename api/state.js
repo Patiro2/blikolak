@@ -21,7 +21,12 @@ export default async function handler(req, res) {
   try {
     if (req.method === 'GET') {
       const stan = await pobierzStan();
-      res.setHeader('Cache-Control', 'no-store');
+      // Wszyscy widzowie pytaja o DOKLADNIE ten sam obiekt, wiec pozwalamy CDN
+      // Vercela scalic te zapytania. Bez tego koszt rosnie liniowo z widownia
+      // (200 widzow x 4 h = ~288 tys. odczytow Redisa) i darmowy limit Upstash
+      // konczy sie w trakcie streamu. Z s-maxage do funkcji dociera najwyzej
+      // 12 zapytan na minute NIEZALEZNIE od liczby widzow.
+      res.setHeader('Cache-Control', 'public, max-age=0, s-maxage=5, stale-while-revalidate=10');
       return res.status(200).json({ ok: true, stan });
     }
 

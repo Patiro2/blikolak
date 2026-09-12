@@ -7,6 +7,7 @@ import { CoinPool } from './coins.js';
 import { GoldenCoinManager } from './goldcoin.js';
 import { Economy, WORKER_TYPE_DEFS, MACHINE_TIERS, SAVE_KEY } from './economy.js';
 import { remote, czyLokalnie } from './remote.js';
+import { Realtime, URL_RELAYA } from './realtime.js';
 import { LEADERBOARD_KEY, ASSIGNMENTS_KEY } from './kick.js';
 import { UI, KickUI, LeaderboardUI, WorkerOverlayManager, VanessaLogUI } from './ui.js';
 import { KickChatClient } from './kick.js';
@@ -41,6 +42,23 @@ async function main() {
   }
 
   const economy = new Economy();
+
+  // Kanal realtime (WebSocket, patrz src/realtime.js) - DODATKOWA warstwa nad
+  // KV: wlasciciel rozsyla snapshoty/zdarzenia natychmiast, widzowie dostaja
+  // je bez czekania na odpytywanie co 10 s. Gdy URL_RELAYA jest puste albo
+  // serwer relay nie odpowiada, modul cicho nic nie robi - reszta gry (KV +
+  // odpytywanie) dziala dokladnie jak dotychczas.
+  const realtime = new Realtime({
+    url: URL_RELAYA,
+    rola: remote.czyAdmin() ? 'host' : 'widz',
+    token: remote.token,
+  });
+  // true, gdy widz ma dzialajace polaczenie realtime Z aktywnym hostem - wtedy
+  // wylaczamy zapasowe odpytywanie /api/state co 10 s (patrz interwaly nizej).
+  let realtimeHostOnline = false;
+  realtime.onStatus = ({ polaczony, host }) => {
+    realtimeHostOnline = polaczony && host;
+  };
 
   // Preload dzwiekow leci w tle - main() NIE czeka na niego (patrz audio.js).
   // Ewentualny blad pojedynczego pliku jest tam obslugiwany osobno i nie moze
@@ -195,10 +213,53 @@ async function main() {
    * Tryb widza: stan na serwerze prowadzi admin, wiec co jakis czas dociagamy
    * go i nadpisujemy to, co lokalnie nasymulowala ta karta.
    */
-  async function synchronizujZSerwera() {
-    if (!remote.czyOnline() || remote.czyAdmin()) return;
-    const stan = await remote.pobierz();
+  /**
+   * Sprzatanie calej sceny i stanu do wartosci poczatkowych. Uzywane zarowno
+   * przez reset wykonany przez wlasciciela, jak i przez karte widza, ktora
+   * wykryla, ze wlasciciel zresetowal gre. NIE dotyka serwera - o to dba
+   * osobno strona wolajaca.
+   */
+  async function resetLokalny() {
+    economy.reset();
+    kickChat.reset();
+    kickUI.updateKliksCount(0);
+    workerOverlays.clear();
+    workerManager.clear();
+    vanessa.reset();
+    boss.reset();
+    goldCoin.reset();
+    await machine.setTier(0);
+    try {
+      await syncLeaderboardAndOverlays();
+    } catch (err) {
+      console.error('[reset] Blad odswiezania po resecie:', err);
+    }
+  }
+
+  // Ostatnia epoka zobaczona na serwerze. Sluzy do wykrycia resetu: economy.reset()
+  // generuje nowe seedGry i epokaStartu, wiec zmiana epoki = wlasciciel zresetowal gre.
+  let ostatniaEpokaSerwera = stanZdalny && stanZdalny.economy ? stanZdalny.economy.epokaStartu : null;
+
+  /**
+   * Wspolna sciezka stosowania stanu prowadzonego przez wlasciciela - uzywana
+   * zarowno przez odpytywanie /api/state (synchronizujZSerwera), jak i przez
+   * snapshoty przychodzace natychmiast kanalem realtime (patrz realtime.onSnapshot
+   * nizej). Ksztalt `stan` jest identyczny w obu przypadkach (patrz zbierzStan).
+   */
+  async function zastosujStanZSerwera(stan) {
     if (!stan) return;
+
+    // Zmiana epoki startu = reset po stronie wlasciciela. Trzeba wyczyscic
+    // cala scene (pracownicy, boss, Vanessa, moneta, tier bankomatu), a nie
+    // tylko nadpisac liczby - inaczej u widza zostalyby stare awatary
+    // i trwajaca walka.
+    const epokaZSerwera = stan.economy ? stan.economy.epokaStartu : null;
+    if (epokaZSerwera && ostatniaEpokaSerwera !== null && epokaZSerwera !== ostatniaEpokaSerwera) {
+      console.info('[stan] Wlasciciel zresetowal gre - czyszcze plansze');
+      await resetLokalny();
+    }
+    if (epokaZSerwera) ostatniaEpokaSerwera = epokaZSerwera;
+
     if (stan.economy) Object.assign(economy.state, stan.economy);
     if (stan.leaderboard) kickChat.leaderboard = stan.leaderboard;
     if (stan.assignments) kickChat.assignments = stan.assignments;
@@ -217,6 +278,74 @@ async function main() {
       console.error('[stan] Blad odswiezania po synchronizacji:', err);
     }
   }
+
+  async function synchronizujZSerwera() {
+    if (!remote.czyOnline() || remote.czyAdmin()) return;
+    const stan = await remote.pobierz();
+
+    // Wlasciciel skasowal stan na serwerze i nie zdazyl jeszcze zapisac nowego.
+    // Jesli wczesniej jakikolwiek stan tam byl, to znaczy, ze poszedl reset.
+    if (!stan) {
+      if (ostatniaEpokaSerwera !== null) {
+        console.info('[stan] Wlasciciel zresetowal gre - czyszcze plansze');
+        ostatniaEpokaSerwera = null;
+        await resetLokalny();
+      }
+      return;
+    }
+
+    await zastosujStanZSerwera(stan);
+  }
+
+  // Widz: zastosowanie zdarzenia natychmiastowego przyszlego kanalem realtime
+  // (patrz protokol w server/server.js). Host NIGDY nie dostaje wlasnych
+  // zdarzen z powrotem (serwer rozsyla je tylko widzom), ale sprawdzamy
+  // remote.czyAdmin() defensywnie na wypadek przyszlych zmian protokolu.
+  // Liczby (kasa, licznik klikow...) i tak nadpisze najblizszy snapshot co 2 s
+  // - tu chodzi wylacznie o natychmiastowa reakcje wizualna/dzwiekowa.
+  function zastosujZdarzenieZdalne(nazwa, dane) {
+    if (remote.czyAdmin()) return;
+    if (nazwa === 'klik') {
+      const nick = (dane && dane.nick) || 'Widz';
+      const wartosc = dane && typeof dane.wartosc === 'number' ? dane.wartosc : 0;
+      const isCrit = !!(dane && dane.isCrit);
+      machine.triggerClickAnim();
+      audio.play('klik');
+      if (isCrit) audio.play('kryt');
+      coinPool.burst(machineBurstOrigin, wartosc);
+      const text = isCrit ? `KRYT! +${fmtShort(wartosc)} (@${nick})` : `+${fmtShort(wartosc)} (@${nick})`;
+      projectAndFloat(machineBurstOrigin, text, { crit: isCrit, kick: true });
+      const assignedSlot = kickChat.getWorkerForUser(nick);
+      if (assignedSlot !== null) {
+        const entry = workerManager.getWorkerType(assignedSlot);
+        if (entry) workerManager.triggerInteract(entry);
+      }
+    } else if (nazwa === 'awans-tieru') {
+      const tier = dane && typeof dane.tier === 'number' ? dane.tier : null;
+      if (tier !== null && MACHINE_TIERS[tier]) {
+        machine.setTier(tier).catch((err) => console.error('[realtime] Blad ustawiania tieru:', err));
+        announceTierAdvance(tier);
+      }
+    } else if (nazwa === 'reset') {
+      resetLokalny().catch((err) => console.error('[realtime] Blad resetu zdalnego:', err));
+    }
+  }
+
+  let pierwszySnapshotZmierzony = false;
+  realtime.onSnapshot = (dane) => {
+    if (!pierwszySnapshotZmierzony) {
+      pierwszySnapshotZmierzony = true;
+      console.info(`[realtime] Pierwszy snapshot po ${Math.round(performance.now())} ms od startu strony`);
+    }
+    zastosujStanZSerwera(dane).catch((err) => console.error('[realtime] Blad stosowania snapshotu:', err));
+  };
+  realtime.onZdarzenie = (nazwa, dane) => {
+    try {
+      zastosujZdarzenieZdalne(nazwa, dane);
+    } catch (err) {
+      console.error('[realtime] Blad stosowania zdarzenia:', err);
+    }
+  };
 
   const clock = new THREE.Clock();
   const machineBurstOrigin = new THREE.Vector3(0, 0.6, 0.3);
@@ -244,9 +373,34 @@ async function main() {
     audio.play('awans-bankomatu');
     showTopAnnouncement(
       '🎰 AWANS BANKOMATU!',
-      `Czat wbił już <strong>${economy.state.totalChatClicks}</strong> klików - bankomat awansuje na <strong>${def.name}</strong> (×${def.mult} zarobku)!`,
+      `Wbite już <strong>${economy.state.totalChatClicks}</strong> klików - bankomat awansuje na <strong>${def.name}</strong> (×${def.mult} zarobku)!`,
       3400,
     );
+  }
+
+  /**
+   * Wspolna obsluga przekroczenia progu tieru - wolana ZAROWNO ze sciezki
+   * klikniecia z czatu, JAK I z klikniecia wlasciciela myszka w model (oba
+   * licza sie do progu, patrz economy.performClick). Gdy na dany tier czeka
+   * niepokonany boss, awans jest odlozony do jego pokonania - inaczej
+   * podmieniamy model i pokazujemy baner od razu.
+   */
+  async function obsluzAwansTieru(tier) {
+    if (tier === null || tier === undefined) return;
+    const def_ = BOSS_DEFS[tier];
+    const alreadyDefeated = economy.state.bossesDefeated.includes(tier);
+    if (def_ && !alreadyDefeated) {
+      // Boss przejmuje kontrole - awans bankomatu i baner wykonaja sie
+      // dopiero po pokonaniu go (patrz onDefeated w setContext ponizej).
+      boss.start(tier);
+      return;
+    }
+    await machine.setTier(tier);
+    announceTierAdvance(tier);
+    if (remote.czyAdmin()) {
+      realtime.wyslijZdarzenie('awans-tieru', { tier });
+    }
+    save();
   }
 
   const boss = new BossManager(
@@ -290,6 +444,7 @@ async function main() {
       if (remote.czyAdmin()) {
         remote.wyloguj();
         zastosujTrybAdmina();
+        realtime.ustawRole({ rola: 'widz', token: null });
         return;
       }
       const haslo = window.prompt('Hasło właściciela gry:');
@@ -301,6 +456,9 @@ async function main() {
       }
       zastosujTrybAdmina();
       zapiszNaSerwer(true);
+      // Login mogl przyjsc po tym, jak realtime juz sie polaczyl jako widz -
+      // podnosimy role do hosta i reconnectujemy z nowym tokenem admina.
+      realtime.ustawRole({ rola: 'host', token: remote.token });
     });
   }
   zastosujTrybAdmina();
@@ -431,6 +589,13 @@ async function main() {
       projectAndFloat(machineBurstOrigin, text, { crit: isCrit, kick: true });
       kickUI.updateKliksCount(kickChat.stats.kliksReceived);
 
+      // Natychmiastowe zdarzenie kanalem realtime - u widza wywoluje ten sam
+      // efekt wizualny/dzwiekowy bez czekania na snapshot co 2 s. No-op, gdy
+      // ta karta nie jest hostem albo relay jest wylaczony/rozlaczony.
+      if (remote.czyAdmin()) {
+        realtime.wyslijZdarzenie('klik', { nick, wartosc: value, isCrit });
+      }
+
       // Rejestracja wygenerowanego zarobku w rankingu widzów (automatycznie wywołuje onLeaderboardUpdate)
       kickChat.recordEarned(nick, value, sender.identity?.color);
 
@@ -445,19 +610,7 @@ async function main() {
 
       // Automatyczny awans tieru automatu - gdy laczna liczba klikniec z czatu
       // przekroczy kolejny prog (patrz MACHINE_TIER_CLICK_THRESHOLDS w economy.js).
-      if (tierAdvanced !== null) {
-        const def_ = BOSS_DEFS[tierAdvanced];
-        const alreadyDefeated = economy.state.bossesDefeated.includes(tierAdvanced);
-        if (def_ && !alreadyDefeated) {
-          // Boss przejmuje kontrole - awans bankomatu i baner wykonaja sie
-          // dopiero po pokonaniu go (patrz onDefeated w setContext powyzej).
-          boss.start(tierAdvanced);
-        } else {
-          await machine.setTier(tierAdvanced);
-          announceTierAdvance(tierAdvanced);
-          save();
-        }
-      }
+      await obsluzAwansTieru(tierAdvanced);
     },
     onLeaderboardUpdate: () => {
       syncLeaderboardAndOverlays().catch((err) => {
@@ -508,30 +661,24 @@ async function main() {
     console.error('[sync] Nieobsluzony blad w syncLeaderboardAndOverlays (start):', err);
   }
   kickChat.connect();
+  realtime.polacz();
 
   ui = new UI(economy, {
     onReset: async () => {
       if (!remote.czyAdmin()) return;
-      economy.reset();
-      kickChat.reset();
-      kickUI.updateKliksCount(0);
-      workerOverlays.clear();
-      workerManager.clear();
-      vanessa.reset();
-      boss.reset();
-      await machine.setTier(0);
-      try {
-        await syncLeaderboardAndOverlays();
-      } catch (err) {
-        console.error('[sync] Nieobsluzony blad w syncLeaderboardAndOverlays (onReset):', err);
-      }
+      await resetLokalny();
       // Reset kasuje takze stan na serwerze - inaczej po odswiezeniu strony
-      // wrocilby stary zapis z KV.
+      // wrocilby stary zapis z KV. Natychmiastowy zapis nowego stanu sprawia,
+      // ze karty widzow zobacza zmieniona epoke przy najblizszej synchronizacji
+      // i tez wyczyszcza u siebie plansze (patrz synchronizujZSerwera).
       if (remote.czyOnline() && remote.czyAdmin()) {
         await remote.wyczysc();
       }
       save();
-      zapiszNaSerwer(true);
+      await zapiszNaSerwer(true);
+      // Natychmiastowa informacja dla widzow kanalem realtime - nie czekaja
+      // na zmiane epokaStartu w kolejnym snapshocie/odpytywaniu.
+      realtime.wyslijZdarzenie('reset', {});
     },
   });
 
@@ -546,14 +693,25 @@ async function main() {
   }
 
   machine.onClickHit = (point) => {
-    // Klik streamera bezposrednio w model 3D - dolicza kase do wspolnej puli,
-    // ale NIE liczy sie do progu awansu tieru (ten napedza wylacznie czat).
-    const { value, isCrit } = economy.performClick(performance.now(), false);
+    // Klik streamera bezposrednio w model 3D - dolicza kase do wspolnej puli
+    // ORAZ liczy sie do progu awansu tieru, dokladnie tak samo jak klik z
+    // czatu. Krytyk zostaje losowany lokalnie (brak wiadomosci czatu, wiec
+    // brak msgId do zakotwiczenia) - to nieszkodliwe, bo karta wlasciciela
+    // jest autorytetem i rozsyla wynik widzom kanalem realtime.
+    const { value, isCrit, tierAdvanced } = economy.performClick(performance.now(), true);
     audio.play('klik-gracz');
     if (isCrit) audio.play('kryt');
     coinPool.burst(point, value);
     const text = isCrit ? `KRYT! +${fmtShort(value)}` : `+${fmtShort(value)}`;
     projectAndFloat(point, text, { crit: isCrit });
+
+    // Widzowie dostaja klik wlasciciela natychmiast, tak samo jak klik z czatu.
+    if (remote.czyAdmin()) {
+      realtime.wyslijZdarzenie('klik', { nick: null, wartosc: value, isCrit });
+    }
+    obsluzAwansTieru(tierAdvanced).catch((err) =>
+      console.error('[klik-gracz] Blad awansu tieru:', err),
+    );
   };
 
   // Ekspozycja do debugowania/weryfikacji w konsoli przeglądarki.
@@ -573,6 +731,10 @@ async function main() {
     workerOverlays,
     vanessaLogUI,
     syncLeaderboardAndOverlays,
+    synchronizujZSerwera,
+    resetLokalny,
+    remote,
+    realtime,
     save,
     scene,
     camera,
@@ -623,8 +785,21 @@ async function main() {
   animate();
 
   setInterval(save, 5000);
-  // Widzowie (bez hasla admina) co 10 s dociagaja stan prowadzony przez admina.
+  // Wlasciciel: snapshot kanalem realtime co 2 s (dodatkowo do zapisu w KV co
+  // 5 s - patrz zapiszNaSerwer). No-op, gdy ta karta nie jest hostem albo
+  // polaczenie realtime jest akurat zerwane (patrz Realtime.wyslijSnapshot).
   setInterval(() => {
+    if (remote.czyAdmin() && realtime.czyPolaczony()) {
+      realtime.wyslijSnapshot(zbierzStan());
+    }
+  }, 2000);
+  // Widzowie (bez hasla admina) co 10 s dociagaja stan prowadzony przez admina -
+  // ZAPASOWO, tylko gdy kanal realtime nie dziala albo host jest offline. Gdy
+  // realtime dziala, snapshoty przychodza juz co 2 s pushem - podwojne
+  // odpytywanie KV byloby zbedne (i to wlasnie ono mialo generowac koszt
+  // rosnacy z widownia, patrz diagnoza w opisie zadania).
+  setInterval(() => {
+    if (!remote.czyAdmin() && realtimeHostOnline) return;
     synchronizujZSerwera().catch((err) => console.warn('[stan] Blad synchronizacji:', err));
   }, 10000);
   document.addEventListener('visibilitychange', () => {

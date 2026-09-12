@@ -62,7 +62,12 @@ function defaultState() {
   return {
     money: 0, // wspolna pula czatu (nie portfel gracza!)
     totalEarned: 0, // suma wszystkiego, co kiedykolwiek wplynelo do puli
-    totalChatClicks: 0, // laczna liczba klikniec "klik" z czatu - napedza awans tieru
+    // Laczna liczba klikniec liczacych sie do awansu tieru: komendy "klik" z
+    // czatu ORAZ klikniecia wlasciciela myszka w model. Nazwa pola jest
+    // historyczna (kiedys liczyl sie sam czat) - zostaje, bo siedzi w
+    // zapisanym stanie w localStorage i w KV, a przemianowanie wymagaloby
+    // migracji zapisow bez zadnego zysku.
+    totalChatClicks: 0,
     machineTier: 0,
     bossesDefeated: [], // numery tierow, dla ktorych boss zostal juz pokonany (anty-powtorka)
     // Wspolne ziarno calej rozgrywki - wylosowane RAZ (tu albo przy resecie) i
