@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { fmt } from './format.js';
+import { wezlyZTrescia } from './kick.js';
 
 const NARROW_SCREEN_BREAKPOINT = 700;
 
@@ -301,7 +302,10 @@ export class KickUI {
 
     const textSpan = document.createElement('span');
     textSpan.className = 'text';
-    textSpan.textContent = ' ' + msg.content;
+    textSpan.appendChild(document.createTextNode(' '));
+    for (const node of wezlyZTrescia(msg.content)) {
+      textSpan.appendChild(node);
+    }
     div.appendChild(textSpan);
 
     this.messagesEl.appendChild(div);
@@ -509,7 +513,7 @@ export class WorkerOverlayManager {
     if (!clean) return;
 
     const item = this._getOrCreate(workerIndex);
-    item.bubbleEl.textContent = clean;
+    item.bubbleEl.replaceChildren(...wezlyZTrescia(clean, { maxEmotek: 3 }));
     item.bubbleEl.style.display = 'block';
     item.bubbleEl.classList.add('active');
 

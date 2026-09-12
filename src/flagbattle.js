@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { COUNTRIES, COUNTRY_CODES, normalizeCountryName } from './countries.js';
+import { usunTagiEmotek } from './kick.js';
 import { loadForest } from './assets.js';
 import { strumien, losujZ } from './rng.js';
 
@@ -636,7 +637,7 @@ export class FlagBattleManager {
     const player = this.players.find(p => p.username.toLowerCase() === username.toLowerCase());
     if (!player) return; // Tylko gracze na polu mogą odpowiadać
     
-    const ans = normalizeCountryName(content);
+    const ans = normalizeCountryName(usunTagiEmotek(content));
     const expected = normalizeCountryName(COUNTRIES[this.currentFlag]);
     
     if (ans === expected || ans.includes(expected)) {

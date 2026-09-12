@@ -390,6 +390,11 @@ html, body {
   transition: opacity 0.2s ease, transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
 }
 
+.worker-bubble .kick-emote {
+  height: 1.2em;
+  vertical-align: middle;
+}
+
 .worker-bubble::after {
   content: '';
   position: absolute;
@@ -762,6 +767,11 @@ html, body {
 .kick-msg .user {
   font-weight: 700;
   margin-right: 4px;
+}
+
+.kick-msg .kick-emote {
+  height: 1.4em;
+  vertical-align: middle;
 }
 
 .kick-msg-klik {

@@ -5,7 +5,7 @@ import { fmtShort } from './format.js';
 import { normalizePolish } from './vanessa.js';
 import { showBossNotification } from './ui.js';
 import { BossAttackFx } from './bossattack.js';
-import { normalizeNick } from './kick.js';
+import { normalizeNick, usunTagiEmotek } from './kick.js';
 import { audio } from './audio.js';
 import { strumien, losujInt, losujZ } from './rng.js';
 
@@ -852,6 +852,12 @@ export class BossManager {
   /** Wywolywane z main.js z kazdej wiadomosci na czacie (odpowiedzi + "pomoc"). */
   onChatMessage(username, content, color) {
     if (this.state !== 'FIGHT' || !username || !content) return;
+
+    // Tagi emotek [emote:ID:NAZWA] usuwamy PRZED jakimkolwiek porownaniem -
+    // inaczej cyfry z ID emotki (np. "39262") mogłyby przypadkiem trafic w
+    // wynik dzialania po wyciecu nie-cyfrowych znakow ponizej.
+    content = usunTagiEmotek(content);
+    if (!content) return;
 
     // Ratunek dla omdlonego
     const norm = normalizePolish(content);

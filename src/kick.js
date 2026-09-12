@@ -40,6 +40,76 @@ export function normalizeNick(username) {
   return stripNickPrefix(username).toLowerCase();
 }
 
+// [emote:ID:NAZWA] - ID MUSI byc \d+, bo leci prosto do URL-a, a tresc czatu
+// jest niezaufana; dowolny znak pozwolilby podmienic adres obrazka.
+const RE_EMOTE = /\[emote:(\d+):([^\]]*)\]/g;
+
+/**
+ * Rozbija tresc wiadomosci czatu na tablice wezlow DOM: tekst jako
+ * text node, tagi emotek [emote:ID:NAZWA] jako <img>. Adres obrazka to
+ * stale URL Kicka (files.kick.com/emotes/<ID>/fullsize) - nie trzeba
+ * pobierac zadnej listy emotek ani wolac API.
+ *
+ * maxEmotek (opcjonalne) ogranicza liczbe RENDEROWANYCH obrazkow - po
+ * przekroczeniu limitu kolejne tagi leca jako zwykly tekst ":NAZWA:",
+ * zeby spam z dziesiatkami emotek nie rozsadzil np. dymka nad glowa.
+ */
+export function wezlyZTrescia(tresc, { maxEmotek } = {}) {
+  const wynik = [];
+  const surowa = String(tresc || '');
+  let lastIndex = 0;
+  let liczbaEmotek = 0;
+
+  // Uzywamy matchAll (swiezy iterator, wlasny stan lastIndex) zamiast
+  // RE_EMOTE.test()/exec() w petli na dzielonym module-level regexie -
+  // to klasyczny bug, gdzie zapomniany/przeterminowany lastIndex gubi
+  // dopasowania przy kolejnych wywolaniach.
+  for (const dopasowanie of surowa.matchAll(RE_EMOTE)) {
+    const [pelny, id, nazwa] = dopasowanie;
+    const indeks = dopasowanie.index;
+
+    if (indeks > lastIndex) {
+      wynik.push(document.createTextNode(surowa.slice(lastIndex, indeks)));
+    }
+
+    if (maxEmotek == null || liczbaEmotek < maxEmotek) {
+      const img = document.createElement('img');
+      img.className = 'kick-emote';
+      img.src = `https://files.kick.com/emotes/${id}/fullsize`;
+      img.alt = nazwa;
+      img.loading = 'lazy';
+      wynik.push(img);
+      liczbaEmotek += 1;
+    } else {
+      wynik.push(document.createTextNode(`:${nazwa}:`));
+    }
+
+    lastIndex = indeks + pelny.length;
+  }
+
+  if (lastIndex < surowa.length) {
+    wynik.push(document.createTextNode(surowa.slice(lastIndex)));
+  }
+
+  return wynik;
+}
+
+/**
+ * Usuwa tagi [emote:ID:NAZWA] z tresci wiadomosci, zbija wielokrotne
+ * spacje i przycina brzegi. Uzywane wszedzie tam, gdzie tresc czatu jest
+ * POROWNYWANA (odpowiedzi flagbattle/boss) - surowy tag rozjezdzalby
+ * dopasowanie.
+ */
+export function usunTagiEmotek(tresc) {
+  return String(tresc || '')
+    // Spacja, nie pusty string: emotka bywa jedynym separatorem miedzy
+    // slowami ("tak[emote:1:x]nie"), a sklejenie ich zepsulo by dopasowanie.
+    // Podwojne spacje zbija nastepna linia.
+    .replace(/\[emote:(\d+):([^\]]*)\]/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
 export class KickChatClient {
   constructor(options = {}) {
     this.chatroomId = options.chatroomId || DEFAULT_CHATROOM_ID;
