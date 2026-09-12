@@ -154,8 +154,8 @@ mini-characters) + `character-male-f`, złożone w jedną grupę i wyskalowane
   Wzory pól też nie są losowe: cztery stałe układy (krzyż, przekątne, pierścień,
   brzegi - `WZORY_RAKIET` w `src/boss.js`) idą cyklicznie po kolei, więc widzowie
   mogą się ich nauczyć i świadomie uciekać.
-- **Omdlenia - atak na pole**: co 12-22 s boss bierze na cel **jedno pole**
-  (pole lidera rankingu stojącego na planszy - też bez losowania), oznacza je na
+- **Omdlenia - atak na pole**: co 12-22 s boss bierze na cel **losowe pole**
+  areny (pomijany jest tylko środek, gdzie stoi bankomat), oznacza je na
   zielono na 1,9 s, po czym pluje na nie pociskiem. W chwili uderzenia omdlewa
   każdy, kto na tym polu stoi; kto zdążył odejść komendą ruchu, jest bezpieczny
   (w feedzie pojawia się wtedy "PUDŁO!"). Omdlały leży, plakietka dostaje 💤,
@@ -163,6 +163,14 @@ mini-characters) + `character-male-f`, złożone w jedną grupę i wyskalowane
   Ratunek: inny widz pisze `pomoc` (lub `!pomoc`, wielkość liter/polskie znaki
   bez znaczenia) - podnosi najdłużej leżącą osobę. Po pokonaniu bossa wszyscy
   omdleni są automatycznie ocucani.
+- **Animacje bossa**: boss siedzi w wózku, więc klipy dla postaci stojącej
+  (`emote-no`, `pick-up`, `holding-right-shoot`, `die`) wyglądały źle - nogi
+  wymachiwały, a tułów wychodził z fotela. Bazą jest teraz zawsze
+  `wheelchair-sit`, a reakcje (szarpnięcie po trafieniu, zgięcie przy
+  wymiotach, podniesienie ręki z wyrzutnikiem, osunięcie się po śmierci) są
+  liczone po kościach i nakładane PO `mixer.update()`. Orientacja lufy jest
+  wymuszana w układzie świata, więc przy strzale zawsze celuje pionowo w górę.
+  W bezczynności boss co kilka sekund rozgląda się klipami `wheelchair-look-*`.
 - Efekty obu ataków (znaczniki pól, pociski, rakiety, kałuże, dym) żyją w
   `src/bossattack.js`; modele wyrzutnika, rakiety i dymu pochodzą z
   `kenney_blaster-kit` i leżą w `assets/blaster/` (własny `colormap.png`).

@@ -75,6 +75,12 @@ const CAM_KINO_TARGET = new THREE.Vector3(0, 0.65, 0.1);
 
 const LOG_LIMIT = 300;
 
+// Pomocnicze obiekty do wymuszania orientacji wyrzutnika - liczone co klatke,
+// wiec nie alokujemy ich w petli.
+const _osX = new THREE.Vector3(1, 0, 0);
+const _qRodzica = new THREE.Quaternion();
+const _qCel = new THREE.Quaternion();
+
 function randInt(min, max) {
   return Math.floor(min + Math.random() * (max - min + 1));
 }
@@ -192,6 +198,9 @@ export class BossManager {
     this.bronObj = null; // wyrzutnik doczepiony do reki bossa na czas salwy
     this._wzorRakiet = 0; // indeks kolejnego wzoru - rosnie o 1, bez losowania
     this._timeryAtakow = []; // aktywne timery atakow - anulowane przy koncu walki
+    this.kosci = null;
+    this._poza = null; // { typ, t, czas } - reczna poza nakladana na wheelchair-sit
+    this._idleTimer = 6 + Math.random() * 4; // co jakis czas boss rozglada sie na boki
 
     this._headWorld = new THREE.Vector3();
     this._projected = new THREE.Vector3();
@@ -361,6 +370,78 @@ export class BossManager {
     this.titleSubEl = titleSub;
   }
 
+  /**
+   * Wlacza reczna poze nakladana na klip wheelchair-sit. Pozy sa liczone
+   * po kosciach ZA kazdym update() miksera, wiec nie walcza z animacja bazowa.
+   */
+  _ustawPoze(typ, czas) {
+    this._poza = { typ, t: 0, czas };
+  }
+
+  /** Nakladanie recznej pozy na kosci - wolane PO mixer.update(). */
+  _aktualizujPoze(delta) {
+    if (!this.kosci) return;
+    const { torso, head, armRight, armLeft } = this.kosci;
+    if (!this._poza) return;
+
+    this._poza.t += delta;
+    const p = this._poza;
+    const u = p.czas > 0 ? Math.min(1, p.t / p.czas) : 1;
+
+    if (p.typ === 'trafienie') {
+      // Szarpniecie do tylu po trafieniu poprawna odpowiedzia
+      const a = Math.sin(Math.PI * u) * 0.42;
+      if (torso) torso.rotation.x -= a;
+      if (head) head.rotation.x -= a * 0.7;
+      if (armLeft) armLeft.rotation.x -= a * 0.5;
+      if (armRight) armRight.rotation.x -= a * 0.5;
+    } else if (p.typ === 'wymioty') {
+      // Zamach do tylu, gwaltowne zgiecie do przodu, powolny powrot
+      let a;
+      if (u < 0.25) a = -0.35 * (u / 0.25);
+      else if (u < 0.45) a = -0.35 + 1.45 * ((u - 0.25) / 0.2);
+      else if (u < 0.75) a = 1.1;
+      else a = 1.1 * (1 - (u - 0.75) / 0.25);
+      if (torso) torso.rotation.x += a;
+      if (head) head.rotation.x += a * 0.55;
+      if (armLeft) armLeft.rotation.x += a * 0.3;
+      if (armRight) armRight.rotation.x += a * 0.3;
+    } else if (p.typ === 'strzal') {
+      // Reka z wyrzutnikiem idzie w gore, potem odrzut
+      const podniesienie = u < 0.3 ? u / 0.3 : 1;
+      const odrzut = u > 0.45 && u < 0.65 ? Math.sin(Math.PI * ((u - 0.45) / 0.2)) : 0;
+      if (armRight) armRight.rotation.x -= podniesienie * 2.0 + odrzut * 0.35;
+      if (torso) torso.rotation.x -= odrzut * 0.25;
+      if (head) head.rotation.x -= podniesienie * 0.45;
+      // Sam obrot kosci reki nie ustawia lufy w niebo - model wyrzutnika ma
+      // wlasna orientacje, a kosc dodatkowo obraca sie w trakcie odrzutu.
+      // Dlatego orientacje broni wymuszamy wprost w ukladzie SWIATA: os +Z
+      // modelu (lufa) ma pokrywac sie z pionem, z niewielkim odchyleniem
+      // w czasie odrzutu.
+      if (this.bronObj && this.bronObj.parent) {
+        const rodzic = this.bronObj.parent;
+        rodzic.updateWorldMatrix(true, false);
+        rodzic.getWorldQuaternion(_qRodzica);
+        _qCel.setFromAxisAngle(_osX, -Math.PI / 2 + odrzut * 0.3);
+        this.bronObj.quaternion.copy(_qRodzica.invert().multiply(_qCel));
+      }
+    } else if (p.typ === 'smierc') {
+      // Bezwladne osuniecie sie w fotelu - trwa do konca
+      const a = Math.min(1, p.t / 1.2);
+      if (torso) {
+        torso.rotation.x += a * 0.75;
+        torso.rotation.z += a * 0.3;
+      }
+      if (head) head.rotation.x += a * 0.6;
+      if (armLeft) armLeft.rotation.x += a * 0.9;
+      if (armRight) armRight.rotation.x += a * 0.9;
+    }
+
+    if (p.typ !== 'smierc' && u >= 1) {
+      this._poza = null;
+    }
+  }
+
   playAction(name, opts = {}) {
     const clip = THREE.AnimationClip.findByName(this.animations, name);
     if (!clip || !this.mixer) return null;
@@ -460,6 +541,16 @@ export class BossManager {
 
     this.model = group;
     this.charObj = char;
+    // Kosci rigu Kenneya - poza bossa jest sterowana recznie NA WIERZCHU klipu
+    // wheelchair-sit (patrz _aktualizujPoze). Klipy dla postaci stojacej
+    // (emote-no, pick-up, holding-right-shoot, die) wygladaly zle na kims, kto
+    // siedzi w wozku - nogi wymachiwaly, a tulow wychodzil z fotela.
+    this.kosci = {
+      torso: char.getObjectByName('torso'),
+      head: char.getObjectByName('head'),
+      armRight: char.getObjectByName('arm-right'),
+      armLeft: char.getObjectByName('arm-left'),
+    };
     this.mixer = new THREE.AnimationMixer(char);
     this.currentAction = null;
 
@@ -511,6 +602,9 @@ export class BossManager {
     if (this.state === 'IDLE') return;
 
     if (this.mixer) this.mixer.update(delta);
+    // Reczna poza MUSI byc nakladana po mikserze - inaczej nastepna klatka
+    // animacji bazowej nadpisalaby ja w calosci.
+    this._aktualizujPoze(delta);
     this.fx.update(delta);
 
     if (this.state === 'CUTSCENE') {
@@ -660,6 +754,17 @@ export class BossManager {
       }
     }
 
+    // Bezczynnosc: co kilka sekund boss rozglada sie na boki. Uzywamy WYLACZNIE
+    // klipow z rodziny wheelchair-*, bo tylko one sa animowane dla postaci
+    // siedzacej w wozku.
+    this._idleTimer -= delta;
+    if (this._idleTimer <= 0) {
+      this._idleTimer = 6 + Math.random() * 5;
+      if (!this._poza) {
+        this.playAction(Math.random() < 0.5 ? 'wheelchair-look-left' : 'wheelchair-look-right', { once: true });
+      }
+    }
+
     // Atak obszarowy na pole - boss co jakis czas plunie na wybrane pole areny
     this.faintTimer -= delta;
     if (this.faintTimer <= 0) {
@@ -759,7 +864,7 @@ export class BossManager {
     if (this.model) {
       this.projectAndFloat(this._bossFloaterOrigin(), `✔ @${username}`, { crit: true, kick: true });
     }
-    this.playAction('emote-no', { once: true });
+    this._ustawPoze('trafienie', 0.45);
     this._shakeBossOnce();
 
     showBossNotification(
@@ -875,25 +980,19 @@ export class BossManager {
   }
 
   /**
-   * Wybor pola pod atak "wymiotow" - BEZ losowania: boss bierze na cel pole
-   * lidera rankingu, ktory stoi na planszy i nie jest omdlaly. Gdy nie ma kogo
-   * scigac, pluje na pole przed soba.
+   * Wybor pola pod atak "wymiotow" - LOSOWE pole areny za kazdym razem.
+   * Pomijamy tylko srodek (0,0), bo tam stoi bankomat i nikt tam nie wejdzie.
+   * Losowosc nie czyni ataku niesprawiedliwym: pole jest oznaczane znacznikiem
+   * na VOMIT_OSTRZEZENIE sekund przed uderzeniem, wiec kazdy ma czas odejsc.
    */
   _wybierzPoleAtaku() {
-    if (this.workerManager && this.kickChat) {
-      for (const u of this.kickChat.getTopEarners(10)) {
-        if (this.faintedMap.has(normalizeNick(u.username))) continue;
-        const slot = this.kickChat.getWorkerForUser(u.username);
-        if (slot === null) continue;
-        const e = this.workerManager.getWorkerType(slot);
-        if (!e || !e.obj) continue;
-        const gx = Number(e.isMoving ? e.targetGridX : e.gridX);
-        const gz = Number(e.isMoving ? e.targetGridZ : e.gridZ);
-        if (gx === 0 && gz === 0) continue;
-        return { x: gx, z: gz };
-      }
-    }
-    return { x: 0, z: 2 };
+    let x = 0;
+    let z = 0;
+    do {
+      x = randInt(-3, 3);
+      z = randInt(-3, 3);
+    } while (x === 0 && z === 0);
+    return { x, z };
   }
 
   /** Rejestruje timer ataku, zeby dalo sie go anulowac przy koncu walki. */
@@ -924,7 +1023,7 @@ export class BossManager {
 
     this._timerAtaku(() => {
       // Pochylenie do przodu - najblizszy "wymiotom" klip w rigu Kenneya.
-      this.playAction('pick-up', { once: true });
+      this._ustawPoze('wymioty', 1.25);
       const start = this.model.position.clone();
       start.y += 1.7;
       this.fx.wystrzelPocisk(start, cel.x, cel.z, VOMIT_LOT, () => this._onVomitImpact(cel.x, cel.z));
@@ -957,7 +1056,7 @@ export class BossManager {
     this._wzorRakiet += 1;
 
     this._zalozBron();
-    this.playAction('holding-right-shoot', { once: true });
+    this._ustawPoze('strzal', 1.5);
     audio.play('boss-zabija');
 
     for (const [x, z] of wzor) {
@@ -1149,7 +1248,10 @@ export class BossManager {
     this.interDelay = 0;
     if (this.bubbleEl) this.bubbleEl.style.display = 'none';
 
-    this.playAction('die', { once: true, hard: true });
+    // Boss siedzi w wozku - klip "die" (dla postaci stojacej) wygladal tu zle.
+    // Zamiast niego bezwladne osuniecie sie w fotelu na kosciach.
+    this.playAction('wheelchair-sit', { hard: true });
+    this._ustawPoze('smierc', 0);
     this._victoryT = 0;
 
     this._wakeAllFainted();
