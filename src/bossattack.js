@@ -99,12 +99,22 @@ export class BossAttackFx {
   /**
    * Znacznik pola. `czas` to czas ostrzegania w sekundach; znacznik pulsuje i
    * gasnie razem z odliczaniem, wiec widac, ile zostalo do uderzenia.
+   *
+   * `pulsRadNaSek` (opcjonalny) - tempo pulsu w rad/s liczone z CZASU
+   * BEZWZGLEDNEGO (wiek znacznika), zamiast domyslnego wzoru liczonego z
+   * ULAMKA POZOSTALEGO ZYCIA (patrz update() nizej). Bez tego argumentu
+   * znaczniki zachowuja sie DOKLADNIE jak przed dodaniem tego parametru -
+   * boss 1 (rownania) go nie podaje i jego znaczniki maja byc bit w bit
+   * takie same. Kowal_88 podaje ten parametr, bo jego znaczniki zyja 20 s i
+   * przy starym wzorze puls byl ok. 8x wolniejszy niz u bossa 1 (zmierzone,
+   * patrz zadanie wlasciciela) - z bezwzglednym tempem czestotliwosc pulsu
+   * nie zalezy juz od tego, jak dlugo znacznik ma jeszcze zyc.
    */
-  oznaczPole(x, z, kolor, czas) {
+  oznaczPole(x, z, kolor, czas, pulsRadNaSek) {
     const obj = makeMarker(kolor);
     obj.position.set(x, MARKER_Y, z);
     this.scene.add(obj);
-    const wpis = { obj, zostalo: czas, calosc: czas };
+    const wpis = { obj, zostalo: czas, calosc: czas, wiek: 0, pulsRadNaSek: pulsRadNaSek || null };
     this.znaczniki.push(wpis);
     return wpis;
   }
@@ -227,8 +237,14 @@ export class BossAttackFx {
     for (let i = this.znaczniki.length - 1; i >= 0; i--) {
       const z = this.znaczniki[i];
       z.zostalo -= delta;
+      z.wiek += delta;
       const post = Math.max(0, z.zostalo / z.calosc);
-      const puls = 0.92 + 0.12 * Math.sin((1 - post) * 26);
+      // Bez pulsRadNaSek: wzor sprzed poprawki, nietkniety (boss 1 ma
+      // wygladac identycznie jak dzis). Z pulsRadNaSek: czas bezwzgledny,
+      // wiec czestotliwosc pulsu nie zalezy od czasu zycia znacznika.
+      const puls = z.pulsRadNaSek
+        ? 0.92 + 0.12 * Math.sin(z.wiek * z.pulsRadNaSek)
+        : 0.92 + 0.12 * Math.sin((1 - post) * 26);
       z.obj.scale.set(puls, puls, 1);
       const pierscien = z.obj.userData.pierscien;
       const wypelnienie = z.obj.userData.wypelnienie;

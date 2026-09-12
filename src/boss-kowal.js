@@ -35,8 +35,16 @@ for (let x = -2; x <= 2; x++) {
 
 const CYKL_RUCHU = 5.0; // sekund na cala zmiane pola (podswietlenie + marsz)
 const CZAS_MARSZU = 2.2; // ostatnia czesc cyklu to faktyczny, powolny marsz
-const KOLOR_CEL = 0xffb347; // pole, na ktore Kowal zaraz wejdzie
+const KOLOR_CEL = 0xff2d2d; // pole, na ktore Kowal zaraz wejdzie - czerwone, zeby bylo wyraznie widac
 const KOLOR_OKRAZENIE = 0x2fb4ff; // niebieskie pola fazy okrazania
+
+// Tempo pulsu (rad/s, czas bezwzgledny - patrz oznaczPole w bossattack.js) dla
+// obu rodzajow znacznikow Kowala. ~1.75 pelnego cyklu/s (2*PI*1.75 ~ 11) -
+// wyraznie szybszy niz stary wzor liczony z ulamka zycia, ktory na
+// znacznikach 20-sekundowych (okrazenie) dawal puls ok. 8x wolniejszy niz u
+// bossa 1 (zmierzone, patrz zadanie wlasciciela). Boss 1 NIE dostaje tego
+// parametru - jego znaczniki maja zostac bit w bit takie jak dzis.
+const PULS_KOWAL_RAD_S = 11;
 
 // Teksty dymkow - DOKLADNIE te, bez zmian (wymaganie zadania).
 const DYMKI = [
@@ -49,6 +57,7 @@ const PRZYROST_PRZECIAZENIA = 2.5; // % za kazda wiadomosc na czacie
 const OPADANIE_PRZECIAZENIA = 0.8; // %/s, dopoki pasek < 100
 const OKNO_OKRAZENIA = 20.0; // sekund na dokonczenie fazy okrazania
 const OBRAZENIA_OKRAZENIA = 25;
+const NAGRODA_OKRAZENIA = 10; // zl dla kazdego gracza na niebieskim polu przy udanym okrazeniu
 
 const LINA_WYSOKOSC = 6.0; // wysokosc, z ktorej Kowal zjezdza na linie
 const LINA_CZAS = 1.8; // sekund zjazdu
@@ -89,6 +98,11 @@ export class BossKowal {
     this.okrazenieT = 0;
     this._poleOkrazenia = [];
     this._znacznikiOkrazenia = [];
+    // Ustawiane, gdy pasek dobije do 100% W TRAKCIE MARSZU (patrz
+    // onChatMessage/_onWejscieNaPole) - trzyma decyzje "wejdz w OKRAZENIE" do
+    // chwili, gdy krok sie dokonczy i this.x/this.z znowu odpowiadaja polu,
+    // na ktorym model faktycznie stoi (diagnoza bledu z zadania wlasciciela).
+    this._okrazenieOczekuje = false;
   }
 
   // ================= BUDOWA MODELU =================
@@ -273,7 +287,7 @@ export class BossKowal {
       this.boss.fx.usunZnacznik(this._znacznikCelu);
       this._znacznikCelu = null;
     }
-    this._znacznikCelu = this.boss.fx.oznaczPole(this.celX, this.celZ, KOLOR_CEL, CYKL_RUCHU);
+    this._znacznikCelu = this.boss.fx.oznaczPole(this.celX, this.celZ, KOLOR_CEL, CYKL_RUCHU, PULS_KOWAL_RAD_S);
     this.boss._log('info', `Kowal_88 bierze na cel pole [${this.celX}, ${this.celZ}]`, { pole: [this.celX, this.celZ] });
   }
 
@@ -314,7 +328,17 @@ export class BossKowal {
       const nick = this.boss._userForWorker(entry);
       if (nick) this.boss._killUser(nick, { source: 'kowal' });
     }
-    this._rozpocznijNowyCykl();
+    if (this._okrazenieOczekuje) {
+      // Krok sie wlasnie dokonczyl - this.x/this.z sa TERAZ rowne polu, na
+      // ktorym model faktycznie stoi (ustawione dwie linijki wyzej), wiec
+      // dopiero teraz _sasiednie() w _rozpocznijOkrazenie() policzy 4 pola
+      // okrazania wokol prawdziwej pozycji, a nie tej sprzed marszu (patrz
+      // onChatMessage i zadanie wlasciciela - zmierzony bug zamrozonego
+      // modelu miedzy polami).
+      this._rozpocznijOkrazenie();
+    } else {
+      this._rozpocznijNowyCykl();
+    }
   }
 
   // ================= DYMKI NAD GLOWA =================
@@ -345,8 +369,25 @@ export class BossKowal {
   onChatMessage(username, content) {
     if (this.faza !== 'RUCH') return;
     this.przeciazenie = Math.min(100, this.przeciazenie + PRZYROST_PRZECIAZENIA);
+    if (this._okrazenieOczekuje || this.przeciazenie < 100) return;
     const jestemHostem = !this.boss.czyNaliczanieDozwolone || this.boss.czyNaliczanieDozwolone();
-    if (this.przeciazenie >= 100 && jestemHostem) this._rozpocznijOkrazenie();
+    if (!jestemHostem) return;
+    const startMarszu = CYKL_RUCHU - CZAS_MARSZU;
+    if (this.cykl >= startMarszu) {
+      // Pasek dobil w TRAKCIE MARSZU - this.x/this.z sa dalej rowne polu
+      // STARTOWEMU (aktualizacja dopiero w _onWejscieNaPole), a model stoi
+      // gdzies w polowie drogi do celu. Wejscie w OKRAZENIE teraz policzyloby
+      // 4 sasiednie pola z bledngo (opuszczanego) pola - zmierzony bug z
+      // zadania wlasciciela. Zamiast przerywac krok w polowie, czekamy do
+      // _onWejscieNaPole (najwyzej CZAS_MARSZU, czyli max 2.2 s), gdzie
+      // this.x/this.z beda juz rowne polu, na ktorym model faktycznie stoi.
+      this._okrazenieOczekuje = true;
+    } else {
+      // Poza marszem (podswietlenie pola docelowego) model juz stoi
+      // dokladnie na this.x/this.z - mozna wejsc w OKRAZENIE od razu, jak
+      // dotychczas.
+      this._rozpocznijOkrazenie();
+    }
   }
 
   _sasiednie() {
@@ -359,6 +400,7 @@ export class BossKowal {
   }
 
   _rozpocznijOkrazenie() {
+    this._okrazenieOczekuje = false;
     this.faza = 'OKRAZENIE';
     this.okrazenieT = OKNO_OKRAZENIA;
     if (this._znacznikCelu) {
@@ -366,7 +408,7 @@ export class BossKowal {
       this._znacznikCelu = null;
     }
     this._poleOkrazenia = this._sasiednie();
-    this._znacznikiOkrazenia = this._poleOkrazenia.map(([x, z]) => this.boss.fx.oznaczPole(x, z, KOLOR_OKRAZENIE, OKNO_OKRAZENIA));
+    this._znacznikiOkrazenia = this._poleOkrazenia.map(([x, z]) => this.boss.fx.oznaczPole(x, z, KOLOR_OKRAZENIE, OKNO_OKRAZENIA, PULS_KOWAL_RAD_S));
     this.playAction('static') || this.playAction('idle');
     showBossNotification(
       'boss',
@@ -378,6 +420,7 @@ export class BossKowal {
 
   /** Wersja bez logow/powiadomien - dopasowanie widza dolaczajacego w trakcie fazy (patrz applySync). */
   _rozpocznijOkrazenieLokalnie(okrazenieT) {
+    this._okrazenieOczekuje = false;
     this.faza = 'OKRAZENIE';
     this.okrazenieT = typeof okrazenieT === 'number' ? okrazenieT : OKNO_OKRAZENIA;
     if (this._znacznikCelu) {
@@ -385,7 +428,7 @@ export class BossKowal {
       this._znacznikCelu = null;
     }
     this._poleOkrazenia = this._sasiednie();
-    this._znacznikiOkrazenia = this._poleOkrazenia.map(([x, z]) => this.boss.fx.oznaczPole(x, z, KOLOR_OKRAZENIE, this.okrazenieT));
+    this._znacznikiOkrazenia = this._poleOkrazenia.map(([x, z]) => this.boss.fx.oznaczPole(x, z, KOLOR_OKRAZENIE, this.okrazenieT, PULS_KOWAL_RAD_S));
   }
 
   _wyczyscZnacznikiOkrazenia() {
@@ -409,18 +452,51 @@ export class BossKowal {
   }
 
   _zakonczOkrazenie(sukces) {
+    // Kopia PRZED czyszczeniem znacznikow - _wyczyscZnacznikiOkrazenia() zeruje
+    // this._poleOkrazenia, a nagroda ponizej potrzebuje tych 4 pol.
+    const poleOkrazenia = this._poleOkrazenia.slice();
     this._wyczyscZnacznikiOkrazenia();
     this.przeciazenie = 0;
     this.faza = 'RUCH';
     if (sukces) {
       audio.play('boss-trafienie');
       this.boss.damage(OBRAZENIA_OKRAZENIA);
+
+      // Nagroda 10 zl dla KAZDEGO gracza stojacego na ktoromkolwiek z 4
+      // niebieskich pol w chwili sukcesu - kazda osoba osobno (dwoje na
+      // jednym polu dostaje kazde po 10 zl), zbierane do zbioru nickow zeby
+      // ta sama osoba nie dostala dwa razy, gdyby stala na dwoch polach
+      // naraz. _zakonczOkrazenie jest wolane WYLACZNIE z _updateOkrazenie,
+      // ktora sama jest host-gated w update() - wiec to naliczenie jest
+      // rowniez bezpiecznie jednorazowe (dokladnie jak nagroda za trafienie
+      // bossa 1 w boss.js _onCorrectAnswer i jak zlota moneta w goldcoin.js).
+      const nagrodzeni = new Set();
+      for (const [x, z] of poleOkrazenia) {
+        const trafieni = this.boss._workersOnTile(x, z);
+        for (const entry of trafieni) {
+          const nick = this.boss._userForWorker(entry);
+          if (!nick || nagrodzeni.has(nick)) continue;
+          nagrodzeni.add(nick);
+          const user = this.boss.kickChat ? this.boss.kickChat.getUserForWorker(entry.typeIndex) : null;
+          const kolor = user ? user.color : undefined;
+          // countsAsClick=false - to nie jest komenda "klik" z czatu, wiec
+          // licznik klikniec widza w rankingu nie moze urosnac (wymaganie
+          // zadania, patrz tez goldcoin.js/_collectByWorker).
+          if (this.boss.kickChat) this.boss.kickChat.recordEarned(nick, NAGRODA_OKRAZENIA, kolor, false);
+          if (this.boss.economy) this.boss.economy.addMoney(NAGRODA_OKRAZENIA);
+          if (entry.obj && this.boss.projectAndFloat) {
+            const origin = entry.obj.position.clone().add(new THREE.Vector3(0, 1.6, 0));
+            this.boss.projectAndFloat(origin, `+${NAGRODA_OKRAZENIA} zł`, { gold: true });
+          }
+        }
+      }
+
       showBossNotification(
         'hit',
         '💥 OKRĄŻENIE UDANE!',
-        `Kowal_88 traci ${OBRAZENIA_OKRAZENIA} HP!`,
+        `Kowal_88 traci ${OBRAZENIA_OKRAZENIA} HP! Każdy na niebieskim polu dostaje ${NAGRODA_OKRAZENIA} zł!`,
       );
-      this.boss._log('good', `Faza okrazania udana - Kowal_88 traci ${OBRAZENIA_OKRAZENIA} HP`);
+      this.boss._log('good', `Faza okrazania udana - Kowal_88 traci ${OBRAZENIA_OKRAZENIA} HP, nagrodzeni: ${[...nagrodzeni].join(', ') || 'brak'}`);
     } else {
       showBossNotification(
         'help',
@@ -492,6 +568,11 @@ export class BossKowal {
       przeciazenie: this.przeciazenie,
       faza: this.faza,
       okrazenieT: this.okrazenieT,
+      // Patrz komentarz przy polu w konstruktorze i przy onChatMessage - bez
+      // synchronizacji tej flagi karta widza moglaby wejsc w faze OKRAZENIE w
+      // innym momencie niz host (jej wlasny _onWejscieNaPole odpala sie
+      // lokalnie i deterministycznie, wiec musi znac ta sama decyzje).
+      okrazenieOczekuje: this._okrazenieOczekuje,
     };
   }
 
@@ -504,6 +585,8 @@ export class BossKowal {
    */
   applySync(state) {
     if (!state) return;
+
+    if (typeof state.okrazenieOczekuje === 'boolean') this._okrazenieOczekuje = state.okrazenieOczekuje;
 
     if (typeof state.faza === 'string' && state.faza !== this.faza) {
       if (state.faza === 'OKRAZENIE') this._rozpocznijOkrazenieLokalnie(state.okrazenieT);
@@ -527,7 +610,7 @@ export class BossKowal {
         this._znacznikCelu = null;
       }
       if (this.faza === 'RUCH') {
-        this._znacznikCelu = this.boss.fx.oznaczPole(this.celX, this.celZ, KOLOR_CEL, Math.max(0.1, CYKL_RUCHU - this.cykl));
+        this._znacznikCelu = this.boss.fx.oznaczPole(this.celX, this.celZ, KOLOR_CEL, Math.max(0.1, CYKL_RUCHU - this.cykl), PULS_KOWAL_RAD_S);
       }
     }
   }
@@ -544,6 +627,7 @@ export class BossKowal {
     this.licznikPol = state && typeof state.licznikPol === 'number' ? state.licznikPol : 0;
     this.przeciazenie = state && typeof state.przeciazenie === 'number' ? state.przeciazenie : 0;
     this.faza = state && state.faza === 'OKRAZENIE' ? 'OKRAZENIE' : 'RUCH';
+    this._okrazenieOczekuje = !!(state && state.okrazenieOczekuje);
 
     if (this.model) {
       this.model.position.set(this.x, 0, this.z);
@@ -554,7 +638,7 @@ export class BossKowal {
     if (this.faza === 'OKRAZENIE') {
       this._rozpocznijOkrazenieLokalnie(state ? state.okrazenieT : OKNO_OKRAZENIA);
     } else {
-      this._znacznikCelu = this.boss.fx.oznaczPole(this.celX, this.celZ, KOLOR_CEL, Math.max(0.1, CYKL_RUCHU - this.cykl));
+      this._znacznikCelu = this.boss.fx.oznaczPole(this.celX, this.celZ, KOLOR_CEL, Math.max(0.1, CYKL_RUCHU - this.cykl), PULS_KOWAL_RAD_S);
     }
   }
 }
