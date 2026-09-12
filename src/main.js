@@ -100,6 +100,8 @@ async function main() {
   await goldCoin.init();
 
   const flagBattle = new FlagBattleManager(scene);
+  let flagBattleBledy = 0;
+  let flagBattleZepsuta = false;
 
   const vanessa = new VanessaManager(
     scene,
@@ -766,7 +768,36 @@ async function main() {
     console.error('[sync] Nieobsluzony blad w syncLeaderboardAndOverlays (start):', err);
   }
   kickChat.connect();
-  realtime.polacz();
+
+  // Przy uruchomieniu LOKALNYM nie tykamy produkcyjnego przekaznika.
+  //
+  // Powod jest powazny: lokalnie czyAdmin() zwraca true (patrz remote.js), wiec
+  // karta deweloperska laczyla sie do wss://bankomat-relay.onrender.com w roli
+  // HOSTA. Relay przy nowym hoscie rozlacza starego ("Nowy host przejmuje role"),
+  // wiec lokalne odpalenie gry z poprawnym haslem wyrzuciloby z przekaznika
+  // karte prowadzaca stream. Do tego produkcyjne snapshoty wpadalyby co 2 s do
+  // karty lokalnej, nadpisujac to, co sie wlasnie testuje.
+  //
+  // Wlacznik na zadanie: ?relay=1 w adresie albo
+  // localStorage['bankomat-clicker-relay-lokalnie'] = '1'.
+  function relayDozwolonyLokalnie() {
+    try {
+      if (new URLSearchParams(location.search).get('relay') === '1') return true;
+      return localStorage.getItem('bankomat-clicker-relay-lokalnie') === '1';
+    } catch (_) {
+      return false;
+    }
+  }
+
+  if (czyLokalnie() && !relayDozwolonyLokalnie()) {
+    console.info(
+      '[realtime] Uruchomienie lokalne - przekaznik wylaczony, zeby nie przejac roli hosta ' +
+      'od karty na produkcji. Wlacz swiadomie przez ?relay=1 albo ' +
+      "localStorage['bankomat-clicker-relay-lokalnie']='1'."
+    );
+  } else {
+    realtime.polacz();
+  }
 
   ui = new UI(economy, {
     onReset: async () => {
@@ -842,6 +873,7 @@ async function main() {
     resetLokalny,
     remote,
     realtime,
+    flagBattle,
     save,
     scene,
     camera,
@@ -865,7 +897,27 @@ async function main() {
     workerManager.update(delta);
     coinPool.update(delta);
     goldCoin.update(delta);
-    flagBattle.tick(delta);
+    // Minigra jest najmlodszym i najmniej sprawdzonym modulem, a tick() leci
+    // w petli klatek PRZED renderowaniem - wyjatek stad przerywal cala klatke
+    // razem z rysowaniem sceny i kladl gre na produkcji (patrz commit
+    // "Naprawa: minigra flag wywalala cala gre na produkcji"). Tamta naprawa
+    // usunela przyczyne, ale nie kruchosc. Teraz blad minigry degraduje
+    // WYLACZNIE minigre: po trzech bledach pod rzad przestajemy ja tykac,
+    // a gra leci dalej. Rdzen gry zostaje bez oslony celowo - tam bledy maja
+    // byc glosne.
+    if (!flagBattleZepsuta) {
+      try {
+        flagBattle.tick(delta);
+        flagBattleBledy = 0;
+      } catch (err) {
+        flagBattleBledy += 1;
+        console.error(`[flagi] Blad w tick() minigry (${flagBattleBledy}/3):`, err);
+        if (flagBattleBledy >= 3) {
+          flagBattleZepsuta = true;
+          console.error('[flagi] Minigra wylaczona po trzech bledach pod rzad - reszta gry dziala normalnie.');
+        }
+      }
+    }
     city.update(delta);
 
     // Brak dochodu pasywnego - zl powstaja WYLACZNIE z klikniec.
