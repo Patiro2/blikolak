@@ -133,7 +133,7 @@ export function makeDraggable(panelEl, handleEl, storageKey = null) {
   // Wysunięcie aktywnego okna na wierzch (z-index)
   const bringToFront = () => {
     let maxZ = 20;
-    document.querySelectorAll('#leaderboard-panel, #kick-panel').forEach((el) => {
+    document.querySelectorAll('#leaderboard-panel, #kick-panel, #kick-embed-panel').forEach((el) => {
       const z = parseInt(window.getComputedStyle(el).zIndex || '10', 10);
       if (!isNaN(z) && z > maxZ) maxZ = z;
     });
@@ -315,6 +315,78 @@ export class KickUI {
     }
 
     this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+  }
+}
+
+const KICK_EMBED_SRC = 'https://kick.com/popout/patiro/chat';
+const KICK_EMBED_COLLAPSED_KEY = 'bankomat-clicker-kick-embed-collapsed';
+
+/**
+ * Wbudowany, PISZACY czat Kicka (oficjalny popout w iframe) - w odroznieniu
+ * od #kick-panel (KickUI wyzej), ktory jest tylko-do-odczytu i pokazuje
+ * wiadomosci wciagniete do gry. Ten panel pozwala widzowi pisac na czacie
+ * bez przelaczania sie na kick.com.
+ *
+ * Iframe jest CROSS-ORIGIN (kick.com), wiec nie da sie odczytac ani ruszyc
+ * jego zawartosci z JS - i nie trzeba, to tylko osadzenie oficjalnego popoutu.
+ *
+ * src ustawiamy DOPIERO przy pierwszym rozwinieciu panelu (leniwe ladowanie) -
+ * czat Kicka ciagnie wlasny websocket i zasoby, a strona rownolegle startuje
+ * scene Three.js i wlasne polaczenie z czatem (kick.js). Ktos, kto nigdy nie
+ * otworzy panelu, nie powinien tego pobierac. Po pierwszym ustawieniu src juz
+ * go nie zerujemy przy zwijaniu - przeladowywanie czatu za kazdym zwinieciem
+ * byloby gorsze niz zostawienie go zaladowanego w tle.
+ */
+export class KickEmbedUI {
+  constructor() {
+    this.panel = document.getElementById('kick-embed-panel');
+    this.header = document.getElementById('kick-embed-header');
+    this.frame = document.getElementById('kick-embed-frame');
+    this.toggleBtn = document.getElementById('kick-embed-toggle-btn');
+
+    this._loaded = false;
+
+    this._restoreCollapsedState();
+    this._bindEvents();
+
+    if (this.panel && this.header) {
+      makeDraggable(this.panel, this.header, 'bankomat-clicker-kick-embed-pos');
+    }
+  }
+
+  _restoreCollapsedState() {
+    if (!this.panel || !this.toggleBtn) return;
+    let collapsed = true; // domyslnie zwiniety - patrz uzasadnienie w opisie klasy
+    try {
+      const saved = localStorage.getItem(KICK_EMBED_COLLAPSED_KEY);
+      if (saved !== null) collapsed = saved === '1';
+    } catch (_) {}
+
+    this.panel.classList.toggle('collapsed', collapsed);
+    this.toggleBtn.textContent = collapsed ? '+' : '–';
+
+    if (!collapsed) this._ensureLoaded();
+  }
+
+  _bindEvents() {
+    if (!this.toggleBtn || !this.panel) return;
+    this.toggleBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const collapsed = this.panel.classList.toggle('collapsed');
+      this.toggleBtn.textContent = collapsed ? '+' : '–';
+
+      try {
+        localStorage.setItem(KICK_EMBED_COLLAPSED_KEY, collapsed ? '1' : '0');
+      } catch (_) {}
+
+      if (!collapsed) this._ensureLoaded();
+    });
+  }
+
+  _ensureLoaded() {
+    if (this._loaded || !this.frame) return;
+    this._loaded = true;
+    this.frame.src = KICK_EMBED_SRC;
   }
 }
 

@@ -10,7 +10,7 @@ import { Economy, WORKER_TYPE_DEFS, MACHINE_TIERS, SAVE_KEY } from './economy.js
 import { remote, czyLokalnie } from './remote.js';
 import { Realtime, URL_RELAYA } from './realtime.js';
 import { LEADERBOARD_KEY, ASSIGNMENTS_KEY } from './kick.js';
-import { UI, KickUI, LeaderboardUI, WorkerOverlayManager, VanessaLogUI } from './ui.js';
+import { UI, KickUI, KickEmbedUI, LeaderboardUI, WorkerOverlayManager, VanessaLogUI } from './ui.js';
 import { KickChatClient } from './kick.js';
 import { VanessaManager, showTopAnnouncement } from './vanessa.js';
 import { BossManager, BOSS_DEFS } from './boss.js';
@@ -641,6 +641,7 @@ async function main() {
   }
 
   const kickUI = new KickUI();
+  const kickEmbedUI = new KickEmbedUI();
   const leaderboardUI = new LeaderboardUI();
   const workerOverlays = new WorkerOverlayManager();
   let ui;
