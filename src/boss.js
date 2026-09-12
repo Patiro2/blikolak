@@ -959,9 +959,17 @@ export class BossManager {
    * Usmierca KONKRETNEGO widza - wolane wtedy, gdy rakieta trafi w pole, na
    * ktorym stoi jego postac. Nie ma tu juz zadnego losowania ofiary: o tym,
    * kto ginie, decyduje wylacznie to, gdzie kto stoi w chwili uderzenia.
+   *
+   * `opts.source` rozroznia tylko TEKST powiadomienia/logu - reszta skutku
+   * (utrata dorobku, zniknięcie z rankingu, animacja smierci, usuniecie
+   * modelu po 2.5 s) jest identyczna niezaleznie od zrodla. Domyslne
+   * 'rocket' to trafienie rakieta bossa; 'admin' to reczna eliminacja z
+   * panelu wlasciciela w HUD (patrz killUserManual nizej) i dziala tak samo
+   * poza walka, jak i w jej trakcie.
    */
-  _killUser(username) {
+  _killUser(username, opts = {}) {
     if (!username || !this.kickChat) return;
+    const source = opts.source || 'rocket';
     const wpis = this.kickChat.leaderboard[normalizeNick(username)];
     const workerIndex = this.kickChat.getWorkerForUser(username);
     const lostAmount = Math.round(wpis ? wpis.totalEarned || 0 : 0);
@@ -987,16 +995,40 @@ export class BossManager {
       }
     }
 
-    showBossNotification(
-      'kill',
-      `💀 RAKIETA TRAFIŁA @${username}!`,
-      `Stał na oznaczonym polu. Stracił cały dorobek (<strong>${fmtShort(lostAmount)} zł</strong>) i wypadł z rankingu.`,
-    );
+    if (source === 'admin') {
+      showBossNotification(
+        'kill',
+        `💀 @${username} ZOSTAŁ USUNIĘTY PRZEZ STREAMERA`,
+        `Stracił cały dorobek (<strong>${fmtShort(lostAmount)} zł</strong>) i wypadł z rankingu.`,
+      );
+      this._log('bad', `Streamer usunal @${username} z panelu eliminacji - stracil ${lostAmount} zl i wypadl z rankingu`, {
+        ofiara: username,
+        utraconeZl: lostAmount,
+      });
+    } else {
+      showBossNotification(
+        'kill',
+        `💀 RAKIETA TRAFIŁA @${username}!`,
+        `Stał na oznaczonym polu. Stracił cały dorobek (<strong>${fmtShort(lostAmount)} zł</strong>) i wypadł z rankingu.`,
+      );
+      this._log('bad', `Boss "zabil" @${username} - stracil ${lostAmount} zl i wypadl z rankingu`, {
+        ofiara: username,
+        utraconeZl: lostAmount,
+      });
+    }
+  }
 
-    this._log('bad', `Boss "zabil" @${username} - stracil ${lostAmount} zl i wypadl z rankingu`, {
-      ofiara: username,
-      utraconeZl: lostAmount,
-    });
+  /**
+   * Reczna eliminacja widza z panelu wlasciciela w HUD (poza walka z bossem,
+   * patrz btn-eliminacja w main.js). Uzywa dokladnie tej samej logiki
+   * wykonawczej co trafienie rakieta (_killUser) - rozni sie wylacznie
+   * tekstem powiadomienia. Bezpieczna do wywolania niezaleznie od tego, czy
+   * boss aktualnie walczy: nie dotyka hp/cutscenki, korzysta tylko z
+   * this.kickChat/this.workerManager/this.projectAndFloat, ktore sa ustawione
+   * raz w boss.setContext() przy starcie gry (patrz main.js).
+   */
+  killUserManual(username) {
+    this._killUser(username, { source: 'admin' });
   }
 
 

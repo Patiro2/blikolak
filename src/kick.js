@@ -69,9 +69,13 @@ export class KickChatClient {
     this.assignments = this._loadAssignments();
     this.updateAssignments();
 
-    // Widzowie "wyeliminowani" przez bossa (patrz boss.js) - stan runtime,
-    // NIE zapisywany do localStorage. Dopoki trwa walka z bossem, nie moga
-    // wrocic do rankingu (recordEarned/creditRecoveredMoney je ignoruja).
+    // Widzowie "wyeliminowani" przez bossa lub przez panel eliminacji
+    // wlasciciela (patrz boss.js) - stan runtime, NIE zapisywany do
+    // localStorage. Wpis tu NIE blokuje powrotu do rankingu - kolejne
+    // "klik" tego widza od razu go z tego zbioru usuwa (patrz recordEarned
+    // nizej) i zaczyna go liczyc od zera. Zbior sluzy tylko do odrozniania
+    // "wlasnie wyeliminowany" od "nigdy nie klikal" w krotkim oknie miedzy
+    // eliminacja a nastepnym klikiem.
     this.eliminated = new Set();
   }
 
@@ -343,10 +347,13 @@ export class KickChatClient {
   }
 
   /**
-   * "Zabicie" widza przez bossa (patrz boss.js, timeout dzialania matematycznego):
-   * traci caly dorobek, znika z rankingu, zwalnia sie jego przypisany pracownik,
-   * a jego nick trafia do this.eliminated - dopoki trwa walka, nie moze wrocic
-   * do rankingu (patrz guard w recordEarned/creditRecoveredMoney).
+   * "Zabicie" widza - przez rakiete bossa albo przez reczna eliminacje z
+   * panelu wlasciciela (patrz boss.js, _killUser/killUserManual): traci caly
+   * dorobek, znika z rankingu, zwalnia sie jego przypisany pracownik, a jego
+   * nick trafia do this.eliminated. To NIE jest bana - wystarczy, ze widz
+   * napisze kolejne "klik", a recordEarned od razu usunie go z tego zbioru
+   * i zacznie liczyc dorobek od zera (patrz komentarz przy this.eliminated
+   * w konstruktorze).
    */
   eliminateUser(username) {
     if (!username) return;

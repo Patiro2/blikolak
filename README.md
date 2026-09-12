@@ -58,9 +58,13 @@ Port można podać jako argument: `python serve.py 8080`.
   "w lewo", "do przodu"). Kierunki są WZGLĘDEM tego, gdzie postać aktualnie
   patrzy (jak sterowanie "zza pleców postaci"), nie względem osi świata -
   `left`/`right` obracają postać o 90° i robią krok, `up`/`down` to krok do
-  przodu/tyłu względem aktualnego zwrotu. Postać nie wychodzi poza arenę 7×7,
-  nie wchodzi na pole bankomatu (0,0) ani na pole zajęte przez innego
-  pracownika - w takich przypadkach tylko się obraca w tę stronę.
+  przodu/tyłu względem aktualnego zwrotu. Postać nie wychodzi poza arenę 7×7
+  ani nie wchodzi na pole bankomatu (0,0) - w takich przypadkach tylko się
+  obraca w tę stronę. **Kolizje między postaciami są wyłączone**: kilku widzów
+  może stać na tym samym polu i przechodzić przez siebie, więc nikt nikomu nie
+  blokuje drogi i cała siatka jest dostępna dla każdego. Konsekwencja: postacie
+  na wspólnym polu nachodzą na siebie wizualnie, a atak obszarowy bossa trafia
+  całym polem, więc jedna rakieta może zabić kilka osób naraz.
 - **Feed powiadomień bossa** — w trakcie walki z bossem Kamilem Kovalenko
   (patrz niżej) w prawym dolnym rogu ekranu pojawiają się kolejno karty z
   najważniejszymi zdarzeniami walki (trafienie, "zabicie" widza, omdlenie,
@@ -76,7 +80,7 @@ Stan zapisuje się sam do `localStorage` co 5 s i przy zamykaniu karty.
 | `src/scene.js` | renderer, kamera, światła, pokój z kafli 1×1 |
 | `src/assets.js` | ładowanie GLB z cache, retry i limitem współbieżności |
 | `src/machine.js` | model automatu, podmiana tieru, raycast i animacja kliknięcia |
-| `src/workers.js` | awatary Top 10, klony szkieletów, animacje `idle`/`interact-right`, ruch po siatce 2D (`moveWorker`, kolizje między pracownikami) |
+| `src/workers.js` | awatary Top 10, klony szkieletów, animacje `idle`/`interact-right`, ruch po siatce 2D (`moveWorker` - bez kolizji między postaciami), synchronizacja pozycji (`getSyncState`/`applySync`) |
 | `src/coins.js` | pula 120 monet z lotem po łuku |
 | `src/goldcoin.js` | złota moneta na siatce areny - spawn, znacznik czasu na podłodze, zbieranie przez dobiegnięcie awatara |
 | `src/economy.js` | stan wspólnej puli czatu, wartość kliknięcia, progi awansu tieru, zapis/odczyt |
@@ -154,6 +158,8 @@ mini-characters) + `character-male-f`, złożone w jedną grupę i wyskalowane
   spadają na nie rakiety - ginie każdy, kto w chwili uderzenia stoi na
   oznaczonym polu: traci CAŁY dorobek i znika z rankingu
   (`kickChat.eliminateUser`), awatar gra `die` i po ~2,5 s znika ze sceny.
+  To NIE jest ban - eliminacja nie blokuje powrotu, nawet w trakcie trwającej
+  walki: widz wraca do Top 10 od zera, gdy tylko napisze kolejne "klik".
   **Nie ma tu losowania ofiary** - o śmierci decyduje wyłącznie pozycja.
   Wzory pól też nie są losowe: cztery stałe układy (krzyż, przekątne, pierścień,
   brzegi - `WZORY_RAKIET` w `src/boss.js`) idą cyklicznie po kolei, więc widzowie
@@ -191,6 +197,27 @@ mini-characters) + `character-male-f`, złożone w jedną grupę i wyskalowane
 Panel testowy: przycisk **👹 Zresp bossa** obok "Zresp Vanessę" wywołuje
 `boss.start(1, { force: true })` niezależnie od `bossesDefeated`.
 
+## Panel eliminacji (właściciel)
+
+Przycisk **💀 Eliminacja** w HUD (obok "Zresp Vanessę"/"Zresp bossa"/"Reset gry",
+widoczny tylko po zalogowaniu jako właściciel - dokładnie ten sam mechanizm
+ukrywania co reszta przycisków admina, patrz `body.tryb-widza` w `style.css`)
+otwiera listę aktualnego Top 10 (nick, dorobek w zł, numer slotu jeśli widz ma
+akurat awatara w grze). Wybranie nicku pyta o potwierdzenie (`confirm()`) i
+dopiero po nim zabija widza - skutek jest identyczny jak przy trafieniu rakietą
+bossa (`BossManager._killUser`): traci cały dorobek, znika z rankingu, jego
+awatar gra `die` i po ~2,5 s znika ze sceny, a wraca do gry od zera przy
+kolejnym "klik". Różni się tylko treść powiadomienia w feedzie bossa - zamiast
+"RAKIETA TRAFIŁA" widać "ZOSTAŁ USUNIĘTY PRZEZ STREAMERA". Działa niezależnie od
+tego, czy akurat trwa walka z bossem (`BossManager.killUserManual()` woła tę
+samą logikę wykonawczą co rakieta, poza kontekstem walki).
+
+Wybór z panelu rozgłasza się widzom zdarzeniem realtime `eliminacja` (`{ nick }`,
+patrz `zastosujZdarzenieZdalne()` w `main.js`), żeby animacja śmierci i
+zniknięcie z rankingu były widoczne natychmiast, a nie dopiero po najbliższym
+snapshocie co 2 s. Gdy ranking jest pusty, panel informuje, że nie ma kogo
+eliminować.
+
 ## Log zdarzeń Vanessy
 
 Panel **🦹‍♀️ LOG VANESSY** na dole ekranu pokazuje na żywo wszystko, co robi złodziejka.
@@ -220,7 +247,7 @@ window.__game.vanessa.logToConsole = false;  // tylko panel, bez konsoli
 
 Karta właściciela jest **autorytetem**: pcha stan przez WebSocket do własnego
 serwera-przekaźnika (`server/`), a ten rozgłasza go wszystkim widzom. Zdarzenia
-(`klik`, `awans-tieru`, `reset`) lecą natychmiast, pełny snapshot idzie co 2 s
+(`klik`, `awans-tieru`, `reset`, `eliminacja`) lecą natychmiast, pełny snapshot idzie co 2 s
 i prostuje ewentualny dryf. Nowy widz dostaje ostatni snapshot od razu po
 podłączeniu, więc wchodzący w trakcie streamu nie ogląda pustej planszy.
 
@@ -311,7 +338,7 @@ Gra może stać na Vercelu ze **wspólnym zapisem w Vercel KV**, tak że postęp
 |---|---|---|
 | widzi aktualny stan | tak | tak |
 | zapisuje stan na serwer | tak, co 5 s | **nie** |
-| reset gry, respienie Vanessy i bossa | tak | przyciski ukryte |
+| reset gry, respienie Vanessy i bossa, eliminacja widza | tak | przyciski ukryte |
 
 Odczyt (`GET /api/state`) jest publiczny, a każdy zapis (`POST`) i kasowanie
 (`DELETE`) wymaga hasła w nagłówku `Authorization`. Ukrycie przycisków to

@@ -956,6 +956,103 @@ html, body {
   transform: scale(0.97);
 }
 
+/* ===== Panel eliminacji widza (właściciel) ===== */
+
+#eliminacja-wrap {
+  position: relative;
+  display: inline-block;
+}
+
+#btn-eliminacja {
+  pointer-events: auto;
+  background: linear-gradient(135deg, #0d0d0d, #2b2b2b);
+  border: 1px solid #8a8a8a;
+  color: #fff;
+  border-radius: 6px;
+  padding: 5px 11px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  box-shadow: 0 2px 8px rgba(255, 255, 255, 0.15);
+  transition: background 0.15s ease, transform 0.1s ease, box-shadow 0.15s ease;
+}
+
+#btn-eliminacja:hover {
+  background: #3a3a3a;
+  box-shadow: 0 0 14px rgba(255, 255, 255, 0.35);
+  transform: scale(1.03);
+}
+
+#btn-eliminacja:active {
+  transform: scale(0.97);
+}
+
+#eliminacja-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  width: 260px;
+  max-height: 320px;
+  overflow-y: auto;
+  background: rgba(16, 20, 28, 0.95);
+  border: 1px solid rgba(255, 92, 92, 0.4);
+  border-radius: 10px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  padding: 8px;
+  z-index: 20;
+}
+
+#eliminacja-panel-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: #ff9d9d;
+  letter-spacing: 0.3px;
+  margin-bottom: 6px;
+  padding: 0 2px;
+}
+
+.eliminacja-pozycja {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  margin-bottom: 4px;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.eliminacja-pozycja:hover {
+  background: rgba(255, 92, 92, 0.22);
+}
+
+.eliminacja-pozycja-nick {
+  font-size: 12px;
+  font-weight: 700;
+  color: #fff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.eliminacja-pozycja-info {
+  font-size: 11px;
+  color: #cfd6e4;
+  white-space: nowrap;
+}
+
+.eliminacja-pusto {
+  font-size: 12px;
+  color: #9aa3b5;
+  padding: 6px 2px;
+}
+
 /* Stos powiadomień walki z bossem po prawej stronie ekranu */
 .boss-feed {
   position: fixed;
@@ -1381,6 +1478,7 @@ html, body {
    jest wygoda, a nie zabezpieczeniem. */
 body.tryb-widza #btn-spawn-vanessa,
 body.tryb-widza #btn-spawn-boss,
+body.tryb-widza #eliminacja-wrap,
 body.tryb-widza #reset-btn {
   display: none;
 }

@@ -336,6 +336,14 @@ async function main() {
       }
     } else if (nazwa === 'reset') {
       resetLokalny().catch((err) => console.error('[realtime] Blad resetu zdalnego:', err));
+    } else if (nazwa === 'eliminacja') {
+      // Wlasciciel wyeliminowal widza recznie z panelu HUD (poza kontekstem
+      // walki z bossem) - u widza odgrywamy dokladnie ta sama animacje
+      // smierci i usuniecie z rankingu przez wspolna funkcje wykonawcza
+      // (patrz boss.killUserManual/_killUser w boss.js). Najblizszy snapshot
+      // i tak wyrówna liczby - to tylko natychmiastowa reakcja wizualna.
+      const nick = dane && typeof dane.nick === 'string' ? dane.nick : null;
+      if (nick) boss.killUserManual(nick);
     }
   }
 
@@ -477,6 +485,83 @@ async function main() {
       if (!remote.czyAdmin()) return;
       boss.start(1, { force: true });
     });
+  }
+
+  // --- Panel eliminacji widza (właściciel) --------------------------------
+  // Skutek identyczny jak trafienie rakietą bossa (patrz boss.killUserManual
+  // w boss.js) - wywoływalny NIEZALEŻNIE od tego, czy trwa walka z bossem.
+  // Widoczność przycisku idzie tym samym mechanizmem co reszta panelu admina
+  // (body.tryb-widza w style.css); klik dodatkowo strzeże remote.czyAdmin(),
+  // dokladnie tak samo jak spawnVanessaBtn/spawnBossBtn powyzej.
+  const eliminacjaBtn = document.getElementById('btn-eliminacja');
+  const eliminacjaPanel = document.getElementById('eliminacja-panel');
+  const eliminacjaLista = document.getElementById('eliminacja-lista');
+
+  function zamknijPanelEliminacji() {
+    if (eliminacjaPanel) eliminacjaPanel.hidden = true;
+  }
+
+  function wykonajEliminacje(nick) {
+    if (!nick) return;
+    // Straz niezalezna od ukrycia przycisku w CSS i od bramki na otwarciu
+    // panelu - ukrycie jest kosmetyka, a TO jest faktyczny warunek wykonania
+    // akcji (ta sama zasada co przy spawnVanessaBtn/spawnBossBtn wyzej).
+    if (!remote.czyAdmin()) return;
+    const potwierdzone = window.confirm(
+      `Na pewno wyeliminować @${nick}? Straci cały dorobek i zniknie z rankingu (może wrócić od zera, pisząc "klik").`,
+    );
+    if (!potwierdzone) return;
+    boss.killUserManual(nick);
+    // Rozgłoszenie do widzów - bez tego animacje smierci i zniknięcie z
+    // rankingu zobaczy tylko karta wlasciciela, az do najblizszego snapshotu.
+    if (remote.czyAdmin()) {
+      realtime.wyslijZdarzenie('eliminacja', { nick });
+    }
+    zamknijPanelEliminacji();
+  }
+
+  function renderPanelEliminacji() {
+    if (!eliminacjaLista) return;
+    eliminacjaLista.innerHTML = '';
+    const top = kickChat.getTopEarners(10);
+    if (!top.length) {
+      const pusto = document.createElement('div');
+      pusto.className = 'eliminacja-pusto';
+      pusto.textContent = 'Ranking jest pusty - nie ma kogo eliminować.';
+      eliminacjaLista.appendChild(pusto);
+      return;
+    }
+    top.forEach((wpis) => {
+      const slot = kickChat.getWorkerForUser(wpis.username);
+      const pozycja = document.createElement('div');
+      pozycja.className = 'eliminacja-pozycja';
+      const nickEl = document.createElement('span');
+      nickEl.className = 'eliminacja-pozycja-nick';
+      nickEl.textContent = `@${wpis.username}`;
+      const infoEl = document.createElement('span');
+      infoEl.className = 'eliminacja-pozycja-info';
+      infoEl.textContent = slot !== null ? `${fmtShort(wpis.totalEarned)} zł · slot ${slot + 1}` : `${fmtShort(wpis.totalEarned)} zł`;
+      pozycja.appendChild(nickEl);
+      pozycja.appendChild(infoEl);
+      pozycja.addEventListener('click', () => wykonajEliminacje(wpis.username));
+      eliminacjaLista.appendChild(pozycja);
+    });
+  }
+
+  if (eliminacjaBtn && eliminacjaPanel) {
+    eliminacjaBtn.addEventListener('click', (ev) => {
+      if (!remote.czyAdmin()) return;
+      ev.stopPropagation();
+      const otwarty = !eliminacjaPanel.hidden;
+      if (otwarty) {
+        zamknijPanelEliminacji();
+        return;
+      }
+      renderPanelEliminacji();
+      eliminacjaPanel.hidden = false;
+    });
+    eliminacjaPanel.addEventListener('click', (ev) => ev.stopPropagation());
+    document.addEventListener('click', () => zamknijPanelEliminacji());
   }
 
   const kickUI = new KickUI();
