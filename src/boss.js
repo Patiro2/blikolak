@@ -27,6 +27,12 @@ export const BOSS_DEFS = [
 ];
 
 const HP_PER_HIT = 5;
+// Nagroda za zadanie obrazen bossowi (poprawna odpowiedz na dzialanie) - trafia
+// do widza, ktory odpowiedzial, TYLKO do rankingu (recordEarned z countsAsClick
+// =false, patrz _onCorrectAnswer), nigdy jako "klik". Wczesniej odpowiadajacy
+// nie dostawal nic (README: "Odpowiadajacy NIE dostaje zlotowek ani klikow") -
+// wlasciciel zdecydowal, ze ma dostawac 10 zl za trafienie.
+const REWARD_PER_HIT = 10;
 const ANSWER_WINDOW = 8.0; // sekund na odpowiedz
 const HIT_TO_NEXT_EQ_DELAY = 1.2; // sekund pauzy po trafieniu, zanim wyskoczy nowe dzialanie
 // Atak obszarowy "wymioty": boss celuje w JEDNO pole siatki areny. Pole jest
@@ -161,6 +167,17 @@ export class BossManager {
     this.kickChat = null;
     this.vanessaRef = null;
     this.onDefeated = null;
+
+    // Wzorzec i uzasadnienie identyczne jak machine.czyKlikaniaDozwolone
+    // (machine.js) i vanessa.czyKlikaniaDozwolone (vanessa.js): naliczanie
+    // nagrody 10 zl za poprawna odpowiedz to DECYZJA (dopisuje kase do
+    // rankingu), a boss.onChatMessage dziala dzis identycznie na kazdej
+    // otwartej karcie (host i kazdy widz licza HP i floatery lokalnie,
+    // niezaleznie - patrz applySync/getSyncState, ktore synchronizuja tylko
+    // hp/liczniki, nie decyzje). Bez tej strazy KAZDA karta doliczylaby 10 zl
+    // temu widzowi u siebie i ranking rozjechalby sie miedzy kartami. main.js
+    // ustawia to na () => remote.czyAdmin() - patrz tam.
+    this.czyNaliczanieDozwolone = null;
 
     this.chairTemplate = null;
     this.charTemplate = null;
@@ -906,7 +923,29 @@ export class BossManager {
     audio.play('boss-trafienie');
     if (this.model) {
       this.projectAndFloat(this._bossFloaterOrigin(), `✔ @${username}`, { crit: true, kick: true });
+      // Przesuniety w bok o 0.6 jednostki swiata (nie dokladnie ten sam punkt
+      // co floater ✔ powyzej) - inaczej oba floatery leca w gore idealnie na
+      // sobie i "+10 zl" byloby nieczytelne/niewidoczne na streamie.
+      this.projectAndFloat(
+        this._bossFloaterOrigin().add(new THREE.Vector3(0.6, -0.25, 0)),
+        `+${REWARD_PER_HIT} zł`,
+        { gold: true },
+      );
     }
+
+    // Nagroda 10 zl dla odpowiadajacego - dziala rowniez w trybie awaryjnym
+    // (emergency, patrz onChatMessage), bo to nadal poprawna odpowiedz, tylko
+    // od widza spoza normalnie uprawnionych. Naliczanie to DECYZJA (patrz
+    // komentarz przy czyNaliczanieDozwolone w konstruktorze) - tylko host ja
+    // podejmuje, inaczej kazda otwarta karta dopisze 10 zl temu widzowi u
+    // siebie i ranking rozjedzie sie miedzy kartami. countsAsClick=false -
+    // to nie jest komenda "klik" z czatu (dokladnie jak zlota moneta w
+    // goldcoin.js/_collectByWorker), wiec licznik "clicks" widza NIE rosnie.
+    if (!this.czyNaliczanieDozwolone || this.czyNaliczanieDozwolone()) {
+      if (this.kickChat) this.kickChat.recordEarned(username, REWARD_PER_HIT, color, false);
+      if (this.economy) this.economy.addMoney(REWARD_PER_HIT);
+    }
+
     this._ustawPoze('trafienie', 0.45);
     this._shakeBossOnce();
 

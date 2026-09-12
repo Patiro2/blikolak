@@ -798,6 +798,10 @@ async function main() {
   // plakietka, dymek), bo wszystkie ida przez jeden wspolny straznik w
   // vanessa.chaseAway() (patrz vanessa.js).
   vanessa.czyKlikaniaDozwolone = () => remote.czyAdmin();
+  // Ta sama polityka co machine.czyKlikaniaDozwolone/vanessa.czyKlikaniaDozwolone
+  // powyzej - patrz komentarz przy czyNaliczanieDozwolone w boss.js: naliczanie
+  // nagrody 10 zl za poprawna odpowiedz to decyzja, wiec tylko host ja podejmuje.
+  boss.czyNaliczanieDozwolone = () => remote.czyAdmin();
   boss.setContext({
     workerManager,
     workerOverlays,
