@@ -72,6 +72,22 @@ const FAINT_MIN = 12;
 const FAINT_MAX = 22;
 const CUTSCENE_DURATION = 5.0;
 
+// Zabezpieczenie przed zakleszczeniem ratunku (patrz _checkAutoWake): omdlenie
+// ma byc kara zdejmowana normalnie przez INNEGO widza piszacego "pomoc"
+// (_tryHelp) - ale gdy akurat nie ma nikogo nieomdlonego w czacie (np. bitwa o
+// flagi stawia dwoch jedynych aktywnych graczy na TYM SAMYM polu, atak
+// "wymioty" trafia cale pole i omdlewaja OBAJ naraz), nikt nie moze napisac
+// "pomoc" i ofiary zostalyby unieruchomione az do konca walki z bossem. Zamiast
+// wykrywac ten konkretny przypadek (kruche - zalezaloby od tego, kto akurat
+// jest w Top 10/na czacie w danej chwili), kazde omdlenie dostaje twardy limit
+// czasu: po FAINT_AUTO_WAKE_SEC bez ratunku ofiara budzi sie sama. Wartosc jest
+// SWIADOMIE dluzsza niz najkrotszy odstep miedzy atakami bossa (FAINT_MIN=12s),
+// zeby zwykly ratunek przez czat (ktory zazwyczaj reaguje w kilka-kilkanascie
+// sekund) zdazyl zadzialac pierwszy - auto-ocucenie jest WYLACZNIE siatka
+// bezpieczenstwa na sytuacje bez nikogo do pomocy, nie skroceniem kary.
+const FAINT_AUTO_WAKE_SEC = 25;
+
+
 const SPAWN_POS = new THREE.Vector3(0, 0, -3.0); // korytarz z tylu sceny
 const IMPACT_POS = new THREE.Vector3(0.3, 0, 0.2); // punkt uderzenia w bankomat (tuz przed nim)
 // Miejsce postoju bossa: idealnie pośrodku wszystkich graczy (X = 0, Z = -0.45),
@@ -930,6 +946,9 @@ export class BossManager {
       this.faintTimer = this._randomFaintDelay();
       this._startVomitAttack();
     }
+
+    // Zabezpieczenie przed zakleszczeniem ratunku - patrz FAINT_AUTO_WAKE_SEC.
+    this._checkAutoWake();
   }
 
   /** Klucz strumienia dla N-tego rownania biezacej walki - patrz src/rng.js. */
@@ -1466,6 +1485,38 @@ export class BossManager {
       ratownik: rescuerUsername,
       ofiara: info.username,
     });
+  }
+
+  /**
+   * Wywolywane co klatke walki (patrz _updateFight): budzi kazdego, kto lezy
+   * omdlony >= FAINT_AUTO_WAKE_SEC bez ratunku od innego widza. To jedyna
+   * siatka bezpieczenstwa na sytuacje "nikt nieomdlony nie moze napisac
+   * pomoc" (patrz komentarz przy stalej) - w normalnym przebiegu walki
+   * zwykly ratunek (_tryHelp) zdazy zadzialac dawno przed uplywem limitu.
+   * Budzi wszystkich zaleglych na raz (nie tylko najstarszego, jak _tryHelp) -
+   * jesli limit minal kilku naraz (np. dwoch trafionych tym samym pociskiem),
+   * nie ma powodu budzic ich jeden po drugim klatka po klatce.
+   */
+  _checkAutoWake() {
+    if (this.faintedMap.size === 0) return;
+    const teraz = Date.now();
+    for (const [key, info] of [...this.faintedMap]) {
+      if (teraz - info.ts < FAINT_AUTO_WAKE_SEC * 1000) continue;
+      this.faintedMap.delete(key);
+      audio.play('ratunek');
+      if (info.slot !== null && info.slot !== undefined && this.workerManager) {
+        this.workerManager.setFainted(info.slot, false);
+        this._refreshFaintedNameplate(info.slot, false);
+      }
+      showBossNotification(
+        'help',
+        '⏱️ OCKNĄŁ SIĘ SAM!',
+        `<strong>@${info.username}</strong> leżał zbyt długo bez pomocy (${FAINT_AUTO_WAKE_SEC}s) i ocknął się sam.`,
+      );
+      this._log('good', `@${info.username} ocknal sie sam po ${FAINT_AUTO_WAKE_SEC}s bez ratunku (zabezpieczenie przed zakleszczeniem)`, {
+        ofiara: info.username,
+      });
+    }
   }
 
   _wakeAllFainted() {

@@ -174,7 +174,12 @@ mini-characters) + `character-male-f`, złożone w jedną grupę i wyskalowane
   jego `klik` i odpowiedzi są ignorowane - bez utraty pieniędzy.
   Ratunek: inny widz pisze `pomoc` (lub `!pomoc`, wielkość liter/polskie znaki
   bez znaczenia) - podnosi najdłużej leżącą osobę. Po pokonaniu bossa wszyscy
-  omdleni są automatycznie ocucani.
+  omdleni są automatycznie ocucani. **Zabezpieczenie przed zakleszczeniem**:
+  jeśli akurat nie ma nikogo nieomdlonego, kto mógłby napisać `pomoc` (np. dwaj
+  jedyni aktywni gracze stoją na tym samym polu - bitwa o flagi wymusza dokładnie
+  to - i jeden atak omdlewa obu naraz), każde omdlenie budzi się samo po 25 s
+  bez ratunku (`FAINT_AUTO_WAKE_SEC` w `src/boss.js`) - to wyłącznie siatka
+  bezpieczeństwa, zwykły ratunek przez czat zadziała dawno wcześniej.
 - **Animacje bossa**: boss siedzi w wózku, więc klipy dla postaci stojącej
   (`emote-no`, `pick-up`, `holding-right-shoot`, `die`) wyglądały źle - nogi
   wymachiwały, a tułów wychodził z fotela. Bazą jest teraz zawsze

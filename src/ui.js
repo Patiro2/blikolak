@@ -210,8 +210,21 @@ export function makeDraggable(panelEl, handleEl, storageKey = null) {
   handleEl.addEventListener('pointerup', stopDrag);
   handleEl.addEventListener('pointercancel', stopDrag);
 
-  // Dostosowanie pozycji przy zmianie rozmiaru okna przeglądarki
+  // Dostosowanie pozycji przy zmianie rozmiaru okna przeglądarki - TYLKO dla
+  // okien, ktore uzytkownik kiedys recznie przeciagnal (maja zapisana pozycje).
+  // Bez tego warunku ten listener walczyl z src/tutorial.js o pozycje
+  // #leaderboard-panel: tutorial.js ustawia ranking zaraz pod soba, a ten kod
+  // (nieswiadomy tej logiki) potrafil to nadpisac wlasnym "maxTop = wysokosc
+  // okna - 40", co przy niskim ekranie wpychalo ranking z powrotem na
+  // samouczek. Panel bez zapisanej pozycji nie jest "przeciagniety", wiec nie
+  // ma czego tu bronic przed wyjsciem poza ekran - jego pozycje kontroluje
+  // kto inny (domyslny CSS albo, dla rankingu, tutorial.js).
   window.addEventListener('resize', () => {
+    if (storageKey) {
+      try {
+        if (!localStorage.getItem(storageKey)) return;
+      } catch (_) {}
+    }
     const rect = panelEl.getBoundingClientRect();
     const pad = 8;
     const panelWidth = panelEl.offsetWidth || 320;
@@ -606,100 +619,6 @@ export class WorkerOverlayManager {
       item.bubbleEl.remove();
     }
     this.overlays.clear();
-  }
-}
-
-/**
- * Panel z logiem zdarzen Vanessy. Pokazuje na zywo co robi zlodziejka -
- * kogo okrada, ile zabrala na kazdym tyku, kto ja przegonil i ile
- * z lupu wrocilo do gry. Wpisy dopisywane sa pojedynczo (bez przebudowy
- * calej listy), a najnowszy jest na gorze dzieki column-reverse w CSS.
- */
-export class VanessaLogUI {
-  constructor(vanessa) {
-    this.vanessa = vanessa;
-    this.panel = document.getElementById('vanessa-log-panel');
-    this.header = document.getElementById('vanessa-log-header');
-    this.listEl = document.getElementById('vanessa-log-list');
-    this.toggleBtn = document.getElementById('vanessa-log-toggle-btn');
-    this.clearBtn = document.getElementById('vanessa-log-clear-btn');
-    this.maxRows = 200;
-
-    if (this.toggleBtn && this.panel) {
-      this.toggleBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        this.panel.classList.toggle('collapsed');
-        this.toggleBtn.textContent = this.panel.classList.contains('collapsed') ? '+' : '–';
-      });
-      this.toggleBtn.textContent = this.panel.classList.contains('collapsed') ? '+' : '–';
-    }
-
-    if (this.clearBtn) {
-      this.clearBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (this.vanessa) this.vanessa.clearLog();
-        else this.renderAll([]);
-      });
-    }
-
-    if (this.panel && this.header) {
-      makeDraggable(this.panel, this.header, 'bankomat-clicker-vanessa-log-pos');
-    }
-
-    this.renderAll(vanessa ? vanessa.getLog(this.maxRows) : []);
-  }
-
-  _rowFor(entry) {
-    const row = document.createElement('div');
-    row.className = `vlog-row vlog-${entry.kind || 'info'}`;
-
-    const time = document.createElement('span');
-    time.className = 'vlog-time';
-    time.textContent = new Date(entry.t).toLocaleTimeString('pl-PL');
-    row.appendChild(time);
-
-    const run = document.createElement('span');
-    run.className = 'vlog-run';
-    run.textContent = `#${entry.run}`;
-    row.appendChild(run);
-
-    const msg = document.createElement('span');
-    msg.className = 'vlog-msg';
-    msg.textContent = entry.message;
-    if (entry.data) {
-      const extra = document.createElement('span');
-      extra.className = 'vlog-data';
-      extra.textContent = ` ${JSON.stringify(entry.data)}`;
-      msg.appendChild(extra);
-    }
-    row.appendChild(msg);
-
-    return row;
-  }
-
-  append(entry) {
-    if (!this.listEl || !entry) return;
-    const empty = this.listEl.querySelector('#vanessa-log-empty');
-    if (empty) empty.remove();
-
-    this.listEl.appendChild(this._rowFor(entry));
-    // column-reverse: najstarsze wpisy sa na koncu listy w DOM
-    while (this.listEl.children.length > this.maxRows) {
-      this.listEl.removeChild(this.listEl.firstElementChild);
-    }
-  }
-
-  renderAll(entries) {
-    if (!this.listEl) return;
-    this.listEl.innerHTML = '';
-    if (!entries || entries.length === 0) {
-      const empty = document.createElement('div');
-      empty.id = 'vanessa-log-empty';
-      empty.textContent = 'Brak zdarzeń. Vanessa jeszcze się nie pojawiła.';
-      this.listEl.appendChild(empty);
-      return;
-    }
-    for (const e of entries) this.listEl.appendChild(this._rowFor(e));
   }
 }
 

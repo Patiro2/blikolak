@@ -181,8 +181,9 @@ export class VanessaManager {
     // Vanessa (kogo okradla, ile zabrala, kto ja przegonil i ile wrocilo do gry)
     // bez wpatrywania sie w konsole w trakcie gry.
     this.logEntries = [];
-    this.onLog = null; // ustawiane z main.js, zeby panel na ekranie mogl sie odswiezac
-    this.logToConsole = true;
+    // Log w konsoli wylaczony domyslnie (panel podgladu na ekranie zostal
+    // usuniety) - wlacz recznie z konsoli: vanessa.logToConsole = true.
+    this.logToConsole = false;
     this._runId = 0; // numer kolejnego "napadu", ulatwia czytanie logu
 
     this._createDOMOverlays();
@@ -211,13 +212,6 @@ export class VanessaManager {
         console.log(`[Vanessa #${entry.run} ${stamp}] ${message}`, data);
       } else {
         console.log(`[Vanessa #${entry.run} ${stamp}] ${message}`);
-      }
-    }
-    if (this.onLog) {
-      try {
-        this.onLog(entry);
-      } catch (err) {
-        console.error('[Vanessa] Blad w obsludze logu:', err);
       }
     }
   }
@@ -285,7 +279,6 @@ export class VanessaManager {
 
   clearLog() {
     this.logEntries = [];
-    if (this.onLog) this.onLog(null);
   }
 
   _createDOMOverlays() {

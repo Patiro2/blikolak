@@ -10,7 +10,7 @@ import { Economy, WORKER_TYPE_DEFS, MACHINE_TIERS, SAVE_KEY } from './economy.js
 import { remote, czyLokalnie } from './remote.js';
 import { Realtime, URL_RELAYA } from './realtime.js';
 import { LEADERBOARD_KEY, ASSIGNMENTS_KEY } from './kick.js';
-import { UI, KickUI, KickEmbedUI, LeaderboardUI, WorkerOverlayManager, VanessaLogUI } from './ui.js';
+import { UI, KickUI, KickEmbedUI, LeaderboardUI, WorkerOverlayManager } from './ui.js';
 import { KickChatClient } from './kick.js';
 import { VanessaManager, showTopAnnouncement } from './vanessa.js';
 import { BossManager, BOSS_DEFS } from './boss.js';
@@ -19,6 +19,14 @@ import { CityBackground } from './city.js';
 import { audio } from './audio.js';
 
 async function main() {
+  // Sprzatanie po usunietym panelu logu Vanessy - osierocony klucz pozycji
+  // (przeciagania okna) nie jest juz nigdzie odczytywany, wiec go kasujemy.
+  try {
+    localStorage.removeItem('bankomat-clicker-vanessa-log-pos');
+  } catch (err) {
+    // localStorage moze byc niedostepny (np. tryb prywatny) - nic sie nie stanie
+  }
+
   const canvas = document.getElementById('scene');
   const { renderer, scene, camera, controls } = createScene(canvas);
 
@@ -125,13 +133,6 @@ async function main() {
     }
   );
   await vanessa.init();
-
-  // Panel z logiem zdarzen Vanessy - kazde zdarzenie dopisuje sie na biezaco.
-  const vanessaLogUI = new VanessaLogUI(vanessa);
-  vanessa.onLog = (entry) => {
-    if (entry === null) vanessaLogUI.renderAll([]);
-    else vanessaLogUI.append(entry);
-  };
 
   // Dzwiek "ui-klik" dla kazdego przycisku w pasku HUD (delegacja zdarzen -
   // obejmuje tez przyszle przyciski, np. wyciszenie/glosnosc, bez dopisywania
@@ -972,7 +973,6 @@ async function main() {
     kickUI,
     leaderboardUI,
     workerOverlays,
-    vanessaLogUI,
     syncLeaderboardAndOverlays,
     synchronizujZSerwera,
     resetLokalny,

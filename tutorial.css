@@ -119,7 +119,14 @@
   #tutorial-panel {
     left: 8px;
     width: auto;
-    max-width: calc(100vw - 16px);
+    /* #hud-top-left (okno wspolnej puli) nie ma wlasnego max-width - jego
+       szerokosc wynika z tresci i na waskim ekranie potrafi dojsc az do
+       samej krawedzi (lewy margines 8px, bez prawego). tutorial.js kopiuje
+       jego realna szerokosc jako inline styl (zawsze bije width:auto
+       powyzej), a max-width tutaj jest juz tylko siatka bezpieczenstwa na
+       wypadek braku #hud-top-left w DOM - 16px dawaloby wezszy samouczek niz
+       pula i falszywy wrazenie "rozjechania" mimo braku realnego nachodzenia. */
+    max-width: calc(100vw - 8px);
   }
 
   #tutorial-body {

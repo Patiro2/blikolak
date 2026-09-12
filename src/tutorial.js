@@ -129,45 +129,96 @@ function ustawStanZwiniecia(panel, toggleBtn, collapsed) {
 }
 
 // Panel stoi poza #hud (wlasny <div>, position:fixed), wiec nie zalezy od
-// pointer-events HUD-u, ale wciaz musi omijac #hud-top-left i
-// #leaderboard-panel - oba potrafia zmieniac wysokosc (tryb widza/admina,
-// zaladowany ranking, przeciagniecie myszka). Zamiast sztywnych pikseli
-// mierzymy ich prostokaty w przegladarce i stawiamy siebie kawalek nizej niz
-// dolna krawedz nizszego z nich - to jedyny sposob, zeby "gora, lewa strona"
-// dzialalo niezaleznie od tego, ile przyciskow HUD akurat pokazuje.
+// pointer-events HUD-u, ale wciaz musi isc DOKLADNIE pod #hud-top-left (okno
+// wspolnej puli) - ta sama lewa krawedz, ta sama szerokosc. #hud-top-left
+// potrafi zmieniac szerokosc/wysokosc (tryb widza chowa przyciski admina),
+// wiec zamiast sztywnych pikseli mierzymy jego realny prostokat w przegladarce.
+//
+// #leaderboard-panel (ranking Top 10) idzie z kolei zaraz pod samouczkiem -
+// to samouczek nim tu steruje (przesunRanking), a nie odwrotnie jak dawniej.
+// Wyjatek: jesli w localStorage jest zapisana pozycja rankingu (uzytkownik go
+// recznie przeciagnal - patrz makeDraggable w ui.js), nie ruszamy go wcale.
 function przelicznikPozycji(panel, body, header) {
-  const MARGIN = 8;
+  const MARGIN = 8; // ten sam odstep, co miedzy elementami samego HUD-u (#hud-top-left-buttons)
   const DEFAULT_TOP = 16;
   const MIN_WIDOCZNE = 120; // minimalna wysokosc panelu widoczna na niskim ekranie
+  const LEADERBOARD_POS_KEY = 'bankomat-clicker-leaderboard-pos';
+
+  // #tutorial-panel ma "transition: top/left" (plynne przesuwanie przy zmianie
+  // roli widz/admin) - w trakcie tej animacji getBoundingClientRect().top/left
+  // zwraca wartosc POSREDNIA, nie docelowa. Gdyby przesunRanking() liczyl
+  // pozycje rankingu z takiego posredniego odczytu, ranking zatrzymalby sie
+  // w zlym miejscu (ranking sam nie ma tej animacji, wiec nie ma szans nadgonic
+  // pozniej). Dlatego trzymamy tu DOCELOWE top/left, ustawione przez ostatnie
+  // wywolanie przelicz() - to jedyne wiarygodne zrodlo prawdy o pozycji.
+  // Wysokosc NIE jest animowana, wiec jej biezacy odczyt jest zawsze OK.
+  let docelowyTop = DEFAULT_TOP;
+  let docelowyLeft = 16;
+
+  function czyRankingPrzeciagniety() {
+    try {
+      return !!localStorage.getItem(LEADERBOARD_POS_KEY);
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function przesunRanking() {
+    const leaderboard = document.getElementById('leaderboard-panel');
+    if (!leaderboard || czyRankingPrzeciagniety()) return;
+    const h = panel.getBoundingClientRect().height;
+    if (h <= 0) return;
+    leaderboard.style.top = `${docelowyTop + h + MARGIN}px`;
+    leaderboard.style.left = `${docelowyLeft}px`;
+  }
 
   function przelicz() {
-    const left = window.innerWidth <= 700 ? 8 : 16;
-    let top = DEFAULT_TOP;
     const hudTopLeft = document.getElementById('hud-top-left');
-    const leaderboard = document.getElementById('leaderboard-panel');
+    let left = window.innerWidth <= 700 ? 8 : 16;
+    let top = DEFAULT_TOP;
+    let width = null;
 
     if (hudTopLeft) {
       const r = hudTopLeft.getBoundingClientRect();
-      if (r.width > 0 && r.height > 0) top = Math.max(top, r.bottom + MARGIN);
-    }
-    if (leaderboard) {
-      const r = leaderboard.getBoundingClientRect();
-      if (r.width > 0 && r.height > 0) top = Math.max(top, r.bottom + MARGIN);
+      if (r.width > 0 && r.height > 0) {
+        top = r.bottom + MARGIN;
+        left = r.left;
+        width = r.width;
+      }
     }
 
-    // Na niskim ekranie (albo gdy hud-top-left/leaderboard sa wysokie, np.
-    // pelny Top 10) samo "top" moze wyleciec poza widoczny obszar - przycinamy
-    // je tak, zeby nagłowek zawsze zostal widoczny, a reszta tresci ma wlasny
-    // scroll w #tutorial-body.
+    // Na niskim ekranie samo "top" moze wyleciec poza widoczny obszar -
+    // przycinamy je tak, zeby nagłowek zawsze zostal widoczny, a reszta
+    // tresci ma wlasny scroll w #tutorial-body.
     const maxTop = Math.max(DEFAULT_TOP, window.innerHeight - MIN_WIDOCZNE);
     top = Math.min(top, maxTop);
 
+    docelowyTop = top;
+    docelowyLeft = left;
+
     panel.style.top = top + 'px';
     panel.style.left = left + 'px';
+    // Szerokosc = szerokosc #hud-top-left (border-box, box-sizing globalny w
+    // style.css) - wpisujemy ja jako inline styl, ktory zawsze bije regule
+    // "width: auto" z media query na waskim ekranie w tutorial.css.
+    if (width !== null) panel.style.width = width + 'px';
 
     const headerH = header.getBoundingClientRect().height || 0;
     const dostepneNaBody = window.innerHeight - top - headerH - MARGIN;
     body.style.maxHeight = Math.max(80, dostepneNaBody) + 'px';
+
+    przesunRanking();
+  }
+
+  // ResizeObserver zamiast recznego wpinania sie w kazde miejsce, ktore moze
+  // zmienic wysokosc/szerokosc obserwowanych elementow (zwiniecie/rozwiniecie
+  // samouczka, zmiana roli widz/admin, doladowana tresc):
+  // - zmiana rozmiaru #hud-top-left przelicza cala pozycje samouczka,
+  // - zmiana rozmiaru samego panelu samouczka (np. zwiniecie) przesuwa ranking.
+  if (typeof ResizeObserver !== 'undefined') {
+    new ResizeObserver(() => przesunRanking()).observe(panel);
+    const hudTopLeft = document.getElementById('hud-top-left');
+    if (hudTopLeft) new ResizeObserver(() => przelicz()).observe(hudTopLeft);
   }
 
   return przelicz;
@@ -184,20 +235,27 @@ function inicjalizuj() {
     zapiszJakoWidziany();
   }
 
-  toggleBtn.addEventListener('click', () => {
-    const bedzieZwiniety = !panel.classList.contains('collapsed');
-    ustawStanZwiniecia(panel, toggleBtn, bedzieZwiniety);
-  });
-
   const header = panel.querySelector('#tutorial-header');
   const body = panel.querySelector('#tutorial-body');
   const przelicz = przelicznikPozycji(panel, body, header);
+
+  toggleBtn.addEventListener('click', () => {
+    const bedzieZwiniety = !panel.classList.contains('collapsed');
+    ustawStanZwiniecia(panel, toggleBtn, bedzieZwiniety);
+    // Zwiniecie/rozwiniecie zmienia wysokosc panelu natychmiast (bez animacji
+    // wysokosci - tylko top/left maja transition), a ranking musi za nim
+    // podazyc od razu, a nie dopiero gdy przegladarka zdazy wywolac
+    // ResizeObserver (w tle bywa to zauwazalnie opoznione).
+    przelicz();
+  });
+
   przelicz();
   window.addEventListener('resize', przelicz);
 
-  // Hud-top-left i leaderboard-panel doladowuja tresc asynchronicznie (stan
-  // gry z API, ranking widzow) - kilka przeliczen w pierwszych sekundach
-  // lapie te pozniejsze zmiany wysokosci bez potrzeby MutationObservera.
+  // Hud-top-left doladowuje tresc asynchronicznie (stan gry z API) i moze
+  // zmienic szerokosc (tryb widza/admina) - ResizeObserver (patrz
+  // przelicznikPozycji) lapie wiekszosc takich zmian na biezaco, a ponizsze
+  // przeliczenia sa dodatkowa siatka bezpieczenstwa na pierwsze sekundy gry.
   const timery = [200, 600, 1200, 2500, 4000];
   for (const ms of timery) {
     setTimeout(przelicz, ms);
