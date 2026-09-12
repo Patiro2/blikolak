@@ -79,6 +79,57 @@ function podmienKoloryNaNasycone(svgText) {
   return out;
 }
 
+// Awaryjna sciezka dla flag, ktorych zrodlowy SVG jest nie do naprawy
+// (zdegenerowana/niepelna geometria - zobacz komentarz przy AS ponizej).
+// Dla tych kodow rasteryzujemy PNG z paczki (assets/flags-png/) zamiast
+// SVG, i podmieniamy paleta NA PIKSELACH canvasu (PNG uzywa tej samej
+// zestylizowanej palety co SVG, wiec bez podmiany flaga wygladalaby blado
+// na tle reszty). Dopasowanie koloru jest "najblizszy sasiad" z progiem
+// odleglosci w przestrzeni RGB - lapie piksele antyaliasingu blisko
+// jednego z 9 kolorow palety, zostawia bez zmian piksele dalekie od
+// wszystkich (np. gdyby PNG mial kolor spoza znanej palety).
+//
+// AS (Samoa Amerykanskie): assets/flags-vector/AS.svg ma geometrie
+// przycieta/zdegenerowana - wspolrzedne ujemne w okolicy -14..+14 przy
+// viewBox 64x64, wiec rysunek renderuje sie jako niewidoczny/przyciety
+// skrawek w rogu, nie flage. Rekonstrukcja wektorowa orla z symbolami
+// wladzy "na oko" bylaby zgadywanka - zamiast tego PNG z paczki (ten sam
+// zasob, ktory Kenney faktycznie wyeksportowal jako obrazek flagi).
+const KODY_PNG_FALLBACK = new Set(['AS']);
+
+function hexNaRgb(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+const PALETA_RGB = Object.entries(PALETA_KOLOROW).map(([stary, nowy]) => [hexNaRgb(stary), hexNaRgb(nowy)]);
+// Prog dopasowania "najblizszy sasiad" - suma kwadratow roznic na R,G,B.
+// 40 na kanal (40*40*3) lapie piksele antyaliasingu przy krawedziach
+// ksztaltow, nie zmienia kolorow spoza palety.
+const PROG_DOPASOWANIA_RGB = 40 * 40 * 3;
+
+function podmienKoloryNaNasyconeNaPikselach(ctx, szerokosc, wysokosc) {
+  const imgData = ctx.getImageData(0, 0, szerokosc, wysokosc);
+  const d = imgData.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const r = d[i], g = d[i + 1], b = d[i + 2];
+    let najlepszy = null;
+    let najlepszaOdleglosc = Infinity;
+    for (const [zrodlo, cel] of PALETA_RGB) {
+      const odleglosc = (r - zrodlo[0]) ** 2 + (g - zrodlo[1]) ** 2 + (b - zrodlo[2]) ** 2;
+      if (odleglosc < najlepszaOdleglosc) {
+        najlepszaOdleglosc = odleglosc;
+        najlepszy = cel;
+      }
+    }
+    if (najlepszy && najlepszaOdleglosc < PROG_DOPASOWANIA_RGB) {
+      d[i] = najlepszy[0];
+      d[i + 1] = najlepszy[1];
+      d[i + 2] = najlepszy[2];
+    }
+  }
+  ctx.putImageData(imgData, 0, 0);
+}
+
 /**
  * Pobiera SVG flagi, podmienia paleta, rasteryzuje do canvasu 256x256 i
  * zwraca CanvasTexture z poprawnym colorSpace/anizotropia. Wynik cache'owany
@@ -89,37 +140,51 @@ function zaladujTeksturaFlagi(kod, renderer) {
   if (cacheTeksturFlag.has(kod)) return cacheTeksturFlag.get(kod);
 
   const promise = (async () => {
-    const resp = await fetch(`assets/flags-vector/${kod}.svg`);
-    if (!resp.ok) throw new Error(`HTTP ${resp.status} przy pobieraniu assets/flags-vector/${kod}.svg`);
-    const svgTextOryginalny = await resp.text();
-    const svgText = podmienKoloryNaNasycone(svgTextOryginalny);
+    const canvas = document.createElement('canvas');
+    canvas.width = ROZMIAR_TEKSTURY_FLAGI;
+    canvas.height = ROZMIAR_TEKSTURY_FLAGI;
+    const ctx = canvas.getContext('2d');
 
-    const blob = new Blob([svgText], { type: 'image/svg+xml' });
-    const url = URL.createObjectURL(blob);
-    try {
+    if (KODY_PNG_FALLBACK.has(kod)) {
+      // Sciezka awaryjna PNG (patrz komentarz przy KODY_PNG_FALLBACK) -
+      // brak URL.createObjectURL/revokeObjectURL, bo Image laduje plik
+      // bezposrednio z assets/flags-png/, bez posredniego Bloba.
       const img = await new Promise((resolve, reject) => {
         const im = new Image();
         im.onload = () => resolve(im);
-        im.onerror = () => reject(new Error(`Blad rasteryzacji SVG flagi ${kod}`));
-        im.src = url;
+        im.onerror = () => reject(new Error(`Blad rasteryzacji PNG flagi ${kod}`));
+        im.src = `assets/flags-png/${kod}.png`;
       });
-
-      const canvas = document.createElement('canvas');
-      canvas.width = ROZMIAR_TEKSTURY_FLAGI;
-      canvas.height = ROZMIAR_TEKSTURY_FLAGI;
-      const ctx = canvas.getContext('2d');
       ctx.drawImage(img, 0, 0, ROZMIAR_TEKSTURY_FLAGI, ROZMIAR_TEKSTURY_FLAGI);
+      podmienKoloryNaNasyconeNaPikselach(ctx, ROZMIAR_TEKSTURY_FLAGI, ROZMIAR_TEKSTURY_FLAGI);
+    } else {
+      const resp = await fetch(`assets/flags-vector/${kod}.svg`);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status} przy pobieraniu assets/flags-vector/${kod}.svg`);
+      const svgTextOryginalny = await resp.text();
+      const svgText = podmienKoloryNaNasycone(svgTextOryginalny);
 
-      const texture = new THREE.CanvasTexture(canvas);
-      texture.colorSpace = THREE.SRGBColorSpace;
-      if (renderer && renderer.capabilities && typeof renderer.capabilities.getMaxAnisotropy === 'function') {
-        texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+      const blob = new Blob([svgText], { type: 'image/svg+xml' });
+      const url = URL.createObjectURL(blob);
+      try {
+        const img = await new Promise((resolve, reject) => {
+          const im = new Image();
+          im.onload = () => resolve(im);
+          im.onerror = () => reject(new Error(`Blad rasteryzacji SVG flagi ${kod}`));
+          im.src = url;
+        });
+        ctx.drawImage(img, 0, 0, ROZMIAR_TEKSTURY_FLAGI, ROZMIAR_TEKSTURY_FLAGI);
+      } finally {
+        URL.revokeObjectURL(url);
       }
-      texture.needsUpdate = true;
-      return texture;
-    } finally {
-      URL.revokeObjectURL(url);
     }
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    if (renderer && renderer.capabilities && typeof renderer.capabilities.getMaxAnisotropy === 'function') {
+      texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    }
+    texture.needsUpdate = true;
+    return texture;
   })();
 
   cacheTeksturFlag.set(kod, promise);
