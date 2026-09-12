@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
-import { loadArcade } from './assets.js';
+import { loadArcade, loadDungeon } from './assets.js';
 import { fmtShort } from './format.js';
 import { normalizePolish } from './vanessa.js';
 import { showBossNotification } from './ui.js';
@@ -8,6 +8,7 @@ import { BossAttackFx } from './bossattack.js';
 import { normalizeNick, usunTagiEmotek } from './kick.js';
 import { audio } from './audio.js';
 import { strumien, losujInt, losujZ } from './rng.js';
+import { BossKowal } from './boss-kowal.js';
 
 // Architektura gotowa na kolejnych bossow (jeden na kazdy tier bankomatu) -
 // tablica indeksowana numerem tieru, wypelniony na razie tylko indeks 1.
@@ -19,8 +20,15 @@ export const BOSS_DEFS = [
     name: 'Kamil Kovalenko',
     subtitle: 'SZEF WSZYSTKICH BANKOMATÓW',
     hp: 100,
+    mechanika: 'rownania',
   },
-  null, // tier 2 - TODO kolejny boss
+  {
+    tier: 2,
+    name: 'Kowal_88',
+    subtitle: 'PRZECIĄŻONY KOWAL Z HUTY',
+    hp: 100,
+    mechanika: 'kowal',
+  },
   null, // tier 3 - TODO kolejny boss
   null, // tier 4 - TODO kolejny boss
   null, // tier 5 - TODO kolejny boss
@@ -182,6 +190,9 @@ export class BossManager {
     this.chairTemplate = null;
     this.charTemplate = null;
     this.animations = [];
+    this.orcTemplate = null; // character-orc.glb (kenney_mini-dungeon) - cialo Kowala_88
+    this.orcAnimations = [];
+    this.kowal = null; // instancja BossKowal - tylko gdy def.mechanika === 'kowal' (patrz src/boss-kowal.js)
 
     this.model = null; // THREE.Group (wozek + postac)
     this.charObj = null; // dziecko-postac, na nim dziala mixer/animacje
@@ -312,14 +323,17 @@ export class BossManager {
   }
 
   async init() {
-    const [chairGltf, charGltf] = await Promise.all([
+    const [chairGltf, charGltf, orcGltf] = await Promise.all([
       loadArcade('wheelchair-deluxe'),
       loadArcade('character-male-f'),
+      loadDungeon('character-orc'),
     ]);
     await this.fx.init();
     this.chairTemplate = chairGltf.scene;
     this.charTemplate = charGltf.scene;
     this.animations = charGltf.animations || [];
+    this.orcTemplate = orcGltf.scene;
+    this.orcAnimations = orcGltf.animations || [];
   }
 
   isActive() {
@@ -346,6 +360,7 @@ export class BossManager {
     nameRow.className = 'boss-name-row';
     nameRow.textContent = '👹 Kamil Kovalenko';
     headerRow.appendChild(nameRow);
+    this.nameRowEl = nameRow;
 
     const hpText = document.createElement('div');
     hpText.className = 'boss-hp-text';
@@ -360,6 +375,20 @@ export class BossManager {
     hpFill.className = 'boss-hp-fill';
     hpWrap.appendChild(hpFill);
     np.appendChild(hpWrap);
+
+    // Pasek przeciazenia (WYLACZNIE Kowal_88, tier 2) - analogiczny do paska
+    // HP powyzej, w innym kolorze. Ukryty domyslnie - pokazywany tylko na
+    // czas walki z bossem, ktorego def.mechanika === 'kowal' (patrz
+    // _beginCutsceneKowal/_teardown).
+    const overloadWrap = document.createElement('div');
+    overloadWrap.className = 'boss-overload-bar';
+    overloadWrap.style.display = 'none';
+    const overloadFill = document.createElement('div');
+    overloadFill.className = 'boss-overload-fill';
+    overloadWrap.appendChild(overloadFill);
+    np.appendChild(overloadWrap);
+    this.overloadWrapEl = overloadWrap;
+    this.overloadFillEl = overloadFill;
 
     // Zintegrowana sekcja działania matematycznego z paskiem odliczania
     const eqSection = document.createElement('div');
@@ -412,6 +441,14 @@ export class BossManager {
     this.titleCardEl = title;
     this.titleNameEl = titleName;
     this.titleSubEl = titleSub;
+
+    // Dymek Kowala_88 - cykliczne teksty nad glowa (patrz BossKowal._updateDymek).
+    // Osobny element, bo eqSection powyzej jest specyficzna dla dzialan bossa 1.
+    const dymek = document.createElement('div');
+    dymek.className = 'boss-dymek';
+    dymek.style.display = 'none';
+    document.body.appendChild(dymek);
+    this.dymekEl = dymek;
   }
 
   /**
@@ -529,7 +566,12 @@ export class BossManager {
       this._teardown();
     }
 
-    if (!this.chairTemplate || !this.charTemplate) {
+    if (def.mechanika === 'kowal') {
+      if (!this.orcTemplate) {
+        this._log('bad', 'Nie moge wystartowac - model Kowala_88 jeszcze sie nie zaladowal');
+        return false;
+      }
+    } else if (!this.chairTemplate || !this.charTemplate) {
       this._log('bad', 'Nie moge wystartowac - model bossa jeszcze sie nie zaladowal');
       return false;
     }
@@ -551,9 +593,19 @@ export class BossManager {
 
     this._log('spawn', `Startuje walka z bossem "${def.name}" (awans na tier ${tier})`, { tier, hp: this.hp });
 
-    audio.play('boss-wejscie');
-    this._buildModel();
-    this._beginCutscene();
+    if (def.mechanika === 'kowal') {
+      // Kowal gra wlasny dzwiek wejscia w chwili zjazdu na linie (patrz
+      // BossKowal.beginEntrance) - nie ma tu cutscenki z podjazdem jak boss 1.
+      this.kowal = new BossKowal(this);
+      this.model = this.kowal.build();
+      this.mixer = null;
+      this._beginCutsceneKowal();
+    } else {
+      this.kowal = null;
+      audio.play('boss-wejscie');
+      this._buildModel();
+      this._beginCutscene();
+    }
     return true;
   }
 
@@ -624,6 +676,7 @@ export class BossManager {
 
     this.titleNameEl.textContent = `👹 ${this.def.name.toUpperCase()}`;
     this.titleSubEl.textContent = this.def.subtitle || '';
+    if (this.nameRowEl) this.nameRowEl.textContent = `👹 ${this.def.name}`;
 
     // reflow, zeby animacje CSS zawsze wystartowaly od nowa
     void this.letterboxTop.offsetWidth;
@@ -634,8 +687,50 @@ export class BossManager {
     this.titleCardEl.classList.add('show');
 
     this.nameplateEl.style.display = 'flex';
+    if (this.overloadWrapEl) this.overloadWrapEl.style.display = 'none';
     this.hpFillEl.style.width = '100%';
     this.hpTextEl.textContent = `${this.hp} / ${this.maxHp}`;
+  }
+
+  /**
+   * Wejscie Kowala_88 - zamiast cutscenki z podjazdem (boss 1), pokazujemy
+   * te sama karte tytulowa/letterbox, ale bez blokady kamery (wlasciciel
+   * zaakceptowal pominiecie kamery kinowej dla tego bossa - wyglada lepiej,
+   * bo widac cala zjazd na linie). Faktyczny zjazd prowadzi BossKowal.update().
+   */
+  _beginCutsceneKowal() {
+    this.state = 'CUTSCENE';
+    this.cutsceneT = 0;
+
+    this.titleNameEl.textContent = `👹 ${this.def.name.toUpperCase()}`;
+    this.titleSubEl.textContent = this.def.subtitle || '';
+    if (this.nameRowEl) this.nameRowEl.textContent = `👹 ${this.def.name}`;
+
+    void this.letterboxTop.offsetWidth;
+    this.letterboxTop.classList.add('show');
+    this.letterboxBottom.classList.add('show');
+    this.titleCardEl.classList.remove('show');
+    void this.titleCardEl.offsetWidth;
+    this.titleCardEl.classList.add('show');
+
+    this.nameplateEl.style.display = 'flex';
+    if (this.overloadWrapEl) {
+      this.overloadWrapEl.style.display = 'block';
+      this.overloadFillEl.style.width = '0%';
+    }
+    this.hpFillEl.style.width = '100%';
+    this.hpTextEl.textContent = `${this.hp} / ${this.maxHp}`;
+
+    this.kowal.beginEntrance();
+  }
+
+  _endCutsceneKowal() {
+    this.letterboxTop.classList.remove('show');
+    this.letterboxBottom.classList.remove('show');
+    this.titleCardEl.classList.remove('show');
+
+    this.state = 'FIGHT';
+    this._log('info', 'Kowal_88 wyladowal na arenie - start walki');
   }
 
   /** Czy boss aktualnie ma pelna kontrole nad kamera (main.js pomija wtedy controls.update()). */
@@ -666,6 +761,12 @@ export class BossManager {
   }
 
   _updateCutscene(delta) {
+    if (this.def && this.def.mechanika === 'kowal') {
+      this.kowal.update(delta);
+      if (!this.kowal.fazaWejscia) this._endCutsceneKowal();
+      return;
+    }
+
     this.cutsceneT += delta;
     const u = Math.min(1, this.cutsceneT / CUTSCENE_DURATION);
 
@@ -768,6 +869,12 @@ export class BossManager {
   // ================= WALKA =================
 
   _updateFight(delta) {
+    if (this.def && this.def.mechanika === 'kowal') {
+      this.kowal.update(delta);
+      if (this.overloadFillEl) this.overloadFillEl.style.width = `${this.kowal.przeciazenie}%`;
+      return;
+    }
+
     // Wstrzas kamery po uderzeniu (dogasa w pierwszych ulamkach sekundy walki)
     if (this._camShakeT > 0) {
       this._camShakeT -= delta;
@@ -858,6 +965,14 @@ export class BossManager {
     // wynik dzialania po wyciecu nie-cyfrowych znakow ponizej.
     content = usunTagiEmotek(content);
     if (!content) return;
+
+    // Kowal_88 (tier 2): KAZDA wiadomosc na czacie (od dowolnego widza, takze
+    // spoza rankingu) podbija pasek przeciazenia - brak tu rownan/ratunku
+    // bossa 1, wiec dalsza czesc tej metody go nie dotyczy.
+    if (this.def && this.def.mechanika === 'kowal') {
+      if (this.kowal) this.kowal.onChatMessage(username, content);
+      return;
+    }
 
     // Ratunek dla omdlonego
     const norm = normalizePolish(content);
@@ -1047,6 +1162,16 @@ export class BossManager {
         `Stracił cały dorobek (<strong>${fmtShort(lostAmount)} zł</strong>) i wypadł z rankingu.`,
       );
       this._log('bad', `Streamer usunal @${username} z panelu eliminacji - stracil ${lostAmount} zl i wypadl z rankingu`, {
+        ofiara: username,
+        utraconeZl: lostAmount,
+      });
+    } else if (source === 'kowal') {
+      showBossNotification(
+        'kill',
+        `💀 KOWAL_88 ZMIAŻDŻYŁ @${username}!`,
+        `Stał na polu, na które wszedł Kowal. Stracił cały dorobek (<strong>${fmtShort(lostAmount)} zł</strong>) i wypadł z rankingu.`,
+      );
+      this._log('bad', `Kowal_88 "zabil" @${username} wchodzac na jego pole - stracil ${lostAmount} zl i wypadl z rankingu`, {
         ofiara: username,
         utraconeZl: lostAmount,
       });
@@ -1373,6 +1498,21 @@ export class BossManager {
     this.currentEq = null;
     this.interDelay = 0;
     if (this.bubbleEl) this.bubbleEl.style.display = 'none';
+    if (this.overloadWrapEl) this.overloadWrapEl.style.display = 'none';
+    if (this.dymekEl) this.dymekEl.style.display = 'none';
+
+    if (this.def && this.def.mechanika === 'kowal') {
+      // Kowal stoi (nie siedzi w wozku) - standardowy klip "die" z rigu
+      // Kenneya pasuje tu wprost, bez recznej pozy na kosciach.
+      if (this.kowal) this.kowal.playAction('die', { hard: true, once: true });
+      this._victoryT = 0;
+      showBossNotification(
+        'boss',
+        '🏆 KOWAL_88 POKONANY!',
+        'Czat okrążył i powalił Kowala! Bankomat wraca na nowym tierze.',
+      );
+      return;
+    }
 
     // Boss siedzi w wozku - klip "die" (dla postaci stojacej) wygladal tu zle.
     // Zamiast niego bezwladne osuniecie sie w fotelu na kosciach.
@@ -1390,6 +1530,12 @@ export class BossManager {
   }
 
   _updateVictory(delta) {
+    // Kowal_88 trzyma wlasny mixer w BossKowal (this.mixer tutaj zostaje null,
+    // patrz start()) - bez tego klip "die" odegralby sie tylko na pierwszej
+    // klatce i zamarl, bo nic wiecej nie wolaloby mixer.update() w tym stanie.
+    if (this.def && this.def.mechanika === 'kowal' && this.kowal && this.kowal.mixer) {
+      this.kowal.mixer.update(delta);
+    }
     this._victoryT = (this._victoryT || 0) + delta;
     if (this.model) {
       this.model.rotation.z = Math.min(0.6, this._victoryT * 0.4);
@@ -1429,6 +1575,10 @@ export class BossManager {
     this._timeryAtakow = [];
     this._zdejmijBron();
     this.fx.clear();
+    if (this.kowal) {
+      this.kowal.teardown();
+      this.kowal = null;
+    }
     if (this.model) {
       this.scene.remove(this.model);
       this.model = null;
@@ -1452,6 +1602,8 @@ export class BossManager {
 
     if (this.nameplateEl) this.nameplateEl.style.display = 'none';
     if (this.bubbleEl) this.bubbleEl.style.display = 'none';
+    if (this.overloadWrapEl) this.overloadWrapEl.style.display = 'none';
+    if (this.dymekEl) this.dymekEl.style.display = 'none';
     this.letterboxTop.classList.remove('show');
     this.letterboxBottom.classList.remove('show');
     this.titleCardEl.classList.remove('show');
@@ -1481,6 +1633,7 @@ export class BossManager {
 
     if (this._projected.z >= 1.0) {
       this.nameplateEl.style.display = 'none';
+      if (this.dymekEl) this.dymekEl.style.display = 'none';
       return;
     }
 
@@ -1508,6 +1661,22 @@ export class BossManager {
       const showEq = this.state === 'FIGHT' && this.currentEq && this.interDelay <= 0;
       this.equationSectionEl.style.display = showEq ? 'flex' : 'none';
     }
+
+    // Dymek Kowala_88 - nad plakietka (ten sam ekranowy punkt sx/sy, tylko
+    // wyzej o stala wartosc - prostsze i rownie stabilne niz osobne
+    // rzutowanie 3D->2D drugiego punktu swiata).
+    if (this.dymekEl) {
+      const pokazDymek = this.def && this.def.mechanika === 'kowal'
+        && this.state === 'FIGHT' && this.kowal && this.kowal.dymekTekst;
+      if (pokazDymek) {
+        this.dymekEl.textContent = this.kowal.dymekTekst;
+        this.dymekEl.style.left = `${sx}px`;
+        this.dymekEl.style.top = `${sy - 92}px`;
+        this.dymekEl.style.display = 'block';
+      } else {
+        this.dymekEl.style.display = 'none';
+      }
+    }
   }
 
   // ================= SYNCHRONIZACJA STANU (widz dolaczajacy w trakcie walki) =================
@@ -1520,7 +1689,7 @@ export class BossManager {
 
   /** Wycinek stanu wysylany na serwer (patrz zbierzStan w main.js). */
   getSyncState() {
-    return {
+    const stan = {
       aktywny: this.state === 'CUTSCENE' || this.state === 'FIGHT' || this.state === 'VICTORY',
       tier: this.pendingTier,
       hp: this.hp,
@@ -1528,6 +1697,10 @@ export class BossManager {
       licznikAtakow: this.licznikAtakow,
       startWalki: this.startWalki,
     };
+    if (this.def && this.def.mechanika === 'kowal' && this.kowal) {
+      stan.kowal = this.kowal.getSyncState();
+    }
+    return stan;
   }
 
   /**
@@ -1553,6 +1726,11 @@ export class BossManager {
         if (this.hpFillEl) this.hpFillEl.style.width = `${(this.hp / this.maxHp) * 100}%`;
         if (this.hpTextEl) this.hpTextEl.textContent = `${this.hp} / ${this.maxHp}`;
       }
+      if (this.def && this.def.mechanika === 'kowal') {
+        if (this.kowal && bossState.kowal) this.kowal.applySync(bossState.kowal);
+        return;
+      }
+
       const rownanieZmienione = bossState.licznikRownan !== undefined && bossState.licznikRownan !== this.licznikRownan;
       if (bossState.licznikRownan !== undefined) this.licznikRownan = bossState.licznikRownan;
       if (bossState.licznikAtakow !== undefined) this.licznikAtakow = bossState.licznikAtakow;
@@ -1577,7 +1755,13 @@ export class BossManager {
     const def = BOSS_DEFS[tier];
     if (!def) return false;
     if (this.state !== 'IDLE') this._teardown();
-    if (!this.chairTemplate || !this.charTemplate) {
+
+    if (def.mechanika === 'kowal') {
+      if (!this.orcTemplate) {
+        this._log('bad', 'Nie moge dolaczyc do walki (sync) - model Kowala_88 jeszcze sie nie zaladowal');
+        return false;
+      }
+    } else if (!this.chairTemplate || !this.charTemplate) {
       this._log('bad', 'Nie moge dolaczyc do walki (sync) - model bossa jeszcze sie nie zaladowal');
       return false;
     }
@@ -1596,6 +1780,26 @@ export class BossManager {
 
     this._log('info', `Dolaczam do trwajacej walki z bossem "${def.name}" (sync, bez cutscenki)`, bossState);
 
+    if (this.nameRowEl) this.nameRowEl.textContent = `👹 ${def.name}`;
+
+    if (def.mechanika === 'kowal') {
+      this.kowal = new BossKowal(this);
+      this.model = this.kowal.build();
+      this.mixer = null;
+      this.kowal.startFromSync(bossState.kowal);
+
+      this.state = 'FIGHT';
+      if (this.nameplateEl) this.nameplateEl.style.display = 'flex';
+      if (this.overloadWrapEl) {
+        this.overloadWrapEl.style.display = 'block';
+        this.overloadFillEl.style.width = `${this.kowal.przeciazenie}%`;
+      }
+      if (this.hpFillEl) this.hpFillEl.style.width = `${(this.hp / this.maxHp) * 100}%`;
+      if (this.hpTextEl) this.hpTextEl.textContent = `${this.hp} / ${this.maxHp}`;
+      return true;
+    }
+
+    this.kowal = null;
     this._buildModel();
     if (this.machine.model) {
       this.machine.model.rotation.z = 0.35;
@@ -1609,6 +1813,7 @@ export class BossManager {
 
     this.state = 'FIGHT';
     if (this.nameplateEl) this.nameplateEl.style.display = 'flex';
+    if (this.overloadWrapEl) this.overloadWrapEl.style.display = 'none';
     if (this.hpFillEl) this.hpFillEl.style.width = `${(this.hp / this.maxHp) * 100}%`;
     if (this.hpTextEl) this.hpTextEl.textContent = `${this.hp} / ${this.maxHp}`;
 
