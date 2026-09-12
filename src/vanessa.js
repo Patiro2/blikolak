@@ -127,6 +127,15 @@ export class VanessaManager {
     this.projectAndFloat = projectAndFloat;
     this.onRewardViewer = onRewardViewer || null;
 
+    // Predykat uprawnien do "reczne" przegnania Vanessy myszka (model, plakietka,
+    // dymek - wszystkie 3 sciezki ida przez chaseAway() nizej). Ustawiane z
+    // main.js, sprawdzane W CHWILI KLIKU (nie raz przy starcie) - patrz ten sam
+    // wzorzec i to samo uzasadnienie co machine.czyKlikaniaDozwolone w machine.js.
+    // NIE dotyczy chaseAwayByViewer() (haslo na czacie) - to jest wlasciwa,
+    // zamierzona droga dla KAZDEGO widza i zostaje bez zmian. Domyslnie null =
+    // dozwolone.
+    this.czyKlikaniaDozwolone = null;
+
     this.template = null;
     this.animations = null;
     this.model = null;
@@ -627,6 +636,17 @@ export class VanessaManager {
    * Przegonienie Vanessy po kliknięciu na nią przez gracza myszką.
    */
   chaseAway(point) {
+    // Wspolny straznik dla WSZYSTKICH 3 sciezek klikania myszka (model przez
+    // machine.registerClickable, plakietka i dymek przez pointerdown - patrz
+    // wywolania chaseAway() nizej w tym pliku) - to jedyne miejsce, ktorym
+    // wszystkie trzy przechodza, wiec jeden straznik tutaj wystarcza zamiast
+    // powtarzania go w kazdym z 3 listenerow. Sprawdzenie jest NA SAMEJ
+    // GORZE, przed jakimkolwiek efektem (stan/dzwiek/animacja/kasa/floater) -
+    // widz bez uprawnien ma dostac calkowita cisze, nie polowiczny efekt.
+    // chaseAwayByViewer() (haslo na czacie) NIE jest tym objete - to osobna,
+    // zamierzona droga dla kazdego widza.
+    if (this.czyKlikaniaDozwolone && !this.czyKlikaniaDozwolone()) return;
+
     if (this.state === 'IDLE' || this.state === 'FLEEING') {
       this._log('info', `Gracz kliknal Vanesse, ale stan to ${this.state} - bez efektu`);
       return;

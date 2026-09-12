@@ -27,6 +27,16 @@ export class Machine {
 
     this.onClickHit = null; // callback(point: Vector3)
 
+    // Predykat uprawnien do klikania w bankomat - USTAWIANY Z ZEWNATRZ (main.js).
+    // Machine.js celowo NIE importuje remote.js (mechanizm tutaj, polityka w
+    // main.js) - patrz komentarz przy sprawdzeniu w _handlePointerUp. Sprawdzany
+    // W CHWILI KAZDEGO KLIKNIECIA (nie raz przy starcie), bo remote.czyAdmin()
+    // zmienia sie w trakcie zycia strony (logowanie/wylogowanie przyciskiem w
+    // HUD) - dokladnie ta sama pulapka co isHost w minigrze flag, tu naprawiona
+    // od razu. Domyslnie null = klikanie DOZWOLONE (zeby brak konfiguracji nie
+    // wylaczal po cichu calej gry przy uruchomieniu lokalnym/bez wdrozonej polityki).
+    this.czyKlikaniaDozwolone = null;
+
     domElement.addEventListener('pointerdown', (e) => this._handlePointerDown(e));
     domElement.addEventListener('pointerup', (e) => this._handlePointerUp(e));
   }
@@ -87,6 +97,14 @@ export class Machine {
     if (best.extra) {
       best.extra.onClick(best.point);
     } else {
+      // Klik bezposrednio w model bankomatu jest zastrzezony dla zalogowanego
+      // wlasciciela (patrz main.js: machine.czyKlikaniaDozwolone). Sprawdzenie
+      // MUSI byc PRZED animacja (_playClickAnim) i PRZED onClickHit - inaczej
+      // widz zobaczylby bankomat "reagujacy" na klik, ktory nic nie robi (gorsze
+      // wrazenie niz calkowity brak reakcji). Klik bez uprawnien jest calkowicie
+      // cichy: bez dzwieku, bez monet, bez animacji, bez zadnego komunikatu -
+      // widz nie zrobil nic zlego, po prostu ta akcja nie jest dla niego.
+      if (this.czyKlikaniaDozwolone && !this.czyKlikaniaDozwolone()) return;
       this._playClickAnim();
       if (this.onClickHit) this.onClickHit(best.point);
     }

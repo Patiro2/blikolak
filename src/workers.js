@@ -258,6 +258,14 @@ export class WorkerManager {
         walkAction: null,
         interactAction: null,
         dieAction: null,
+        // Pelna lista klipow z GLTF (nie tylko idle/walk/interact/die zaladowane
+        // nizej) - potrzebna do leniwego wyszukania klipow ataku na zadanie
+        // (attack-melee-*/attack-kick-*, patrz triggerAttack nizej). GLTFLoader
+        // NIE dopina animacji do obiektu sceny - trzeba ich szukac w gltf.animations
+        // po nazwie (tak samo jak idle/walk/interact/die ponizej).
+        gltfAnimations: gltf.animations,
+        attackActions: {}, // nazwa klipu -> AnimationAction, budowane na zadanie w triggerAttack
+        _aktywnaAkcjaAtaku: null,
         playingInteract: false,
         isFainted: false,
         isRobbed: false,
@@ -298,6 +306,17 @@ export class WorkerManager {
             // idle MUSI byc wznowione przed przejsciem - patrz _wrocDoIdle.
             wrocDoIdle(entry, entry.interactAction, 0.3);
           }
+        } else if (entry._aktywnaAkcjaAtaku && e.action === entry._aktywnaAkcjaAtaku) {
+          // Koniec klipu ataku (attack-melee-*/attack-kick-*, patrz triggerAttack)
+          // - dokladnie ta sama sciezka powrotu co po interactAction: idle MUSI
+          // byc jawnie wznowione PRZED crossFadeTo, inaczej postac zamarza w T-pozie
+          // (crossFadeTo samo NIE uruchamia akcji docelowej - patrz wrocDoIdle).
+          const akcja = entry._aktywnaAkcjaAtaku;
+          entry._aktywnaAkcjaAtaku = null;
+          entry.playingInteract = false;
+          if (entry.idleAction && !entry.isFainted && !entry.isMoving) {
+            wrocDoIdle(entry, akcja, 0.25);
+          }
         }
       });
 
@@ -333,6 +352,47 @@ export class WorkerManager {
     if (entry.idleAction) {
       entry.idleAction.crossFadeTo(entry.interactAction, 0.15, false);
     }
+  }
+
+  /**
+   * Odtwarza jeden z klipow walki (attack-melee-right/left, attack-kick-right/left
+   * - kazda postac w projekcie ma je w swoim wspolnym slowniku klipow, patrz
+   * README) na zadanie minigry "Bitwa o flagi" (patrz flagbattle.js). Klip
+   * jest szukany leniwie w entry.gltfAnimations i cache'owany w entry.attackActions,
+   * dokladnie jak interactAction, ale bez ograniczania sie do jednej z gory
+   * ustalonej animacji - stad osobna metoda zamiast rozszerzania triggerInteract.
+   *
+   * Powrot do idle idzie PRZEZ wrocDoIdle (patrz listener 'finished' w
+   * addWorkerType) - crossFadeTo() samo NIE uruchamia akcji docelowej, wiec
+   * pominiecie tego zostawia postac w T-pozie po zakonczeniu ciosu.
+   *
+   * Zwraca true, jesli animacja faktycznie ruszyla (model tego pakietu ma
+   * dany klip i postac nie jest akurat zajeta czyms innym), false w
+   * przeciwnym razie - wywolujacy moze to bezpiecznie zignorowac (minigra
+   * dziala dalej nawet bez animacji, to czysto kosmetyczny dodatek).
+   */
+  triggerAttack(entry, nazwaKlipu) {
+    if (!entry || !entry.mixer || entry.isFainted || entry.isMoving || entry.playingInteract) return false;
+
+    let action = entry.attackActions[nazwaKlipu];
+    if (!action) {
+      const clip = entry.gltfAnimations && THREE.AnimationClip.findByName(entry.gltfAnimations, nazwaKlipu);
+      if (!clip) return false; // ten model akurat nie ma tego klipu - nic sie nie dzieje
+      action = entry.mixer.clipAction(clip);
+      action.setLoop(THREE.LoopOnce);
+      action.clampWhenFinished = true;
+      entry.attackActions[nazwaKlipu] = action;
+    }
+
+    entry.playingInteract = true; // ta sama flaga co triggerInteract - blokuje nakladajace sie animacje
+    entry._aktywnaAkcjaAtaku = action;
+    action.reset();
+    action.setEffectiveWeight(1);
+    action.play();
+    if (entry.idleAction) {
+      entry.idleAction.crossFadeTo(action, 0.12, false);
+    }
+    return true;
   }
 
   /**

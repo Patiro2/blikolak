@@ -81,6 +81,12 @@ async function main() {
   city.build(scene, renderer);
 
   const machine = new Machine(scene, camera, renderer.domElement);
+  // Polityka uprawnien (kto smie klikac w bankomat myszka) zyje TU, nie w
+  // machine.js - patrz komentarz przy czyKlikaniaDozwolone w machine.js.
+  // Strzalka, nie zapamietana wartosc: remote.czyAdmin() jest wolane PRZY
+  // KAZDYM kliknieciu, wiec zalogowanie/wylogowanie przyciskiem w HUD w
+  // trakcie zycia strony dziala natychmiast, bez przeladowania.
+  machine.czyKlikaniaDozwolone = () => remote.czyAdmin();
   await machine.setTier(economy.state.machineTier);
 
   const workerManager = new WorkerManager(scene);
@@ -253,6 +259,31 @@ async function main() {
    * snapshoty przychodzace natychmiast kanalem realtime (patrz realtime.onSnapshot
    * nizej). Ksztalt `stan` jest identyczny w obu przypadkach (patrz zbierzStan).
    */
+  /**
+   * NAPRAWA: kazdy z krokow nizej byl wolany "goly", jeden po drugim, bez
+   * zadnej izolacji - wyjatek w KTORYMKOLWIEK z nich (np. boss.applySync na
+   * nieoczekiwanym ksztalcie danych, gdy karta hosta i karta widza sa
+   * chwilowo na roznych wersjach kodu po wdrozeniu - karta hosta nie
+   * przeladowuje sie sama) ucinal WSZYSTKIE kolejne kroki w tym wywolaniu.
+   * Skoro cala funkcja jest wolana jako `zastosujStanZSerwera(dane).catch(...)`
+   * z realtime.onSnapshot (patrz nizej), jedyny slad w konsoli ladowal sie
+   * na samym koncu, bez wskazania KTORY krok faktycznie padl - z zewnatrz
+   * wygladalo to jak "synchronizacja czasem po cichu nie dziala", co 2 sekundy,
+   * bez zadnego namierzalnego sladu. Kazdy krok ma wiec teraz WLASNA izolacje
+   * (krokStanu nizej) - blad w bossie nie kradnie pracownikow, blad w
+   * pracownikach nie kradnie minigry, zaden z nich nie blokuje odswiezenia
+   * rankingu, i kazdy blad trafia do konsoli z nazwa kroku, ktory go rzucil.
+   *
+   * WYJATEK: krok epoki/resetu (zaraz ponizej) NIE jest izolowany w ten sam
+   * sposob - celowo. Jesli resetLokalny() wysypie sie w polowie, scena moze
+   * zostac w niespojnym stanie (czesc obiektow usunieta, czesc nie) i
+   * nakladanie na to boss/workers/flagBattle z tego samego snapshotu i tak
+   * nie mialoby sensu. Wyjatek leci wiec dalej do wywolujacego (ktory i tak
+   * go lapie - patrz realtime.onSnapshot/synchronizujZSerwera), a linia
+   * `ostatniaEpokaSerwera = epokaZSerwera` NIE wykonuje sie w takim wypadku -
+   * dzieki temu kolejny snapshot (za 2 s) sam ponowi reset zamiast po cichu
+   * zostawic widza ze starymi obiektami na zawsze.
+   */
   async function zastosujStanZSerwera(stan) {
     if (!stan) return;
 
@@ -267,32 +298,50 @@ async function main() {
     }
     if (epokaZSerwera) ostatniaEpokaSerwera = epokaZSerwera;
 
-    if (stan.economy) Object.assign(economy.state, stan.economy);
-    if (stan.leaderboard) kickChat.leaderboard = stan.leaderboard;
-    if (stan.assignments) kickChat.assignments = stan.assignments;
-    kickChat.updateAssignments();
-    if (machine.currentTier !== economy.state.machineTier) {
-      await machine.setTier(economy.state.machineTier);
-    }
+    await krokStanu('economy', () => {
+      if (stan.economy) Object.assign(economy.state, stan.economy);
+    });
+    await krokStanu('leaderboard+assignments', () => {
+      if (stan.leaderboard) kickChat.leaderboard = stan.leaderboard;
+      if (stan.assignments) kickChat.assignments = stan.assignments;
+      kickChat.updateAssignments();
+    });
+    await krokStanu('machine.setTier', async () => {
+      if (machine.currentTier !== economy.state.machineTier) {
+        await machine.setTier(economy.state.machineTier);
+      }
+    });
     // Stan walki z bossem - widz, ktory wchodzi w trakcie walki, podejmuje ja
     // bez cutscenki z tym samym hp i tym samym rownaniem (patrz boss.applySync).
-    if (stan.boss) {
-      boss.applySync(stan.boss);
-    }
+    await krokStanu('boss.applySync', () => {
+      if (stan.boss) boss.applySync(stan.boss);
+    });
     // Pozycje pracownikow na siatce - pomijamy u hosta (host jest zrodlem
     // prawdy, patrz komentarz w WorkerManager.applySync).
-    if (stan.workers && !remote.czyAdmin()) {
-      workerManager.applySync(stan.workers);
-    }
+    await krokStanu('workerManager.applySync', () => {
+      if (stan.workers && !remote.czyAdmin()) workerManager.applySync(stan.workers);
+    });
     // Minigra "Bitwa o flagi" - patrz komentarz przy isHost w flagbattle.js:
     // widz nie losuje juz nic sam, tylko odgrywa to, co przyslal host.
-    if (!remote.czyAdmin()) {
-      flagBattle.applySync(stan.flagBattle || null);
-    }
+    await krokStanu('flagBattle.applySync', () => {
+      if (!remote.czyAdmin()) flagBattle.applySync(stan.flagBattle || null);
+    });
     try {
       await syncLeaderboardAndOverlays();
     } catch (err) {
       console.error('[stan] Blad odswiezania po synchronizacji:', err);
+    }
+  }
+
+  /** Wykonuje jeden krok zastosujStanZSerwera w izolacji - patrz komentarz powyzej. */
+  async function krokStanu(nazwaKroku, fn) {
+    try {
+      await fn();
+    } catch (err) {
+      console.error(
+        `[stan] Blad w kroku '${nazwaKroku}' przy stosowaniu stanu z serwera - pomijam TYLKO ten krok, reszta stanu leci dalej:`,
+        err,
+      );
     }
   }
 
@@ -458,6 +507,16 @@ async function main() {
   function zastosujTrybAdmina() {
     const admin = remote.czyAdmin();
     document.body.classList.toggle('tryb-widza', !admin);
+    // NAPRAWA: flagBattle.setContext() ustawia isHost tylko RAZ, przy starcie
+    // main() - karta wlasciciela startujaca niezalogowana zostawala z
+    // isHost=false na stale, wiec minigra nigdy nie startowala nawet po
+    // zalogowaniu (patrz komentarz w flagbattle.js przy setHost). Ta funkcja
+    // jest juz wolana przy starcie, logowaniu i wylogowaniu - wiec to
+    // jedyne miejsce, ktore potrzebuje odswiezac role minigry w locie.
+    // Musi byc PRZED wczesniejszymi "return" nizej (brak przycisku/tryb
+    // lokalny), bo rola minigry ma sie zmieniac niezaleznie od tego, czy
+    // przycisk admina w ogole istnieje na stronie.
+    flagBattle.setHost(admin);
     if (!adminBtn) return;
     if (czyLokalnie()) {
       // Lokalnie nie ma sie gdzie logowac - chowamy przycisk.
@@ -734,6 +793,11 @@ async function main() {
   });
   workerManager.setContext({ boss, vanessa, flagBattle });
   vanessa.setContext({ workerManager, kickChat });
+  // Ta sama polityka co machine.czyKlikaniaDozwolone powyzej - patrz komentarz
+  // tam. Obejmuje wszystkie 3 sciezki klikania myszka w Vanesse (model,
+  // plakietka, dymek), bo wszystkie ida przez jeden wspolny straznik w
+  // vanessa.chaseAway() (patrz vanessa.js).
+  vanessa.czyKlikaniaDozwolone = () => remote.czyAdmin();
   boss.setContext({
     workerManager,
     workerOverlays,
@@ -766,6 +830,7 @@ async function main() {
     kickChat,
     economy,
     isHost: remote.czyAdmin(),
+    boss,
   });
   // Narracja bitwy ("Bitwa o flagi! X vs Y!", "X wygrywa!"...) dociera do
   // widza z hostowej karty natychmiast przez kanal realtime, zamiast czekac
@@ -776,6 +841,18 @@ async function main() {
     if (remote.czyAdmin()) {
       realtime.wyslijZdarzenie('flaga-info', { text });
     }
+  };
+  // Dymek "+2 zl" nad zwyciezca minigry, raz na sekunde w trakcie nagrody
+  // (patrz komentarz przy onRewardTick w flagbattle.js). Samo naliczanie
+  // kasy juz dziala (economy.addMoney w tick()) - to WYLACZNIE wizualne
+  // potwierdzenie, idzie przez ten sam sprawdzony projectAndFloat co kazdy
+  // inny dymek w grze (a wiec przez #floaters, nie przez nieistniejacy
+  // #ui-layer, ktory kiedys polozyl produkcje - patrz historia tego pliku).
+  flagBattle.onRewardTick = (winner) => {
+    const w = workerManager.getWorkerType(winner.typeIndex);
+    if (!w || !w.obj) return;
+    const origin = w.obj.position.clone().add(new THREE.Vector3(0, 1.8, 0));
+    projectAndFloat(origin, '+2 zł', { crit: false });
   };
 
   // Widz otwierajacy karte w trakcie walki z bossem podejmuje ja od razu, bez
