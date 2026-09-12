@@ -184,6 +184,7 @@ async function main() {
       leaderboard: kickChat.leaderboard,
       assignments: kickChat.assignments,
       boss: boss.getSyncState(),
+      workers: workerManager.getSyncState(),
     };
   }
 
@@ -272,6 +273,11 @@ async function main() {
     if (stan.boss) {
       boss.applySync(stan.boss);
     }
+    // Pozycje pracownikow na siatce - pomijamy u hosta (host jest zrodlem
+    // prawdy, patrz komentarz w WorkerManager.applySync).
+    if (stan.workers && !remote.czyAdmin()) {
+      workerManager.applySync(stan.workers);
+    }
     try {
       await syncLeaderboardAndOverlays();
     } catch (err) {
@@ -306,20 +312,22 @@ async function main() {
   function zastosujZdarzenieZdalne(nazwa, dane) {
     if (remote.czyAdmin()) return;
     if (nazwa === 'klik') {
-      const nick = (dane && dane.nick) || 'Widz';
+      // Zdarzenie 'klik' jest rozglaszane WYLACZNIE dla klikniec wlasciciela
+      // myszka w model 3D (patrz machine.onClickHit nizej) - klik z czatu NIE
+      // jest tu rozglaszany, bo kazda karta widza ma wlasne polaczenie z
+      // czatem Kicka i widzi te sama wiadomosc sama (patrz kickChat.onKlik).
+      // Rozglaszanie klikow z czatu dawalo podwojny dzwiek/animacje/wysyp
+      // monet u kazdego widza - raz z wlasnego czatu, raz z tego zdarzenia.
       const wartosc = dane && typeof dane.wartosc === 'number' ? dane.wartosc : 0;
       const isCrit = !!(dane && dane.isCrit);
+      const opis = dane && dane.zrodlo === 'gracz' ? 'Streamer' : null;
       machine.triggerClickAnim();
       audio.play('klik');
       if (isCrit) audio.play('kryt');
       coinPool.burst(machineBurstOrigin, wartosc);
-      const text = isCrit ? `KRYT! +${fmtShort(wartosc)} (@${nick})` : `+${fmtShort(wartosc)} (@${nick})`;
+      const suffix = opis ? ` (${opis})` : '';
+      const text = isCrit ? `KRYT! +${fmtShort(wartosc)}${suffix}` : `+${fmtShort(wartosc)}${suffix}`;
       projectAndFloat(machineBurstOrigin, text, { crit: isCrit, kick: true });
-      const assignedSlot = kickChat.getWorkerForUser(nick);
-      if (assignedSlot !== null) {
-        const entry = workerManager.getWorkerType(assignedSlot);
-        if (entry) workerManager.triggerInteract(entry);
-      }
     } else if (nazwa === 'awans-tieru') {
       const tier = dane && typeof dane.tier === 'number' ? dane.tier : null;
       if (tier !== null && MACHINE_TIERS[tier]) {
@@ -589,12 +597,14 @@ async function main() {
       projectAndFloat(machineBurstOrigin, text, { crit: isCrit, kick: true });
       kickUI.updateKliksCount(kickChat.stats.kliksReceived);
 
-      // Natychmiastowe zdarzenie kanalem realtime - u widza wywoluje ten sam
-      // efekt wizualny/dzwiekowy bez czekania na snapshot co 2 s. No-op, gdy
-      // ta karta nie jest hostem albo relay jest wylaczony/rozlaczony.
-      if (remote.czyAdmin()) {
-        realtime.wyslijZdarzenie('klik', { nick, wartosc: value, isCrit });
-      }
+      // UWAGA: klik z czatu NIE jest tu rozglaszany zdarzeniem realtime.
+      // Kazda karta (wlasciciela i kazdego widza) ma wlasne polaczenie z
+      // czatem Kicka i widzi te sama wiadomosc "klik" sama, natychmiast -
+      // wiec rozgloszenie byloby zbedne i dawaloby podwojny efekt u widzow
+      // (raz z ich wlasnego czatu, raz z tego zdarzenia). Zdarzenie 'klik'
+      // jest rozglaszane WYLACZNIE dla klikniec wlasciciela myszka w model
+      // 3D (patrz machine.onClickHit nizej), bo tych widz nie ma jak sam
+      // zobaczyc.
 
       // Rejestracja wygenerowanego zarobku w rankingu widzów (automatycznie wywołuje onLeaderboardUpdate)
       kickChat.recordEarned(nick, value, sender.identity?.color);
@@ -705,9 +715,11 @@ async function main() {
     const text = isCrit ? `KRYT! +${fmtShort(value)}` : `+${fmtShort(value)}`;
     projectAndFloat(point, text, { crit: isCrit });
 
-    // Widzowie dostaja klik wlasciciela natychmiast, tak samo jak klik z czatu.
+    // Widzowie dostaja klik wlasciciela natychmiast - to JEDYNE zrodlo klikow,
+    // dla ktorego zdarzenie 'klik' jest rozglaszane (patrz komentarz w onKlik
+    // powyzej): widz nie ma czatowej wiadomosci, z ktorej sam by sie o tym dowiedzial.
     if (remote.czyAdmin()) {
-      realtime.wyslijZdarzenie('klik', { nick: null, wartosc: value, isCrit });
+      realtime.wyslijZdarzenie('klik', { zrodlo: 'gracz', wartosc: value, isCrit });
     }
     obsluzAwansTieru(tierAdvanced).catch((err) =>
       console.error('[klik-gracz] Blad awansu tieru:', err),

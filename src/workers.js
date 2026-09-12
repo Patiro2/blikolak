@@ -549,6 +549,63 @@ export class WorkerManager {
     }
   }
 
+  // ================= SYNCHRONIZACJA POZYCJI (widz dolaczajacy w trakcie streamu) =================
+
+  /**
+   * Wycinek stanu pozycji na siatce wysylany na serwer/kanalem realtime (patrz
+   * zbierzStan w main.js). Tylko zajete sloty - nieobecny pracownik nie ma
+   * czego synchronizowac.
+   */
+  getSyncState() {
+    return this.entries.map((entry) => ({
+      slot: entry.typeIndex,
+      gridX: entry.gridX,
+      gridZ: entry.gridZ,
+      facingAngle: entry.facingAngle,
+    }));
+  }
+
+  /**
+   * Wyrownuje lokalne pozycje na siatce do tego, co przyszlo z serwera/hosta
+   * (widz, patrz zastosujStanZSerwera w main.js) - host NIGDY tego nie woluje,
+   * bo to on jest zrodlem prawdy dla pozycji.
+   *
+   * Pracownika w trakcie animacji kroku (entry.isMoving) NIE szarpiemy -
+   * dokanczamy jego biezacy krok i korekte odkladamy do nastepnego wywolania,
+   * kiedy juz stoi. Gdy pozycja juz sie zgadza, nie robimy nic (unikniecie
+   * zbednego "cichego" teleportu w miejscu przy kazdym snapshocie).
+   */
+  applySync(stan) {
+    if (!Array.isArray(stan)) return;
+    for (const wpis of stan) {
+      if (!wpis) continue;
+      const slot = Number(wpis.slot);
+      const entry = this.getWorkerType(slot);
+      if (!entry || !entry.obj) continue;
+      if (entry.isMoving) continue; // dokoncz biezacy krok, korekta przy kolejnym snapshocie
+
+      const gridX = Number(wpis.gridX);
+      const gridZ = Number(wpis.gridZ);
+      const facingAngle = Number(wpis.facingAngle);
+      if (!Number.isFinite(gridX) || !Number.isFinite(gridZ) || !Number.isFinite(facingAngle)) continue;
+
+      const zgodna = entry.gridX === gridX && entry.gridZ === gridZ && entry.facingAngle === facingAngle;
+      if (zgodna) continue;
+
+      entry.gridX = gridX;
+      entry.gridZ = gridZ;
+      entry.facingAngle = facingAngle;
+      entry.targetGridX = gridX;
+      entry.targetGridZ = gridZ;
+      entry.startRotY = facingAngle;
+      entry.targetRotY = facingAngle;
+      entry.obj.position.set(gridX, 0, gridZ);
+      entry.obj.rotation.y = facingAngle;
+      entry.startPos.set(gridX, 0, gridZ);
+      entry.targetPos.set(gridX, 0, gridZ);
+    }
+  }
+
   clear() {
     for (const entry of this.entries) {
       if (entry.obj) this.scene.remove(entry.obj);

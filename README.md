@@ -224,6 +224,22 @@ serwera-przekaźnika (`server/`), a ten rozgłasza go wszystkim widzom. Zdarzeni
 i prostuje ewentualny dryf. Nowy widz dostaje ostatni snapshot od razu po
 podłączeniu, więc wchodzący w trakcie streamu nie ogląda pustej planszy.
 
+Snapshot (`zbierzStan()` w `main.js`) niesie: `economy` (pula, licznik klików,
+tier, ziarno, epoka), `leaderboard`, `assignments`, stan walki z bossem oraz
+**pozycje pracowników na siatce** (`workers`). Te ostatnie są istotne, bo
+ostrzał rakietowy bossa zabija WEDŁUG POZYCJI - bez nich widz wchodzący w
+trakcie streamu miałby wszystkich na polach startowych i widziałby, jak giną
+zupełnie inne osoby niż reszta czatu. Korekta pozycji pomija pracownika
+będącego w trakcie animacji kroku (`entry.isMoving`), żeby snapshot nie szarpał
+postacią w połowie ruchu.
+
+**Zdarzenie `klik` dotyczy WYŁĄCZNIE kliknięć streamera myszką w model**
+(`zrodlo: 'gracz'`). Kliki z czatu nie są rozgłaszane celowo: każda karta ma
+własne połączenie z czatem Kicka i widzi tę samą wiadomość sama, więc broadcast
+odtwarzałby efekt drugi raz - podwójny dźwięk i podwójny wysyp monet u każdego
+widza. Kliknięcia streamera nie mają za sobą żadnej wiadomości czatu i tylko one
+naprawdę wymagają rozesłania.
+
 Serwer **nie symuluje gry** - tylko przekazuje ramki i trzyma ostatni snapshot.
 Dzięki temu jest mały (~270 linii), nie duplikuje logiki i nie wymaga
 przepisywania gry. Szczegóły uruchomienia i wdrożenia: `server/README.md`.
