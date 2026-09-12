@@ -112,7 +112,12 @@ export function createScene(canvas) {
   controls.dampingFactor = 0.08;
   controls.target.copy(LOOK_TARGET);
   controls.minDistance = 2.2;
-  controls.maxDistance = 8.5;
+  // Podniesione z 8.5 do 17 (2x) - wlasciciel chcial wyraznie wieksze oddalenie.
+  // Geometria tla w city.js (FOREGROUND_TALL_*, BUILDING_KEEPOUT_RADIUS,
+  // CITY_HALF, FOG_NEAR/FAR) jest przeliczona pod ta wartosc - patrz komentarze
+  // tam, punkt wyjscia to teoretyczny najdalszy promien kamery od (0,0,0):
+  // maxDistance + |LOOK_TARGET| = 17 + 0.658 = ~17.66.
+  controls.maxDistance = 17;
   controls.minPolarAngle = 0.25;
   controls.maxPolarAngle = Math.PI / 2 - 0.04;
   controls.enablePan = false;

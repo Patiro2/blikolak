@@ -31,43 +31,53 @@ const PLAZA_HEIGHT = PLAZA_TOP_Y - CITY_GROUND_Y;
 
 // --- Foreground: zielono-miejski pierscien TUZ przy arenie (patrz _buildForeground) ---
 // Kamera (OrbitControls, patrz scene.js) orbituje wokol LOOK_TARGET ~ (0,0.65,0.1)
-// z maxDistance=8.5, wiec teoretyczny najdalszy promien kamery od (0,0,0) to
-// ~8.5 + |target| ~= 9.16 j. Niskie elementy (krzaki/kamienie, <0.6 j.) sa
+// z maxDistance=17 (podniesione z 8.5 na zyczenie wlasciciela - wyraznie wieksze
+// oddalenie), wiec teoretyczny najdalszy promien kamery od (0,0,0) to
+// ~17 + |target| ~= 17.66 j. Niskie elementy (krzaki/kamienie, <0.6 j.) sa
 // bezpieczne w kazdej odleglosci - nie siegaja wysokosci kamery/glowy postaci.
 // WYSOKIE elementy (drzewa/budynki) MUSZA staC poza tym promieniem, inaczej w
 // jakims kacie kamery znajda sie miedzy kamera a arena i zaslonia rozgrywke.
-const FOREGROUND_APRON_HALF = 10.5; // polowa boku zielonego "trawnika" rozszerzajacego plac
-const FOREGROUND_LOW_MIN = 6.7; // tuz za krawedzia oryginalnego placu (6.5)
+const FOREGROUND_APRON_HALF = 19.3; // polowa boku zielonego "trawnika" rozszerzajacego plac
+const FOREGROUND_LOW_MIN = 6.7; // tuz za krawedzia oryginalnego placu (6.5) - nizej niz wysokosc kamery, bezpieczne przy kazdym maxDistance
 const FOREGROUND_LOW_MAX = 8.6; // niska zielen - bezpieczna wszedzie
-const FOREGROUND_TALL_MIN = 9.4; // margines bezpieczenstwa ponad teoretyczne 9.16
-const FOREGROUND_TALL_MAX = 10.3; // w granicach apronu (10.5)
+const FOREGROUND_TALL_MIN = 18.2; // margines bezpieczenstwa ponad teoretyczne 17.66
+const FOREGROUND_TALL_MAX = 19.1; // w granicach apronu (19.3)
 const FOREGROUND_SLOTS = 26; // rozstaw katowy - "skomponowane" sloty, nie czysty losowy rozrzut
 
-const CITY_HALF = 34; // zasieg miasta (budynki/ulice) od centrum
+const CITY_HALF = 44; // zasieg miasta (budynki/ulice) od centrum - podniesione z 34, zeby pierscien budynkow (za nowym keepout=26) mial podobna grubosc jak wczesniej (18 j.)
 const BUILDING_GRID = 4; // rozstaw siatki dzialek budynkow
 // Wolna strefa (promien od centrum sceny) bez budynkow. OrbitControls
-// (patrz scene.js) pozwala kamerze oddalic sie do maxDistance = 8.5 od celu
+// (patrz scene.js) pozwala kamerze oddalic sie do maxDistance = 17 od celu
 // blisko origin - promien MUSI miec wyrazny margines ponad to, inaczej
 // wysoki budynek staje tuz przy kamerze i zaslania cala scene (zmierzone
-// empirycznie - przy promieniu 10 tak sie wlasnie dzialo).
-const BUILDING_KEEPOUT_RADIUS = 16;
+// empirycznie przy starym maxDistance=8.5/keepout=16 - przy promieniu 10 tak
+// sie wlasnie dzialo, margines keepout-maxDistance ~7.5 byl bezpieczny).
+// Zachowujemy ten sam margines: 26 - 17 = 9, wyraznie ponad FOREGROUND_TALL_MAX (19.1).
+const BUILDING_KEEPOUT_RADIUS = 26;
 const BUILDING_FOOTPRINT = 2.3; // szerokosc/glebokosc dzialki budynku (mniejsza niz rozstaw siatki - zostaw ulice)
 
-const LOOP_HALF_SIZES = [15, 19, 23, 27]; // promienie petli ulic (samochody krazą po obwodzie prostokata) - poza zasiegiem kamery
+const LOOP_HALF_SIZES = [15, 19, 23, 27]; // promienie petli ulic (samochody krazą po obwodzie prostokata)
+// Auta stoja na CITY_GROUND_Y=-2.2, ~2.85 j. ponizej LOOK_TARGET.y (0.65) - nawet
+// przy nowym maxDistance=17 (kamera nisko, ~1.3 j. wysokosci przy maxPolarAngle)
+// linia wzroku kamera->cel na promieniu najblizszej petli (15) przechodzi ~1.2 j.
+// nad ziemia, czyli ok. 3.2 j. NAD autami - auta nie wchodza miedzy kamere a arene.
 const CARS_PER_LOOP = 10;
 
 // Mgla MUSI zaczynac sie poza najdalszym mozliwym punktem areny od kamery -
-// przy maxDistance=8.5 (OrbitControls) i promieniu areny ~5 od celu, w
-// skrajnym ustawieniu kamery to nawet ~13.5 jednostki (zmierzone empirycznie
-// jako bezpieczny margines). FOG_NEAR=14 trzyma arene i postacie zawsze
+// przy maxDistance=17 (OrbitControls) i promieniu areny ~5 od celu, w
+// skrajnym ustawieniu kamery to nawet ~22.7 jednostki (17.66 + 5, zaokraglone
+// w gore jako bezpieczny margines). FOG_NEAR=23 trzyma arene i postacie zawsze
 // calkowicie poza zasiegiem mgly.
-const FOG_NEAR = 14;
-// Zmniejszone z 65 - rog miasta (przekatna CITY_HALF*sqrt2 ~= 48) ledwo
-// dotykal starej granicy mgly, wiec daleka zabudowa nie rozmywala sie
-// wystarczajaco i dokladala sie do "sciany szumu" w gornej polowie kadru.
-// Przy 50 najdalsze budynki (za keepout radius 16) sa juz wyraznie
-// wtopione we mgle, arena (poza zasiegiem FOG_NEAR=14) nadal nietknieta.
-const FOG_FAR = 50;
+const FOG_NEAR = 23;
+// CITY_HALF podniesiony do 44 (patrz wyzej), wiec podloze ulicy siega polowy
+// CITY_HALF*2+20 = 54, jego przekatna to ~54*sqrt2 ~= 76.4. Najblizsza mozliwa
+// odleglosc kamery do krawedzi swiata "na wprost" (przez cel, w skrajnym
+// maxDistance=17) to R + 54 ~= 71.7 j. FOG_FAR=55 zostawia >16 j. marginesu
+// ponizej tej wartosci - krawedz swiata jest zawsze calkowicie wtopiona we
+// mgle (ktora ma ten sam kolor co tlo sceny 0x0e1118 - brak widocznego szwu),
+// a najdalsze budynki (za keepout radius 26) sa wyraznie wtopione we mgle,
+// arena (poza zasiegiem FOG_NEAR=23) nadal nietknieta.
+const FOG_FAR = 55;
 
 function randRange(min, max) {
   return min + Math.random() * (max - min);
@@ -79,7 +89,7 @@ function randRange(min, max) {
  *
  * Zmierzony problem (zrzuty z domyslnego kadru): przy siatce 6x12 i
  * tex.repeat.set(2,5) na ekranie wychodzilo 12x60 okien na sciane, a budynki
- * stoja 16-34 jednostki od kamery (FOV 42) - pojedyncze okno wypadalo ponizej
+ * stoja 26-44 jednostki od kamery (FOV 42) - pojedyncze okno wypadalo ponizej
  * jednego piksela, co przy braku mipmap/anizotropii daje migotliwy szum
  * (telewizyjny snieg) zamiast spokojnej panoramy swiatel. Naprawa ma dwie
  * czesci: (1) mniejsza gestosc siatki + mniejszy repeat, zeby pojedyncze okno
@@ -231,7 +241,7 @@ export class CityBackground {
   build(scene, renderer) {
     // Mgla dopasowana do koloru tla (0x0e1118) - odlegle budynki rozmywaja sie
     // plynnie zamiast urywac sie ostra krawedzia. near/far dobrane tak, zeby
-    // arena (w promieniu ~8.5 od kamery, patrz OrbitControls.maxDistance w
+    // arena (w promieniu maxDistance=17 od kamery, patrz OrbitControls w
     // scene.js) zostala CALKOWICIE poza zasiegiem mgly.
     scene.fog = new THREE.Fog(0x0e1118, FOG_NEAR, FOG_FAR);
 
@@ -363,7 +373,7 @@ export class CityBackground {
       scene.add(inst);
     }
 
-    // --- Wysoka zielen/zabudowa (promien 9.4-10.3): drzewa mini-forest + wieze,
+    // --- Wysoka zielen/zabudowa (promien 18.2-19.1): drzewa mini-forest + wieze,
     // budynki i palmy z pirate-kit. Zastepuje dawne proceduralne bryly
     // (BoxGeometry + vertexColors) prawdziwymi modelami Kenney - patrz CLAUDE.md,
     // pirate-kit jest ~1.5-2x wiekszy od siatki mini-*, wiec kazdy typ dostaje
