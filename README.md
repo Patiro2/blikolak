@@ -90,6 +90,8 @@ Stan zapisuje się sam do `localStorage` co 5 s i przy zamykaniu karty.
 | `src/kick.js` | integracja z czatem Kick.com (Pusher WebSocket), detekcja komendy "klik", eliminacje bossa, `normalizeNick`/`stripNickPrefix` (współdzielone przez cały kod) |
 | `src/vanessa.js` | złodziejka Vanessa - FSM, kradzież zł, przepędzanie, `normalizePolish`/`showTopAnnouncement` (współdzielone też przez bossa) |
 | `src/boss.js` | boss "Kamil Kovalenko" - cutscenka, walka matematyczna, ataki na pola, tryb awaryjny odpowiedzi, `BOSS_DEFS` |
+| `src/tlumaczenia.js` | minigra "Bitwa tłumaczeń" - stany `IDLE/WAITING/BATTLE/REWARD`, losowanie pola i słów, dopasowanie odpowiedzi z czatu, `PUNKTY_DO_WYGRANEJ` |
+| `src/slowka.js` | słownictwo minigry tłumaczeń - angielskie słowo → lista akceptowanych polskich odpowiedzi (`SLOWKA`, `WARIANTY`, `getAkceptowaneWarianty`) |
 | `src/bossattack.js` | efekty ataków obszarowych bossa - znaczniki pól, pociski po łuku, spadające rakiety, kałuże i dym |
 | `src/format.js` | skrócona notacja liczb (1.5K, 2.3M) |
 | `src/city.js` | proceduralne miasto w tle areny (budynki, ulice, jeżdżące samochody) |
@@ -203,6 +205,38 @@ mini-characters) + `character-male-f`, złożone w jedną grupę i wyskalowane
 
 Panel testowy: przycisk **👹 Zresp bossa** obok "Zresp Vanessę" wywołuje
 `boss.start(1, { force: true })` niezależnie od `bossesDefeated`.
+
+## Minigra: Bitwa tłumaczeń
+
+Druga minigra na siatce areny (`src/tlumaczenia.js` + słownictwo w
+`src/slowka.js`), obok bitwy o flagi — mechanika jest celowo skopiowana z tej
+drugiej (stany `IDLE → WAITING → BATTLE → REWARD`, wejście dwóch graczy na
+kafelek, przerwanie przez bossa, `getSyncState`/`applySync`), ale to osobny,
+niezależny plik, bez wspólnej klasy bazowej.
+
+- **Odblokowanie**: dopiero po pokonaniu bossa tieru 2 (`economy.state.bossesDefeated`
+  zawiera `2`) — dopóki ten boss nie padnie, pole tej minigry nigdy się nie
+  pojawia, nawet jeśli bitwa o flagi już działa.
+- **Przebieg**: na losowym wolnym polu siatki 7×7 (z wykluczeniem bankomatu
+  0,0 i pola akurat zajętego przez bitwę o flagi, żeby obie minigry mogły
+  działać równolegle bez kolizji) pojawia się kontestowane pole. Gdy staną na
+  nim dwaj gracze (awatary Top 10), nad polem wyświetla się flashcard z
+  angielskim słowem, a widzowie tłumaczą je na polski na czacie.
+  Odpowiedź może zawierać dodatkowy tekst — liczy się dopasowanie całymi
+  słowami do jednego z akceptowanych wariantów tłumaczenia.
+- **Zwycięstwo**: wygrywa pierwszy z dwóch graczy, który poprawnie
+  przetłumaczy **5 słów** (`PUNKTY_DO_WYGRANEJ` w `src/tlumaczenia.js`) —
+  odpowiednik "best of 9": w najgorszym razie (4:4) bitwa rozstrzyga się w
+  9. rundzie, więc żadne słowo nie może się powtórzyć w obrębie jednej bitwy.
+- **Nagroda**: zwycięzca dostaje 2 zł/s pasywnie przez 30 sekund, dokładnie
+  jak przy bitwie o flagi. Przerwanie przez bossa wypłaca resztę nagrody od
+  razu.
+- **Pole i kolor**: znacznik pola jest niebiesko-fioletowy (`KOLOR_BAZOWY` w
+  `src/tlumaczenia.js`, wysokość `MARKER_Y = 0.056`) — wyraźnie inny niż
+  czerwono-złote pole bitwy o flagi, żeby na pierwszy rzut oka było widać,
+  która minigra się toczy. Losowanie pola świadomie omija kafelek zajęty
+  aktualnie przez bitwę o flagi (i odwrotnie), więc oba pola nigdy się nie
+  pokrywają.
 
 ## Panel eliminacji (właściciel)
 

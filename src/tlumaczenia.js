@@ -13,7 +13,7 @@ import { strumien, losujZ, losujInt } from './rng.js';
 // Minigra "Tlumaczenia" - DRUGA (a chronologicznie trzecia w projekcie) minigra
 // na siatce areny, obok "Bitwy o flagi". Mechanika jest CELOWO skopiowana z
 // src/flagbattle.js (stany IDLE -> WAITING -> BATTLE -> REWARD, wejscie
-// dwoch graczy na kafelek, pierwszy do 3 pkt wygrywa, nagroda 2 zl/s przez
+// dwoch graczy na kafelek, pierwszy do PUNKTY_DO_WYGRANEJ pkt wygrywa, nagroda 2 zl/s przez
 // 30 s, wysuwane plotki, isPlayerLocked/isTileLocked ze straza boss.isActive(),
 // getSyncState/applySync, setHost, przerwanie przez bossa) - a NIE wyciagnieta
 // z niej jako wspolna klasa bazowa. To swiadoma decyzja: minigra o flagi dwa
@@ -42,6 +42,15 @@ const MARKER_Y = 0.056;
 // zielen siatki areny 0x53fc18, zielone znaczniki wymiotow bossa 0x86c232,
 // czerwone znaczniki rakiet 0xff3b30, zloto monety, czerwien flag).
 const KOLOR_BAZOWY = 0x3d5cff; // niebiesko-fioletowy
+
+// Prog zwyciestwa bitwy tlumaczen - "best of 9": pierwszy gracz, ktory
+// zdobedzie PUNKTY_DO_WYGRANEJ punktow, wygrywa; przy max. rownej grze
+// (PUNKTY_DO_WYGRANEJ - 1 : PUNKTY_DO_WYGRANEJ - 1) bitwa rozstrzyga sie w
+// najwyzej 2 * PUNKTY_DO_WYGRANEJ - 1 = 9 rundach. Wszystkie miejsca w tym
+// pliku (tekst ogloszenia na czacie, warunek konca bitwy) MUSZA czytac ta
+// stala, a nie miec wpisanej liczby na sztywno - inaczej przy kolejnej
+// zmianie progu znowu by sie rozjechaly.
+const PUNKTY_DO_WYGRANEJ = 5;
 
 // Klipy walki - identyczne jak w flagbattle.js (patrz tamten komentarz przy
 // KLIPY_ATAKU po uzasadnienie: kazda postac w projekcie ma je w swoim
@@ -468,7 +477,7 @@ export class TlumaczeniaManager {
       if (p2.interactAction) p2.interactAction.play();
 
       this.nextRound();
-      this.announce(`Bitwa tlumaczen! ${p1User} vs ${p2User}! Tlumacz slowo na polski na czacie! Kto pierwszy zdobedzie 3 pkt wygrywa!`);
+      this.announce(`Bitwa tlumaczen! ${p1User} vs ${p2User}! Tlumacz slowo na polski na czacie! Kto pierwszy zdobedzie ${PUNKTY_DO_WYGRANEJ} pkt wygrywa!`);
     }
   }
 
@@ -557,7 +566,7 @@ export class TlumaczeniaManager {
 
     this.announce(`${username} zgaduje poprawnie: "${aktualneSlowo}" = ${poprawnaOdp}! (Punkty: ${player.score})`);
 
-    if (player.score >= 3) {
+    if (player.score >= PUNKTY_DO_WYGRANEJ) {
       this.endBattle(player);
     } else {
       setTimeout(() => this.nextRound(), 1000);
