@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import { COUNTRIES, COUNTRY_CODES, normalizeCountryName } from './countries.js';
-import { projectAndFloat } from './vanessa.js'; // I might need to extract this or just use ui.js for banners. Let's just write floating texts. Wait, projectAndFloat is in vanessa.js? Let's check where to import projectAndFloat. I will implement my own simple floating text or use KickUI.
 
 export class FlagBattleManager {
   constructor(scene) {
@@ -101,16 +100,14 @@ export class FlagBattleManager {
         this.economy.addMoney(2);
         if (this.winner && this.winner.username) {
            this.kickChat.recordEarned(this.winner.username, 2);
-           // Dymek z kasą z pracownika
-           const worker = this.workerManager.getWorkerType(this.winner.typeIndex);
-           if (worker && worker.obj) {
-             // Jeśli trzeba odpalić dymek:
-             const b = document.createElement('div');
-             b.className = 'gold-float';
-             b.textContent = '+2 zł';
-             document.getElementById('ui-layer').appendChild(b);
-             // projectToScreen logic... (Pominięte dla uproszczenia, można wywołać z innej funkcji)
-           }
+           // Uwaga: byl tu zalazek dymka "+2 zl" doklejanego do #ui-layer, ale
+           // taki element NIE ISTNIEJE w index.html (kontener na floatery to
+           // #floaters), wiec appendChild leciał na null i rzucal wyjatkiem co
+           // sekunde. tick() jest wolany z animate() BEZ try/catch, wiec kazdy
+           // taki wyjatek przerywal reszte klatki - w tym renderowanie sceny.
+           // Blok byl przy tym niedokonczony (brak rzutowania na ekran i brak
+           // usuwania elementu), wiec zostal usuniety zamiast naprawiony.
+           // Dymek mozna dodac osobno przez projectAndFloat z main.js.
         }
       }
 
