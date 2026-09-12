@@ -76,18 +76,28 @@
     </div>
   </div>
 
-  <!-- Zastepuje dawny osadzony panel czatu (iframe) - wlasciciel uznal ramke
-       za zbedna. Zostaje wylacznie link otwierajacy oficjalny popout Kicka w
-       osobnym oknie. To <a>, nie <button>: dziala nawet bez JS (href sam w
-       sobie otwiera popout), a JS tylko dokleja rozmiar okienka i, gdy sie
-       uda, podmienia domyslna nawigacje na window.open. target z nazwa
-       ('kick-czat-patiro') sprawia, ze kolejne kliknicia wracaja do tego
-       samego okna zamiast mnozyc karty/okna. -->
-  <a id="kick-chat-btn" href="https://kick.com/popout/patiro/chat" target="kick-czat-patiro" rel="noopener"
-     title="Otworz czat Kicka (kanal patiro) w osobnym oknie"
-     style="position: absolute; top: 16px; right: 16px; pointer-events: auto; display: inline-flex; align-items: center; gap: 6px; background: rgba(83, 252, 24, 0.14); color: #53fc18; border: 1px solid rgba(83, 252, 24, 0.45); border-radius: 8px; padding: 8px 14px; font-size: 13px; font-weight: 700; text-decoration: none; white-space: nowrap; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5), 0 0 10px rgba(83, 252, 24, 0.08); backdrop-filter: blur(6px);">
-    💬 Czat Kicka
-  </a>
+  <!-- Kontener guzikow gornego prawego rogu: obok linku do czatu Kicka
+       dochodzi guzik "Wlacz chodzenie wsadem" (patrz src/wasd-guzik.js).
+       Pozycjonowanie top/right przeniesione tu z #kick-chat-btn, zeby oba
+       guziki ustawialy sie w rzad flexem bez nachodzenia na siebie. -->
+  <div id="top-right-buttons" style="position: absolute; top: 16px; right: 16px; display: flex; align-items: center; gap: 8px; pointer-events: none;">
+    <button id="wasd-guzik-btn" type="button"
+       title="Pokaz instrukcje wlaczenia sterowania WASD z czatu Kicka"
+       style="pointer-events: auto; display: inline-flex; align-items: center; gap: 6px; background: rgba(83, 252, 24, 0.14); color: #53fc18; border: 1px solid rgba(83, 252, 24, 0.45); border-radius: 8px; padding: 8px 14px; font-size: 13px; font-weight: 700; white-space: nowrap; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5), 0 0 10px rgba(83, 252, 24, 0.08); backdrop-filter: blur(6px); cursor: pointer;">Włącz chodzenie wsadem</button>
+
+    <!-- Zastepuje dawny osadzony panel czatu (iframe) - wlasciciel uznal ramke
+         za zbedna. Zostaje wylacznie link otwierajacy oficjalny popout Kicka w
+         osobnym oknie. To <a>, nie <button>: dziala nawet bez JS (href sam w
+         sobie otwiera popout), a JS tylko dokleja rozmiar okienka i, gdy sie
+         uda, podmienia domyslna nawigacje na window.open. target z nazwa
+         ('kick-czat-patiro') sprawia, ze kolejne kliknicia wracaja do tego
+         samego okna zamiast mnozyc karty/okna. -->
+    <a id="kick-chat-btn" href="https://kick.com/popout/patiro/chat" target="kick-czat-patiro" rel="noopener"
+       title="Otworz czat Kicka (kanal patiro) w osobnym oknie"
+       style="pointer-events: auto; display: inline-flex; align-items: center; gap: 6px; background: rgba(83, 252, 24, 0.14); color: #53fc18; border: 1px solid rgba(83, 252, 24, 0.45); border-radius: 8px; padding: 8px 14px; font-size: 13px; font-weight: 700; text-decoration: none; white-space: nowrap; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5), 0 0 10px rgba(83, 252, 24, 0.08); backdrop-filter: blur(6px);">
+      💬 Czat Kicka
+    </a>
+  </div>
 
   <div id="vanessa-log-panel" class="collapsed">
     <div id="vanessa-log-header" class="floating-header" title="Chwyć i przeciągnij okno logu">
@@ -106,5 +116,6 @@
 
 <script type="module" src="src/main.js"></script>
 <script type="module" src="src/tutorial.js"></script>
+<script type="module" src="src/wasd-guzik.js"></script>
 </body>
 </html>
