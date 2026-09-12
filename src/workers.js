@@ -355,25 +355,6 @@ export class WorkerManager {
   }
 
   /**
-   * Sprawdza, czy dane pole siatki jest zajete przez INNEGO pracownika - albo
-   * dlatego, ze juz na nim stoi, albo dlatego, ze wlasnie na nie wchodzi
-   * (targetGridX/targetGridZ w trakcie animacji kroku). Traktujemy to jak
-   * sciane, zeby dwie postacie nigdy nie nachodzily na siebie wizualnie.
-   *
-   * Ograniczenie: nie sprawdzamy tu pozycji bossa ani Vanessy - obaj poruszaja
-   * sie po wspolrzednych ciaglych (nie po siatce calkowitoliczbowej) i nie
-   * maja gridX/gridZ, wiec kolizja z nimi nie jest tu wykrywana.
-   */
-  _isTileOccupiedByOther(selfTypeIndex, x, z) {
-    for (const other of this.entries) {
-      if (!other || Number(other.typeIndex) === Number(selfTypeIndex)) continue;
-      if (other.gridX === x && other.gridZ === z) return true;
-      if (other.isMoving && other.targetGridX === x && other.targetGridZ === z) return true;
-    }
-    return false;
-  }
-
-  /**
    * Wykonuje ruch o 1 pole na siatce 2D areny WZGLĘDEM kierunku, w który postać
    * aktualnie patrzy (NIE względem osi świata):
    * - up / forward: krok do przodu, w stronę, w którą postać jest aktualnie zwrócona
@@ -436,15 +417,22 @@ export class WorkerManager {
     const inBounds = Math.abs(nextX) <= 3 && Math.abs(nextZ) <= 3;
     // Bankomat w centrum (0, 0) blokuje wejście
     const isATM = nextX === 0 && nextZ === 0;
-    // Pole zajete przez innego pracownika (stojacego lub wlasnie na nie wchodzacego)
-    // traktujemy jak sciane - postac obraca sie w te strone, ale nie przechodzi.
-    const isOccupied = this._isTileOccupiedByOther(typeIndex, nextX, nextZ);
+
+    // Kolizje MIEDZY POSTACIAMI sa celowo WYLACZONE - kilku widzow moze stac
+    // na tym samym polu i przechodzic przez siebie, zeby nikt nie blokowal
+    // nikomu drogi i cala siatka byla dostepna dla kazdego. Blokuja wylacznie
+    // granice areny i pole bankomatu.
+    //
+    // Konsekwencja do swiadomej akceptacji: postacie na wspolnym polu nachodza
+    // na siebie wizualnie, a atak obszarowy bossa (rakiety, omdlenia - patrz
+    // _workersOnTile w boss.js) trafia JEDNYM polem we wszystkich, ktorzy na
+    // nim stoja, wiec jedna rakieta moze zabic kilka osob naraz.
 
     entry.startRotY = entry.obj.rotation.y;
     entry.targetRotY = targetHeading;
     entry.facingAngle = targetHeading;
 
-    if (!inBounds || isATM || isOccupied) {
+    if (!inBounds || isATM) {
       // Gracz nie może wyjść poza obszar gry lub wejść w bankomat, ale obraca się w wybraną stronę
       entry.isMoving = true;
       entry.moveProgress = 0;
