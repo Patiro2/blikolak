@@ -8,8 +8,8 @@
 const PUSHER_APP_KEY = '32cbd69e4b950bf97679';
 const PUSHER_CLUSTER = 'us2';
 const DEFAULT_CHATROOM_ID = 37663; // chatroom_id dla kanalu patiro
-const LEADERBOARD_KEY = 'bankomat-clicker-kick-leaderboard';
-const ASSIGNMENTS_KEY = 'bankomat-clicker-worker-assignments';
+export const LEADERBOARD_KEY = 'bankomat-clicker-kick-leaderboard';
+export const ASSIGNMENTS_KEY = 'bankomat-clicker-worker-assignments';
 
 // Przy spamie na czacie (np. 200 wiadomosci "klik" w ciagu kilku sekund) nie
 // chcemy zapisywac do localStorage ani przerysowywac rankingu przy KAZDEJ

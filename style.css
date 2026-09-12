@@ -1372,3 +1372,37 @@ html, body {
   cursor: pointer;
 }
 
+
+
+/* --- Tryb widza (bez hasla admina) ---------------------------------------
+   Na publicznym adresie gry kazdy widzi stan rozgrywki, ale sterowac nia moze
+   wylacznie wlasciciel. Przyciski resetu i spawnowania sa wtedy ukryte; sam
+   serwer i tak odrzuca zapisy bez hasla (patrz api/state.js), wiec ukrycie
+   jest wygoda, a nie zabezpieczeniem. */
+body.tryb-widza #btn-spawn-vanessa,
+body.tryb-widza #btn-spawn-boss,
+body.tryb-widza #reset-btn {
+  display: none;
+}
+
+#btn-admin.zalogowany {
+  border-color: #53fc18;
+  color: #53fc18;
+}
+
+#widz-plakietka {
+  display: none;
+  align-self: flex-start;
+  margin-top: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(0, 0, 0, 0.35);
+  color: #cfd6e4;
+  font-size: 11px;
+  letter-spacing: 0.03em;
+}
+
+body.tryb-widza #widz-plakietka {
+  display: inline-block;
+}

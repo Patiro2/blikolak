@@ -24,7 +24,34 @@ class NoCacheHandler(SimpleHTTPRequestHandler):
     # HTTP/1.1 wlacza keep-alive - te same polaczenia obsluguja wiele plikow.
     protocol_version = 'HTTP/1.1'
 
+    def _api_niedostepne(self):
+        """Lokalnie nie ma Vercel KV - odpowiadamy tak, jak zrobilby to serwer
+        z nieskonfigurowanym magazynem. Dzieki temu gra schodzi na localStorage
+        i pelne uprawnienia (patrz src/remote.js), a konsola zostaje czysta."""
+        import json
+        tresc = json.dumps({'ok': False, 'blad': 'Magazyn KV niedostepny lokalnie'}).encode('utf-8')
+        self.send_response(503)
+        self.send_header('Content-Type', 'application/json; charset=utf-8')
+        self.send_header('Content-Length', str(len(tresc)))
+        self.end_headers()
+        self.wfile.write(tresc)
+
+    def do_POST(self):
+        if self.path.startswith('/api/'):
+            self._api_niedostepne()
+            return
+        self.send_error(405)
+
+    def do_DELETE(self):
+        if self.path.startswith('/api/'):
+            self._api_niedostepne()
+            return
+        self.send_error(405)
+
     def do_GET(self):
+        if self.path in ('/api/state', '/api/login'):
+            self._api_niedostepne()
+            return
         if self.path.startswith('/api/kick/channel/'):
             channel = self.path.split('/api/kick/channel/')[1].split('?')[0].strip()
             import urllib.request, json

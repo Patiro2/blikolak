@@ -2,7 +2,7 @@
 // na aktywnosc czatu Kick.com. Gracz (streamer) nic nie kupuje - klika tylko
 // czasem sam, a widzowie napedzaja postep pisac "klik" na czacie.
 
-const SAVE_KEY = 'bankomat-clicker-v3';
+export const SAVE_KEY = 'bankomat-clicker-v3';
 const OLD_SAVE_KEY = 'bankomat-clicker-v2'; // stary zapis z systemem kupowania - migrujemy tylko tier automatu
 
 export const MACHINE_TIERS = [

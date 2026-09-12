@@ -212,6 +212,61 @@ window.__game.vanessa.clearLog();     // wyczyszczenie
 window.__game.vanessa.logToConsole = false;  // tylko panel, bez konsoli
 ```
 
+## Wdrożenie na Vercel (save po stronie serwera)
+
+Gra może stać na Vercelu ze **wspólnym zapisem w Vercel KV**, tak że postęp
+żyje na serwerze, a nie w przeglądarce. Sterować grą może wyłącznie właściciel.
+
+### Jak to działa
+
+| | właściciel (po zalogowaniu) | widz (publiczny adres) |
+|---|---|---|
+| widzi aktualny stan | tak | tak |
+| zapisuje stan na serwer | tak, co 5 s | **nie** |
+| reset gry, respienie Vanessy i bossa | tak | przyciski ukryte |
+
+Odczyt (`GET /api/state`) jest publiczny, a każdy zapis (`POST`) i kasowanie
+(`DELETE`) wymaga hasła w nagłówku `Authorization`. Ukrycie przycisków to
+wygoda - **właściwym zabezpieczeniem jest sprawdzenie hasła po stronie
+serwera**, więc podrobienie żądania z konsoli przeglądarki nic nie da.
+
+Karta widza dociąga stan z serwera co 10 s i nadpisuje to, co sama sobie
+lokalnie nasymulowała między odświeżeniami. Postęp z czatu liczy więc tylko
+karta właściciela - i musi być otwarta, żeby cokolwiek się zapisywało.
+
+### Konfiguracja (jednorazowo)
+
+1. **Import projektu** - na [vercel.com](https://vercel.com) *Add New → Project*,
+   wybierz repozytorium `Patiro2/blikolak`. Framework: *Other*, bez komendy
+   budowania (to statyczne pliki plus dwie funkcje w `api/`).
+2. **Magazyn** - w projekcie zakładka *Storage* → *Create Database* → **KV
+   (Upstash Redis)** → *Connect*. Zmienne `KV_REST_API_URL` i
+   `KV_REST_API_TOKEN` wpinają się same, nic nie trzeba przepisywać.
+3. **Hasło właściciela** - *Settings → Environment Variables*, dodaj
+   `ADMIN_TOKEN` z własnym, długim hasłem (wszystkie środowiska).
+4. **Redeploy** - *Deployments* → ostatni wpis → *Redeploy*, żeby funkcje
+   zobaczyły nowe zmienne.
+5. Wejdź na adres gry, kliknij **🔑 Zaloguj**, podaj hasło. Pojawią się
+   przyciski resetu i respienia; hasło zapamiętuje się w tej przeglądarce.
+
+### Uruchomienie lokalne
+
+Bez zmian: `python serve.py`. Lokalny serwer odpowiada na `/api/state` i
+`/api/login` kodem 503 („magazyn niedostępny"), więc gra schodzi na
+`localStorage` i działa z pełnymi uprawnieniami - logowanie nie jest do niczego
+potrzebne, a przycisk 🔑 jest wtedy ukryty. W konsoli widać jeden wpis 503 od
+tego sprawdzenia; to normalne i znika po wdrożeniu na Vercela.
+
+### Pliki
+
+| Plik | Rola |
+|---|---|
+| `api/state.js` | `GET` stan (publicznie), `POST`/`DELETE` stan (tylko z hasłem) |
+| `api/login.js` | sprawdzenie hasła właściciela |
+| `api/_kv.js` | dostęp do Vercel KV po REST (bez zależności npm) i stało-czasowe porównanie hasła |
+| `src/remote.js` | klient stanu zdalnego, logowanie, tryb offline |
+| `package.json` | wyłącznie `"type": "module"` - żadnych zależności do instalowania |
+
 ## Reset gry
 
 Przycisk **Reset gry** (obok przycisku respienia Vanessy, w lewym górnym

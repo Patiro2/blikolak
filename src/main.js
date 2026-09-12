@@ -5,7 +5,9 @@ import { Machine } from './machine.js';
 import { WorkerManager, parseMovementDirection } from './workers.js';
 import { CoinPool } from './coins.js';
 import { GoldenCoinManager } from './goldcoin.js';
-import { Economy, WORKER_TYPE_DEFS, MACHINE_TIERS } from './economy.js';
+import { Economy, WORKER_TYPE_DEFS, MACHINE_TIERS, SAVE_KEY } from './economy.js';
+import { remote } from './remote.js';
+import { LEADERBOARD_KEY, ASSIGNMENTS_KEY } from './kick.js';
 import { UI, KickUI, LeaderboardUI, WorkerOverlayManager, VanessaLogUI } from './ui.js';
 import { KickChatClient } from './kick.js';
 import { VanessaManager, showTopAnnouncement } from './vanessa.js';
@@ -17,6 +19,22 @@ import { audio } from './audio.js';
 async function main() {
   const canvas = document.getElementById('scene');
   const { renderer, scene, camera, controls } = createScene(canvas);
+
+  // Stan gry z serwera (Vercel KV) ma pierwszenstwo przed localStorage.
+  // Economy i KickChatClient czytaja localStorage w konstruktorach, wiec
+  // najpierw wsiewamy tam to, co przyszlo z serwera. Gdy API nie odpowiada
+  // (np. lokalne serve.py), zostaje dotychczasowe zachowanie z localStorage.
+  const stanZdalny = await remote.zainicjuj().catch(() => null);
+  if (stanZdalny) {
+    try {
+      if (stanZdalny.economy) localStorage.setItem(SAVE_KEY, JSON.stringify(stanZdalny.economy));
+      if (stanZdalny.leaderboard) localStorage.setItem(LEADERBOARD_KEY, JSON.stringify(stanZdalny.leaderboard));
+      if (stanZdalny.assignments) localStorage.setItem(ASSIGNMENTS_KEY, JSON.stringify(stanZdalny.assignments));
+      console.info('[stan] Wczytano stan gry z serwera');
+    } catch (err) {
+      console.warn('[stan] Nie udalo sie wsiac stanu z serwera do localStorage:', err);
+    }
+  }
 
   const economy = new Economy();
 
@@ -128,9 +146,63 @@ async function main() {
     });
   }
 
+  // Zapis na serwer leci tylko z sesji admina i nie czesciej niz co
+  // ZAPIS_ZDALNY_MS - lokalny zapis do localStorage zostaje bez zmian, wiec
+  // nawet przy padnietym API nic sie nie gubi.
+  const ZAPIS_ZDALNY_MS = 5000;
+  let ostatniZapisZdalny = 0;
+  let zapisZdalnyWToku = false;
+
+  function zbierzStan() {
+    return {
+      economy: economy.state,
+      leaderboard: kickChat.leaderboard,
+      assignments: kickChat.assignments,
+    };
+  }
+
+  async function zapiszNaSerwer(wymus = false) {
+    if (!remote.czyOnline() || !remote.czyAdmin()) return;
+    const teraz = Date.now();
+    if (!wymus && teraz - ostatniZapisZdalny < ZAPIS_ZDALNY_MS) return;
+    if (zapisZdalnyWToku) return;
+    zapisZdalnyWToku = true;
+    ostatniZapisZdalny = teraz;
+    try {
+      await remote.zapisz(zbierzStan());
+    } catch (err) {
+      console.warn('[stan] Nie udalo sie zapisac stanu na serwerze:', err);
+    } finally {
+      zapisZdalnyWToku = false;
+    }
+  }
+
   function save() {
     economy.save();
     kickChat.flush();
+    zapiszNaSerwer();
+  }
+
+  /**
+   * Tryb widza: stan na serwerze prowadzi admin, wiec co jakis czas dociagamy
+   * go i nadpisujemy to, co lokalnie nasymulowala ta karta.
+   */
+  async function synchronizujZSerwera() {
+    if (!remote.czyOnline() || remote.czyAdmin()) return;
+    const stan = await remote.pobierz();
+    if (!stan) return;
+    if (stan.economy) Object.assign(economy.state, stan.economy);
+    if (stan.leaderboard) kickChat.leaderboard = stan.leaderboard;
+    if (stan.assignments) kickChat.assignments = stan.assignments;
+    kickChat.updateAssignments();
+    if (machine.currentTier !== economy.state.machineTier) {
+      await machine.setTier(economy.state.machineTier);
+    }
+    try {
+      await syncLeaderboardAndOverlays();
+    } catch (err) {
+      console.error('[stan] Blad odswiezania po synchronizacji:', err);
+    }
   }
 
   const clock = new THREE.Clock();
@@ -176,6 +248,49 @@ async function main() {
     },
   );
   await boss.init();
+
+  // --- Tryb admina -------------------------------------------------------
+  // Offline (brak API) gra dziala jak dotad, z pelnymi uprawnieniami. Na
+  // Vercelu przyciski resetu i spawnowania widzi tylko zalogowany wlasciciel,
+  // a kazdy zapis i tak jest sprawdzany po stronie serwera.
+  const adminBtn = document.getElementById('btn-admin');
+
+  function zastosujTrybAdmina() {
+    const admin = remote.czyAdmin();
+    document.body.classList.toggle('tryb-widza', !admin);
+    if (!adminBtn) return;
+    if (!remote.czyOnline()) {
+      // Lokalnie nie ma sie gdzie logowac - chowamy przycisk.
+      adminBtn.style.display = 'none';
+      return;
+    }
+    adminBtn.style.display = '';
+    adminBtn.classList.toggle('zalogowany', admin);
+    adminBtn.textContent = admin ? '🔓 Wyloguj' : '🔑 Zaloguj';
+    adminBtn.title = admin
+      ? 'Jesteś zalogowany jako właściciel - kliknij, żeby się wylogować'
+      : 'Zaloguj się hasłem właściciela, żeby móc resetować grę i spawnować';
+  }
+
+  if (adminBtn) {
+    adminBtn.addEventListener('click', async () => {
+      if (remote.czyAdmin()) {
+        remote.wyloguj();
+        zastosujTrybAdmina();
+        return;
+      }
+      const haslo = window.prompt('Hasło właściciela gry:');
+      if (haslo === null) return;
+      const ok = await remote.zaloguj(haslo);
+      if (!ok) {
+        window.alert('Błędne hasło.');
+        return;
+      }
+      zastosujTrybAdmina();
+      zapiszNaSerwer(true);
+    });
+  }
+  zastosujTrybAdmina();
 
   const spawnBossBtn = document.getElementById('btn-spawn-boss');
   if (spawnBossBtn) {
@@ -380,7 +495,13 @@ async function main() {
       } catch (err) {
         console.error('[sync] Nieobsluzony blad w syncLeaderboardAndOverlays (onReset):', err);
       }
+      // Reset kasuje takze stan na serwerze - inaczej po odswiezeniu strony
+      // wrocilby stary zapis z KV.
+      if (remote.czyOnline() && remote.czyAdmin()) {
+        await remote.wyczysc();
+      }
       save();
+      zapiszNaSerwer(true);
     },
   });
 
@@ -472,6 +593,10 @@ async function main() {
   animate();
 
   setInterval(save, 5000);
+  // Widzowie (bez hasla admina) co 10 s dociagaja stan prowadzony przez admina.
+  setInterval(() => {
+    synchronizujZSerwera().catch((err) => console.warn('[stan] Blad synchronizacji:', err));
+  }, 10000);
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') save();
   });
