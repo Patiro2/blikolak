@@ -124,12 +124,14 @@ export class WorkerManager {
     this.bossRef = null;
     this.vanessaRef = null;
     this.flagBattleRef = null;
+    this.tlumaczeniaRef = null;
   }
 
-  setContext({ boss, vanessa, flagBattle }) {
+  setContext({ boss, vanessa, flagBattle, tlumaczenia }) {
     this.bossRef = boss;
     this.vanessaRef = vanessa;
     this.flagBattleRef = flagBattle;
+    this.tlumaczeniaRef = tlumaczenia;
   }
 
   async _getTemplate(modelKey) {
@@ -460,6 +462,15 @@ export class WorkerManager {
       return false;
     }
 
+    // Bitwa tlumaczen: identyczna blokada i identyczne uzasadnienie co
+    // powyzej dla bitwy o flagi (patrz isPlayerLocked() w tlumaczenia.js) -
+    // druga minigra na siatce ma dokladnie ten sam wzorzec (dwaj walczacy nie
+    // moga sie ruszyc W OGOLE, dopoki ktorys nie wygra), wiec musi byc
+    // sprawdzona tym samym sposobem, PRZED policzeniem docelowego pola.
+    if (this.tlumaczeniaRef && typeof this.tlumaczeniaRef.isPlayerLocked === 'function' && this.tlumaczeniaRef.isPlayerLocked(typeIndex)) {
+      return false;
+    }
+
     // Jeśli była odgrywana animacja uderzenia w bankomat, przerywamy ją natychmiast na rzecz chodu
     if (entry.interactAction && entry.playingInteract) {
       entry.interactAction.stop();
@@ -494,6 +505,15 @@ export class WorkerManager {
     if (this.flagBattleRef && typeof this.flagBattleRef.isTileLocked === 'function') {
       isLockedByFlagBattle = this.flagBattleRef.isTileLocked(nextX, nextZ, typeIndex);
     }
+    // Suma logiczna z blokada pola bitwy tlumaczen - to samo pole nigdy nie
+    // moze byc zablokowane przez obie minigry naraz (spawnBattleSquare w
+    // flagbattle.js wyklucza kafelek tlumaczen i vice versa), ale sprawdzamy
+    // niezaleznie, zeby kazda z minigier chronila wlasny kafelek niezaleznie
+    // od drugiej.
+    let isLockedByTlumaczenia = false;
+    if (this.tlumaczeniaRef && typeof this.tlumaczeniaRef.isTileLocked === 'function') {
+      isLockedByTlumaczenia = this.tlumaczeniaRef.isTileLocked(nextX, nextZ, typeIndex);
+    }
 
     // Kolizje MIEDZY POSTACIAMI sa celowo WYLACZONE - kilku widzow moze stac
     // na tym samym polu i przechodzic przez siebie, zeby nikt nie blokowal
@@ -509,7 +529,7 @@ export class WorkerManager {
     entry.targetRotY = targetHeading;
     entry.facingAngle = targetHeading;
 
-    if (!inBounds || isATM || isLockedByFlagBattle) {
+    if (!inBounds || isATM || isLockedByFlagBattle || isLockedByTlumaczenia) {
       // Gracz nie może wyjść poza obszar gry lub wejść w bankomat, ale obraca się w wybraną stronę
       entry.isMoving = true;
       entry.moveProgress = 0;

@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { COUNTRIES, COUNTRY_CODES, tokenizujOdpowiedz, INDEKS_WARIANTOW } from './countries.js';
 import { usunTagiEmotek } from './kick.js';
 import { loadForest } from './assets.js';
-import { strumien, losujZ } from './rng.js';
+import { strumien, losujZ, losujInt } from './rng.js';
 
 // Naprawa koloru/rozdzielczosci flag (dwie NIEZALEZNE przyczyny):
 //
@@ -357,11 +357,17 @@ export class FlagBattleManager {
     this.isHost = false; // wlasciwa wartosc przychodzi z setContext/setHost - patrz nizej
   }
 
-  setContext({ workerManager, kickChat, economy, isHost, boss }) {
+  setContext({ workerManager, kickChat, economy, isHost, boss, tlumaczenia }) {
     this.workerManager = workerManager;
     this.kickChat = kickChat;
     this.economy = economy;
     this.boss = boss || null; // patrz _przerwijPrzezBossa i isTileLocked nizej
+    // Referencja do minigry "Tlumaczenia" - WYLACZNIE do odczytu jej biezacego
+    // kafelka (tlumaczenia.tile), zeby losowanie pola bitwy o flagi nigdy nie
+    // trafilo w kafelek zajety przez tamta minigre (patrz spawnBattleSquare
+    // nizej). Ten sam kontrakt co flagBattleRef w tlumaczenia.js/setContext,
+    // tylko w odwrotna strone.
+    this.tlumaczeniaRef = tlumaczenia || null;
     // NAPRAWA: przed ta zmiana kazda otwarta karta (host i kazdy widz) miala
     // wlasna, niezalezna instancje FlagBattleManager i tick() na kazdej z nich
     // losowal Math.random() SAM - inny kafelek, inna flaga, w innym momencie.
@@ -565,18 +571,11 @@ export class FlagBattleManager {
     }
   }
 
-  spawnBattleSquare() {
-    // Losujemy pole na siatce -3 do 3, bez (0,0) (bankomat)
-    let rx, rz;
-    do {
-      rx = Math.floor(Math.random() * 7) - 3;
-      rz = Math.floor(Math.random() * 7) - 3;
-    } while (rx === 0 && rz === 0);
-    
-    this.tile = { x: rx, z: rz };
-    this.state = 'WAITING';
-    this.timer = 0;
+  // Ograniczenie prob przy losowaniu pola - identyczne uzasadnienie co
+  // MAX_PROB_LOSOWANIA_FLAGI ponizej: petla NIE MOZE zostac nieograniczona.
+  static MAX_PROB_LOSOWANIA_POLA = 50;
 
+  spawnBattleSquare() {
     // Nowa bitwa (a przynajmniej nowa proba - jeszcze bez graczy) - patrz
     // komentarz przy battleId/_uzyteFlagi w konstruktorze. Zerujemy zbior
     // uzytych flag TUTAJ (a nie dopiero w checkPlayersEntry/BATTLE), zeby na
@@ -584,6 +583,55 @@ export class FlagBattleManager {
     // jak wymaga specyfikacja (spawnBattleSquare ORAZ wejscie w BATTLE ORAZ reset()).
     this.battleId += 1;
     this._uzyteFlagi.clear();
+
+    // NAPRAWA: pole bylo losowane golym Math.random() - poza wspolnym
+    // strumieniem, na ktorym stoi cala synchronizacja tej gry (patrz rng.js).
+    // Klucz `${seedGry}:flaga-pole:${battleId}` - battleId jest SYNCHRONIZOWANY
+    // (getSyncState/applySync), wiec kazda karta liczaca ten sam klucz dostanie
+    // ten sam wynik. Wykluczamy (0,0) (bankomat) i kafelek aktualnie zajety
+    // przez minigre tlumaczen (this.tlumaczeniaRef.tile, patrz setContext) -
+    // dwie minigry nigdy nie moga stanac na tym samym polu. Kolejne proby przy
+    // kolizji ciagna z TEGO SAMEGO strumienia (kolejne wywolanie rng(), nie
+    // nowy klucz), ograniczone do MAX_PROB_LOSOWANIA_POLA.
+    const kluczPola = `${this.economy.state.seedGry}:flaga-pole:${this.battleId}`;
+    const rngPola = strumien(kluczPola);
+    const zajeteTlumaczenia = this.tlumaczeniaRef && this.tlumaczeniaRef.tile ? this.tlumaczeniaRef.tile : null;
+
+    let rx = null;
+    let rz = null;
+    for (let proba = 0; proba < FlagBattleManager.MAX_PROB_LOSOWANIA_POLA; proba++) {
+      const kx = losujInt(rngPola, -3, 3);
+      const kz = losujInt(rngPola, -3, 3);
+      if (kx === 0 && kz === 0) continue; // bankomat
+      if (zajeteTlumaczenia && kx === zajeteTlumaczenia.x && kz === zajeteTlumaczenia.z) continue; // pole tlumaczen
+      rx = kx;
+      rz = kz;
+      break;
+    }
+    if (rx === null) {
+      // Awaryjny deterministyczny skan siatki (praktycznie nieosiagalne) -
+      // ale petla wyzej MUSI miec koniec.
+      szukanie: for (let x = -3; x <= 3; x++) {
+        for (let z = -3; z <= 3; z++) {
+          if (x === 0 && z === 0) continue;
+          if (zajeteTlumaczenia && x === zajeteTlumaczenia.x && z === zajeteTlumaczenia.z) continue;
+          rx = x;
+          rz = z;
+          break szukanie;
+        }
+      }
+    }
+    if (rx === null) {
+      // Doslownie kazde pole zajete - nie powinno sie zdarzyc. Rezygnujemy z
+      // tej proby spawnu, host sprobuje ponownie przy nastepnym pelnym cyklu timera.
+      console.warn('[flagi] Brak wolnego pola na siatce - pomijam spawn tej rundy.');
+      this.battleId -= 1;
+      return;
+    }
+
+    this.tile = { x: rx, z: rz };
+    this.state = 'WAITING';
+    this.timer = 0;
 
     this.highlightMesh.position.x = rx;
     this.highlightMesh.position.z = rz;

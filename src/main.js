@@ -6,6 +6,7 @@ import { WorkerManager, parseMovementDirection } from './workers.js';
 import { CoinPool } from './coins.js';
 import { GoldenCoinManager } from './goldcoin.js';
 import { FlagBattleManager } from './flagbattle.js';
+import { TlumaczeniaManager } from './tlumaczenia.js';
 import { Economy, WORKER_TYPE_DEFS, MACHINE_TIERS, SAVE_KEY } from './economy.js';
 import { remote, czyLokalnie } from './remote.js';
 import { Realtime, URL_RELAYA } from './realtime.js';
@@ -117,6 +118,14 @@ async function main() {
   let flagBattleBledy = 0;
   let flagBattleZepsuta = false;
 
+  // Minigra "Tlumaczenia" - druga minigra na siatce areny, obok bitwy o
+  // flagi. Ta sama polityka izolacji bledow (patrz komentarz przy
+  // flagBattleZepsuta nizej w animate()) - blad w tick() degraduje WYLACZNIE
+  // te minigre, reszta gry dziala dalej.
+  const tlumaczenia = new TlumaczeniaManager(scene, renderer);
+  let tlumaczeniaBledy = 0;
+  let tlumaczeniaZepsuta = false;
+
   const vanessa = new VanessaManager(
     scene,
     camera,
@@ -198,6 +207,7 @@ async function main() {
       boss: boss.getSyncState(),
       workers: workerManager.getSyncState(),
       flagBattle: flagBattle.getSyncState(),
+      tlumaczenia: tlumaczenia.getSyncState(),
     };
   }
 
@@ -327,6 +337,10 @@ async function main() {
     await krokStanu('flagBattle.applySync', () => {
       if (!remote.czyAdmin()) flagBattle.applySync(stan.flagBattle || null);
     });
+    // Minigra "Tlumaczenia" - ten sam wzorzec co flagBattle.applySync wyzej.
+    await krokStanu('tlumaczenia.applySync', () => {
+      if (!remote.czyAdmin()) tlumaczenia.applySync(stan.tlumaczenia || null);
+    });
     try {
       await syncLeaderboardAndOverlays();
     } catch (err) {
@@ -411,6 +425,11 @@ async function main() {
       // to tylko dopisuje ten sam tekst do #kick-messages bez czekania.
       const text = dane && typeof dane.text === 'string' ? dane.text : null;
       if (text) flagBattle.announce(text);
+    } else if (nazwa === 'tlumaczenia-info') {
+      // Natychmiastowa narracja bitwy tlumaczen - ten sam wzorzec co
+      // 'flaga-info' powyzej (patrz komentarz tam).
+      const text = dane && typeof dane.text === 'string' ? dane.text : null;
+      if (text) tlumaczenia.announce(text);
     }
   }
 
@@ -518,6 +537,8 @@ async function main() {
     // lokalny), bo rola minigry ma sie zmieniac niezaleznie od tego, czy
     // przycisk admina w ogole istnieje na stronie.
     flagBattle.setHost(admin);
+    // Ta sama naprawa co dla flagBattle powyzej, dla minigry tlumaczen.
+    tlumaczenia.setHost(admin);
     if (!adminBtn) return;
     if (czyLokalnie()) {
       // Lokalnie nie ma sie gdzie logowac - chowamy przycisk.
@@ -706,6 +727,8 @@ async function main() {
       boss.onChatMessage(msg.username, msg.content, msg.color);
       // Odpowiedzi do bitwy o flagi
       flagBattle.onChatMessage(msg.username, msg.content);
+      // Odpowiedzi do bitwy tlumaczen
+      tlumaczenia.onChatMessage(msg.username, msg.content);
       // Chodzenie po siatce 2D areny - tylko dla aktywnych graczy w grze (Top 10)
       const moveDir = parseMovementDirection(msg.content);
       if (moveDir) {
@@ -793,7 +816,10 @@ async function main() {
       });
     },
   });
-  workerManager.setContext({ boss, vanessa, flagBattle });
+  // workerManager.setContext (src/workers.js) egzekwuje blokady ruchu obu
+  // minigier na siatce - isPlayerLocked/isTileLocked dla bitwy o flagi ORAZ
+  // dla bitwy tlumaczen (patrz moveWorker() w workers.js).
+  workerManager.setContext({ boss, vanessa, flagBattle, tlumaczenia });
   vanessa.setContext({ workerManager, kickChat });
   // Ta sama polityka co machine.czyKlikaniaDozwolone powyzej - patrz komentarz
   // tam. Obejmuje wszystkie 3 sciezki klikania myszka w Vanesse (model,
@@ -837,6 +863,15 @@ async function main() {
     economy,
     isHost: remote.czyAdmin(),
     boss,
+    tlumaczenia, // wylacznie do odczytu tlumaczenia.tile - patrz komentarz w flagbattle.js/setContext
+  });
+  tlumaczenia.setContext({
+    workerManager,
+    kickChat,
+    economy,
+    isHost: remote.czyAdmin(),
+    boss,
+    flagBattle, // wylacznie do odczytu flagBattle.tile - patrz komentarz w tlumaczenia.js/setContext
   });
   // Narracja bitwy ("Bitwa o flagi! X vs Y!", "X wygrywa!"...) dociera do
   // widza z hostowej karty natychmiast przez kanal realtime, zamiast czekac
@@ -855,6 +890,19 @@ async function main() {
   // inny dymek w grze (a wiec przez #floaters, nie przez nieistniejacy
   // #ui-layer, ktory kiedys polozyl produkcje - patrz historia tego pliku).
   flagBattle.onRewardTick = (winner) => {
+    const w = workerManager.getWorkerType(winner.typeIndex);
+    if (!w || !w.obj) return;
+    const origin = w.obj.position.clone().add(new THREE.Vector3(0, 1.8, 0));
+    projectAndFloat(origin, '+2 zł', { crit: false });
+  };
+  // Ten sam wzorzec co flagBattle.onAnnounce/onRewardTick powyzej, dla
+  // minigry tlumaczen.
+  tlumaczenia.onAnnounce = (text) => {
+    if (remote.czyAdmin()) {
+      realtime.wyslijZdarzenie('tlumaczenia-info', { text });
+    }
+  };
+  tlumaczenia.onRewardTick = (winner) => {
     const w = workerManager.getWorkerType(winner.typeIndex);
     if (!w || !w.obj) return;
     const origin = w.obj.position.clone().add(new THREE.Vector3(0, 1.8, 0));
@@ -979,6 +1027,7 @@ async function main() {
     remote,
     realtime,
     flagBattle,
+    tlumaczenia,
     save,
     scene,
     camera,
@@ -1020,6 +1069,21 @@ async function main() {
         if (flagBattleBledy >= 3) {
           flagBattleZepsuta = true;
           console.error('[flagi] Minigra wylaczona po trzech bledach pod rzad - reszta gry dziala normalnie.');
+        }
+      }
+    }
+    // Ta sama izolacja bledow co flagBattle powyzej - minigra tlumaczen jest
+    // rowniez mlodym modulem, blad w jej tick() nie moze polozyc calej gry.
+    if (!tlumaczeniaZepsuta) {
+      try {
+        tlumaczenia.tick(delta);
+        tlumaczeniaBledy = 0;
+      } catch (err) {
+        tlumaczeniaBledy += 1;
+        console.error(`[tlumaczenia] Blad w tick() minigry (${tlumaczeniaBledy}/3):`, err);
+        if (tlumaczeniaBledy >= 3) {
+          tlumaczeniaZepsuta = true;
+          console.error('[tlumaczenia] Minigra wylaczona po trzech bledach pod rzad - reszta gry dziala normalnie.');
         }
       }
     }
