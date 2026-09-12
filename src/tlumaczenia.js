@@ -8,7 +8,7 @@ import {
 } from './slowka.js';
 import { usunTagiEmotek } from './kick.js';
 import { loadForest } from './assets.js';
-import { strumien, losujZ, losujInt } from './rng.js';
+import { strumien, losujInt, tasuj } from './rng.js';
 
 // Minigra "Tlumaczenia" - DRUGA (a chronologicznie trzecia w projekcie) minigra
 // na siatce areny, obok "Bitwy o flagi". Mechanika jest CELOWO skopiowana z
@@ -177,7 +177,10 @@ export class TlumaczeniaManager {
     // (getSyncState/applySync), NIE lokalny licznik karty - inkrementowany
     // WYLACZNIE przez hosta, tak samo jak w flagbattle.js.
     this.battleId = 0;
-    this._uzyteSlowa = new Set();
+    // Permutacja calej puli ENGLISH_WORDS na biezaca bitwe (patrz
+    // spawnBattleSquare/nextRound) - budowana leniwie przy pierwszej rundzie,
+    // null oznacza "jeszcze nie zbudowana dla biezacego battleId".
+    this._kolejnoscSlow = null;
 
     this.rewardTimer = 0;
     this.winner = null;
@@ -386,7 +389,10 @@ export class TlumaczeniaManager {
 
   spawnBattleSquare() {
     this.battleId += 1;
-    this._uzyteSlowa.clear();
+    // Nowa bitwa = nowa permutacja puli slowek; null tutaj wystarczy, bo
+    // faktyczne tasowanie (potrzebuje juz przyrostowego this.battleId w
+    // kluczu) wykonuje sie leniwie w nextRound() przy pierwszej rundzie.
+    this._kolejnoscSlow = null;
 
     const zajeteFlag = this.flagBattleRef && this.flagBattleRef.tile ? this.flagBattleRef.tile : null;
     const klucz = `${this.economy.state.seedGry}:tlumaczenia-pole:${this.battleId}`;
@@ -465,7 +471,10 @@ export class TlumaczeniaManager {
 
       this.state = 'BATTLE';
       this.wordsGuessed = 0;
-      this._uzyteSlowa.clear();
+      // battleId sie tu NIE zmienia (ustawia go wylacznie spawnBattleSquare),
+      // wiec permutacja zbudowana ewentualnie wczesniej (nie powinno sie
+      // zdarzyc przy normalnym przebiegu WAITING->BATTLE, ale dla porzadku)
+      // zostaje - nie czyscimy jej ponownie tutaj.
 
       const angleP1 = Math.atan2(p2.obj.position.x - p1.obj.position.x, p2.obj.position.z - p1.obj.position.z);
       p1.targetRotY = angleP1;
@@ -499,35 +508,35 @@ export class TlumaczeniaManager {
     }
   }
 
-  static MAX_PROB_LOSOWANIA_SLOWA = 50;
-
   nextRound() {
     if (this.state !== 'BATTLE') return;
 
-    // Deterministyczne losowanie slowa z tego samego wspolnego strumienia co
-    // reszta gry - patrz analogiczny, obszerny komentarz przy nextRound()
-    // w flagbattle.js. Klucz `${seedGry}:tlumaczenia:${battleId}:${numerRundy}`
-    // - dokladnie w formacie z zadania.
+    // Losowanie slowa BEZ POWTOREK w obrebie bitwy: zamiast losowac
+    // pojedyncze slowo w petli "probuj az trafisz nieuzyte" (dawny
+    // MAX_PROB_LOSOWANIA_SLOWA + _uzyteSlowa, usuniete - patrz obszerny
+    // komentarz przy tasuj() w rng.js po pelne uzasadnienie wad tamtego
+    // podejscia), TASUJEMY RAZ CALA PULE ENGLISH_WORDS na poczatku bitwy i
+    // kazda runda bierze kolejna pozycje z gotowej permutacji. Klucz
+    // `${seedGry}:tlumaczenia-kolejnosc:${battleId}` - oparty o
+    // SYNCHRONIZOWANY battleId (nie o lokalny licznik karty), wiec host i
+    // kazdy widz licza DOKLADNIE ta sama permutacje z tych samych danych
+    // (identyczne uzasadnienie determinizmu co przy kluczu
+    // tlumaczenia-pole w spawnBattleSquare powyzej) - synchronizacja
+    // (getSyncState/applySync) nie jest tu w ogole zaangazowana, bo widz
+    // nigdy sam nie wywoluje nextRound() (patrz applySync: currentWord
+    // przychodzi gotowe w stanie hosta), a permutacje liczy TYLKO host.
+    if (!this._kolejnoscSlow) {
+      const kluczKolejnosci = `${this.economy.state.seedGry}:tlumaczenia-kolejnosc:${this.battleId}`;
+      this._kolejnoscSlow = tasuj(strumien(kluczKolejnosci), ENGLISH_WORDS);
+    }
+
     const numerRundy = this.wordsGuessed + 1;
-    const klucz = `${this.economy.state.seedGry}:tlumaczenia:${this.battleId}:${numerRundy}`;
-    const rng = strumien(klucz);
-
-    let wybrane = null;
-    let proby = 0;
-    while (proby < TlumaczeniaManager.MAX_PROB_LOSOWANIA_SLOWA) {
-      proby += 1;
-      const kandydat = losujZ(rng, ENGLISH_WORDS);
-      if (!this._uzyteSlowa.has(kandydat)) {
-        wybrane = kandydat;
-        break;
-      }
-    }
-    if (!wybrane) {
-      wybrane = losujZ(rng, ENGLISH_WORDS);
-    }
-    this._uzyteSlowa.add(wybrane);
-
-    this.currentWord = wybrane;
+    // Modulo dlugosci puli - czysto obronne (bitwa "best of 9" zuzywa
+    // najwyzej 9 slow z puli 1000, wiec w praktyce nigdy nie zawinie), ale
+    // gwarantuje, ze indeks NIGDY nie da undefined nawet gdyby PUNKTY_DO_WYGRANEJ
+    // kiedys urosl ponad dlugosc ENGLISH_WORDS.
+    const indeks = (numerRundy - 1) % this._kolejnoscSlow.length;
+    this.currentWord = this._kolejnoscSlow[indeks];
     this._stosujTeksturaSlowa(this.currentWord);
   }
 
@@ -714,7 +723,7 @@ export class TlumaczeniaManager {
     this.winner = null;
     this.rewardTimer = 0;
     this._lastRewardTime = 0;
-    this._uzyteSlowa.clear();
+    this._kolejnoscSlow = null;
     this.highlightMesh.visible = false;
     this.wordSprite.visible = false;
     this.markerPierscien.material.opacity = 0.95;

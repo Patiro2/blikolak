@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { COUNTRIES, COUNTRY_CODES, tokenizujOdpowiedz, INDEKS_WARIANTOW } from './countries.js';
 import { usunTagiEmotek } from './kick.js';
 import { loadForest } from './assets.js';
-import { strumien, losujZ, losujInt } from './rng.js';
+import { strumien, losujInt, tasuj } from './rng.js';
 
 // Naprawa koloru/rozdzielczosci flag (dwie NIEZALEZNE przyczyny):
 //
@@ -283,11 +283,13 @@ export class FlagBattleManager {
     // spawnBattleSquare(), wiec kazda karta (i ewentualny nowy host po
     // przejeciu roli w locie) widzi ta sama wartosc dla tej samej bitwy.
     this.battleId = 0;
-    // Flagi juz wylosowane W TEJ bitwie - zyje tylko miedzy spawnBattleSquare/
-    // wejsciem w BATTLE a reset() (patrz komentarze przy obu), nie przecieka
-    // do kolejnych bitew.
-    this._uzyteFlagi = new Set();
-    this._probLosowaniaFlagi = 0; // diagnostyka: ile prob potrzebowala OSTATNIA runda
+    // Kolejnosc flag W TEJ bitwie - deterministyczna permutacja CALEJ puli
+    // COUNTRY_CODES (patrz tasuj() w rng.js i nextRound() nizej). Budowana
+    // leniwie (przy pierwszej rundzie), zyje tylko miedzy spawnBattleSquare/
+    // wejsciem w BATTLE a reset() (patrz komentarze przy obu - to te same
+    // miejsca, ktore kiedys czyscily _uzyteFlagi), nie przecieka do kolejnych
+    // bitew. null = jeszcze nie zbudowana dla biezacego battleId.
+    this._kolejnoscFlag = null;
 
     this.rewardTimer = 0;
     this.winner = null;
@@ -571,18 +573,21 @@ export class FlagBattleManager {
     }
   }
 
-  // Ograniczenie prob przy losowaniu pola - identyczne uzasadnienie co
-  // MAX_PROB_LOSOWANIA_FLAGI ponizej: petla NIE MOZE zostac nieograniczona.
+  // Ograniczenie prob przy losowaniu pola (siatka 7x7, kolizje z bankomatem/
+  // minigra tlumaczen) - petla NIE MOZE zostac nieograniczona. Losowanie
+  // flagi ponizej (nextRound()) juz tego wzorca nie uzywa - permutacja calej
+  // puli (tasuj()) nie potrzebuje petli prob w ogole.
   static MAX_PROB_LOSOWANIA_POLA = 50;
 
   spawnBattleSquare() {
     // Nowa bitwa (a przynajmniej nowa proba - jeszcze bez graczy) - patrz
-    // komentarz przy battleId/_uzyteFlagi w konstruktorze. Zerujemy zbior
-    // uzytych flag TUTAJ (a nie dopiero w checkPlayersEntry/BATTLE), zeby na
-    // pewno nie zostal ani jeden wpis z poprzedniej bitwy - dokladnie tak,
-    // jak wymaga specyfikacja (spawnBattleSquare ORAZ wejscie w BATTLE ORAZ reset()).
+    // komentarz przy battleId/_kolejnoscFlag w konstruktorze. Czyscimy
+    // kolejnosc flag TUTAJ (a nie dopiero w checkPlayersEntry/BATTLE), zeby na
+    // pewno nie zostala kolejnosc z poprzedniej bitwy - dokladnie tak, jak
+    // wymaga specyfikacja (spawnBattleSquare ORAZ wejscie w BATTLE ORAZ reset()).
+    // Budowana na nowo leniwie w nextRound() dla nowego battleId.
     this.battleId += 1;
-    this._uzyteFlagi.clear();
+    this._kolejnoscFlag = null;
 
     // NAPRAWA: pole bylo losowane golym Math.random() - poza wspolnym
     // strumieniem, na ktorym stoi cala synchronizacja tej gry (patrz rng.js).
@@ -676,8 +681,8 @@ export class FlagBattleManager {
       this.flagsGuessed = 0;
       // Zerujemy jeszcze raz na wejsciu do BATTLE (spawnBattleSquare juz to
       // zrobil, ale specyfikacja explicite wymaga tego rowniez tutaj - tania
-      // gwarancja, ze zaden wpis z poprzedniej bitwy nie przecieknie).
-      this._uzyteFlagi.clear();
+      // gwarancja, ze zadna kolejnosc z poprzedniej bitwy nie przecieknie).
+      this._kolejnoscFlag = null;
 
       // Obracamy ich twarzą do siebie
       const angleP1 = Math.atan2(p2.obj.position.x - p1.obj.position.x, p2.obj.position.z - p1.obj.position.z);
@@ -731,11 +736,6 @@ export class FlagBattleManager {
     }
   }
 
-  // Ograniczenie prob przy unikaniu powtorki - przy 232 flagach i realistycznie
-  // max kilkunastu rundach na bitwe to praktycznie nigdy nie powinno wystrzelic,
-  // ale petla NIE MOZE zostac nieograniczona (zawiesilaby klatke).
-  static MAX_PROB_LOSOWANIA_FLAGI = 50;
-
   nextRound() {
     if (this.state !== 'BATTLE') return;
 
@@ -746,37 +746,34 @@ export class FlagBattleManager {
     // MOZE zostac nowym hostem w trakcie zycia strony (choc nie W TRAKCIE tej
     // samej bitwy - setHost() resetuje minigre przy zmianie roli), (2) bez
     // wspolnego strumienia przebiegu bitwy nie da sie odtworzyc ani
-    // zweryfikowac. Klucz `${seedGry}:flaga:${battleId}:${numerRundy}` -
-    // battleId jest SYNCHRONIZOWANY (getSyncState/applySync, patrz konstruktor),
-    // nie lokalnym licznikiem karty, wiec kazda karta liczaca ten sam klucz
-    // dostanie ten sam wynik.
-    const numerRundy = this.flagsGuessed + 1;
-    const klucz = `${this.economy.state.seedGry}:flaga:${this.battleId}:${numerRundy}`;
-    const rng = strumien(klucz);
+    // zweryfikowac.
+    //
+    // Bez powtorek W OBREBIE JEDNEJ BITWY, losowanie z CALEJ puli: zamiast
+    // "losuj az trafisz niewykorzystana" (dawny wzorzec z MAX_PROB_LOSOWANIA_
+    // FLAGI i fallbackiem, ktory przy wyczerpaniu prob ODDAWAL POWTORKE - patrz
+    // historia tego pliku), budujemy RAZ NA BITWE deterministyczna permutacje
+    // (tasuj(), Fisher-Yates) calej puli COUNTRY_CODES z klucza
+    // `${seedGry}:flaga-kolejnosc:${battleId}` i po prostu bierzemy z niej
+    // kolejny element. battleId jest SYNCHRONIZOWANY (getSyncState/applySync,
+    // patrz konstruktor), wiec host i widz (a takze widz, ktory w miedzyczasie
+    // sam zostal hostem - setHost() i tak resetuje minigre przy zmianie roli,
+    // ale NIE w trakcie tej samej bitwy) licza dokladnie ta sama permutacje.
+    // Permutacja daje zero powtorek Z DEFINICJI (kazdy kod wystepuje w niej
+    // dokladnie raz) i jednostajny rozklad na kazdej pozycji - bez petli, bez
+    // limitu prob, bez ryzyka fallbacku na powtorke.
+    if (!this._kolejnoscFlag) {
+      const kluczKolejnosci = `${this.economy.state.seedGry}:flaga-kolejnosc:${this.battleId}`;
+      this._kolejnoscFlag = tasuj(strumien(kluczKolejnosci), COUNTRY_CODES);
+    }
 
-    // Bez powtorek W OBREBIE JEDNEJ BITWY: losujemy z TEGO SAMEGO strumienia
-    // (kolejne wywolanie rng(), NIE nowy klucz) az trafimy flage spoza
-    // this._uzyteFlagi. To zostaje deterministyczne, bo strumien jest
-    // deterministyczny - kazda karta powtarzajaca te sama petle dojdzie do
-    // tego samego wyniku po tej samej liczbie prob.
-    let wybrana = null;
-    let proby = 0;
-    while (proby < FlagBattleManager.MAX_PROB_LOSOWANIA_FLAGI) {
-      proby += 1;
-      const kandydat = losujZ(rng, COUNTRY_CODES);
-      if (!this._uzyteFlagi.has(kandydat)) {
-        wybrana = kandydat;
-        break;
-      }
-    }
-    if (!wybrana) {
-      // Praktycznie nieosiagalne (232 flagi, garstka rund/bitwe) - ale petla
-      // MUSI miec koniec, wiec bierzemy ostatniego kandydata zamiast zawiesic
-      // klatke. Nadal deterministyczne (ten sam strumien na kazdej karcie).
-      wybrana = losujZ(rng, COUNTRY_CODES);
-    }
-    this._probLosowaniaFlagi = proby;
-    this._uzyteFlagi.add(wybrana);
+    // numerRundy = flagsGuessed + 1 (1-indeksowane rundy). Modulo dlugosci
+    // puli WYLACZNIE jako zabezpieczenie na wypadek bitwy dluzszej niz cala
+    // pula (praktycznie nieosiagalne - bitwa konczy sie po 3 punktach jednego
+    // gracza, patrz onChatMessage, wiec maks. kilka-kilkanascie rund) - indeks
+    // tablicy nigdy nie moze dac undefined.
+    const numerRundy = this.flagsGuessed + 1;
+    const indeks = (numerRundy - 1) % this._kolejnoscFlag.length;
+    const wybrana = this._kolejnoscFlag[indeks];
 
     this.currentFlag = wybrana;
     this._stosujTeksturaFlagi(this.currentFlag);
@@ -1034,12 +1031,12 @@ export class FlagBattleManager {
     this.winner = null;
     this.rewardTimer = 0;
     this._lastRewardTime = 0;
-    // Zbior uzytych flag NIE moze przeciekac miedzy bitwami (patrz komentarz
-    // w konstruktorze) - czyszczony tutaj tak samo jak przy starcie nowej
+    // Kolejnosc flag NIE moze przeciekac miedzy bitwami (patrz komentarz w
+    // konstruktorze) - czyszczona tutaj tak samo jak przy starcie nowej
     // bitwy. battleId celowo NIE jest zerowany - rosnie monotonicznie przez
     // cala sesje, zeby zaden klucz strumienia nigdy nie powtorzyl sie miedzy
     // dwiema roznymi bitwami.
-    this._uzyteFlagi.clear();
+    this._kolejnoscFlag = null;
     this.highlightMesh.visible = false;
     this.flagSprite.visible = false;
     // Przywracamy pelna jaskrawosc znacznika - koncowka REWARD moglo ja

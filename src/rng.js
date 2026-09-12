@@ -64,3 +64,31 @@ export function losujInt(rng, min, max) {
 export function losujZ(rng, tablica) {
   return tablica[Math.floor(rng() * tablica.length)];
 }
+
+/**
+ * Deterministyczna permutacja tablicy (tasowanie Fishera-Yatesa napedzane
+ * podanym strumieniem). Zwraca NOWA tablice - wejsciowa zostaje nietknieta.
+ *
+ * Po co, skoro mielismy juz losujZ w petli "losuj az trafisz cos nowego"?
+ * Tamten wzorzec mial trzy wady, ktore ta funkcja kasuje naraz:
+ *  - przy dluzszej bitwie coraz wiecej prob trafialo w juz uzyte pozycje, a
+ *    po wyczerpaniu limitu prob kod ODDAWAL POWTORKE (fallback losujZ),
+ *  - odrzucanie kandydatow lekko zaburzalo rozklad w kolejnych rundach,
+ *  - liczba wywolan rng() zalezala od historii bitwy, wiec przebieg trudniej
+ *    bylo odtworzyc z samego klucza.
+ * Permutacja daje: zero powtorek w obrebie jednej bitwy Z DEFINICJI, dokladnie
+ * jednostajne 1/N na kazda pozycje puli i stala, przewidywalna liczbe
+ * wywolan rng(). Determinizm (a wiec i synchronizacja miedzy kartami, patrz
+ * komentarz na gorze pliku) zostaje bez zmian - wynik zalezy wylacznie od
+ * strumienia.
+ */
+export function tasuj(rng, tablica) {
+  const wynik = tablica.slice();
+  for (let i = wynik.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    const tmp = wynik[i];
+    wynik[i] = wynik[j];
+    wynik[j] = tmp;
+  }
+  return wynik;
+}
