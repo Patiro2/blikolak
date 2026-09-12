@@ -336,6 +336,16 @@ const KICK_EMBED_COLLAPSED_KEY = 'bankomat-clicker-kick-embed-collapsed';
  * otworzy panelu, nie powinien tego pobierac. Po pierwszym ustawieniu src juz
  * go nie zerujemy przy zwijaniu - przeladowywanie czatu za kazdym zwinieciem
  * byloby gorsze niz zostawienie go zaladowanego w tle.
+ *
+ * PISANIE w ramce jest zawodne: sesja logowania Kicka w kontekscie iframe
+ * (third-party) jest partycjonowana per strona nadrzedna, wiec po zalogowaniu
+ * ciasteczko ladowania nie jest widoczne w ramce i Kick prosi o logowanie w
+ * kolko. Atrybut allow="storage-access" na iframe to jedyna rzecz, ktora
+ * nasz kod moze zrobic - pozwala stronie Kicka POROSIC o dostep do wlasnego
+ * magazynu (document.requestStorageAccess()), ale to Kick musi o niego
+ * zawolac po swojej stronie. Dlatego zamiast liczyc na ramke, przycisk
+ * "Napisz na czacie" otwiera oficjalny popout jako osobne okno, gdzie
+ * kick.com jest strona pierwsza i sesja trzyma sie normalnie.
  */
 export class KickEmbedUI {
   constructor() {
@@ -343,11 +353,14 @@ export class KickEmbedUI {
     this.header = document.getElementById('kick-embed-header');
     this.frame = document.getElementById('kick-embed-frame');
     this.toggleBtn = document.getElementById('kick-embed-toggle-btn');
+    this.writeBtn = document.getElementById('kick-embed-write-btn');
+    this.popoutLink = document.getElementById('kick-embed-popout-link');
 
     this._loaded = false;
 
     this._restoreCollapsedState();
     this._bindEvents();
+    this._bindWriteButton();
 
     if (this.panel && this.header) {
       makeDraggable(this.panel, this.header, 'bankomat-clicker-kick-embed-pos');
@@ -387,6 +400,19 @@ export class KickEmbedUI {
     if (this._loaded || !this.frame) return;
     this._loaded = true;
     this.frame.src = KICK_EMBED_SRC;
+  }
+
+  _bindWriteButton() {
+    if (!this.writeBtn) return;
+    this.writeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      // nazwane okno - kolejne klikniecia wracaja do tego samego okna zamiast mnozyc je
+      const popup = window.open(KICK_EMBED_SRC, 'kick-czat-patiro', 'width=420,height=700');
+      if (!popup && this.popoutLink) {
+        // window.open zablokowany przez blokade wyskakujacych okien - uzyj zwyklego linku
+        this.popoutLink.click();
+      }
+    });
   }
 }
 

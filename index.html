@@ -79,12 +79,20 @@
     <div id="kick-embed-header" class="floating-header" title="Chwyć i przeciągnij okno czatu Kicka">
       <div id="kick-embed-title"><span class="drag-grip">⋮⋮</span> 💬 CZAT KICKA</div>
       <div id="kick-embed-actions">
-        <a href="https://kick.com/popout/patiro/chat" target="_blank" rel="noopener" id="kick-embed-popout-link" title="Otwórz czat w nowym oknie na kick.com (przydatne, gdy przeglądarka blokuje ciasteczka stron trzecich)">Otwórz w nowym oknie ↗</a>
+        <button id="kick-embed-write-btn" title="Otwórz czat Kicka w osobnym oknie, zeby pisac (logowanie trzyma sie tam niezawodnie)" style="cursor: pointer; background: rgba(83, 252, 24, 0.14); color: #53fc18; border: 1px solid rgba(83, 252, 24, 0.45); border-radius: 4px; padding: 2px 6px; font-size: 10px; font-weight: 700; white-space: nowrap; line-height: 1.4;">✍️ Napisz</button>
+        <a href="https://kick.com/popout/patiro/chat" target="_blank" rel="noopener" id="kick-embed-popout-link" title="Zapasowy link, gdyby okno powyzej zostalo zablokowane przez przegladarke">Okno ↗</a>
         <button id="kick-embed-toggle-btn" title="Zwiń / Rozwiń czat">+</button>
       </div>
     </div>
-    <div id="kick-embed-body">
-      <iframe id="kick-embed-frame" title="Czat Kicka - kanal patiro" allow="clipboard-write" referrerpolicy="strict-origin-when-cross-origin"></iframe>
+    <!-- flex w stylu inline, a nie w style.css, bo rownolegle trwa tam inna
+         zmiana; docelowo do przeniesienia do arkusza. Bez tego iframe (height
+         100% rodzica o stalej wysokosci) plus tekst informacyjny nad nim daja
+         razem WIECEJ niz wysokosc panelu, a panel ma overflow:hidden - dolne
+         38 px iframe'a byly obcinane, czyli dokladnie pole do pisania i
+         przycisk "Czat". -->
+    <div id="kick-embed-body" style="display: flex; flex-direction: column;">
+      <div id="kick-embed-info" style="font-size: 11px; opacity: 0.75; padding: 4px 8px;">Pisanie w tej ramce bywa blokowane przez ustawienia ciasteczek przegladarki - dlatego otwiera sie osobne okno.</div>
+      <iframe id="kick-embed-frame" style="flex: 1 1 auto; height: auto; min-height: 0;" title="Czat Kicka - kanal patiro" allow="clipboard-write; storage-access" referrerpolicy="strict-origin-when-cross-origin"></iframe>
     </div>
   </div>
 
