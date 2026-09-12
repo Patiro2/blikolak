@@ -1,0 +1,128 @@
+/* Style okna samouczka (tutorial.js). Plik odrebny od style.css - tutorial
+   jest samowystarczalny i nie dzieli arkusza ze wspolnym HUD-em, zeby nie
+   kolidowac z rownolegla praca nad boss.js/main.js/style.css. */
+
+#tutorial-panel {
+  position: fixed;
+  top: 16px;
+  left: 16px;
+  width: 320px;
+  max-width: calc(100vw - 32px);
+  background: rgba(16, 20, 28, 0.88);
+  border: 1px solid rgba(83, 252, 24, 0.28);
+  border-radius: 10px;
+  color: #eee;
+  font-family: 'Segoe UI', Arial, sans-serif;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5), 0 0 10px rgba(83, 252, 24, 0.08);
+  backdrop-filter: blur(6px);
+  pointer-events: auto;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: top 0.15s ease, left 0.15s ease;
+}
+
+#tutorial-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  user-select: none;
+}
+
+#tutorial-panel.collapsed #tutorial-header {
+  border-bottom: none;
+}
+
+#tutorial-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #53fc18;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#tutorial-toggle-btn {
+  pointer-events: auto;
+  flex: 0 0 auto;
+  background: rgba(83, 252, 24, 0.14);
+  color: #53fc18;
+  border: 1px solid rgba(83, 252, 24, 0.45);
+  border-radius: 6px;
+  width: 26px;
+  height: 26px;
+  line-height: 1;
+  font-size: 15px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+#tutorial-toggle-btn:hover {
+  background: #53fc18;
+  color: #10131a;
+}
+
+#tutorial-body {
+  padding: 10px 12px 12px;
+  overflow-y: auto;
+  /* Wartosc domyslna na wypadek, gdyby JS jeszcze nie przeliczyl pozycji -
+     tutorial.js nadpisuje to inline na podstawie realnej dostepnej wysokosci. */
+  max-height: min(70vh, 520px);
+}
+
+#tutorial-panel.collapsed #tutorial-body {
+  display: none;
+}
+
+.tutorial-section {
+  margin-bottom: 10px;
+}
+
+.tutorial-section:last-child {
+  margin-bottom: 0;
+}
+
+.tutorial-section h3 {
+  margin: 0 0 3px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  color: #ffd54a;
+}
+
+.tutorial-section p {
+  margin: 0 0 4px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: #d8dee8;
+}
+
+.tutorial-section p:last-child {
+  margin-bottom: 0;
+}
+
+.tutorial-section code {
+  background: rgba(83, 252, 24, 0.14);
+  color: #53fc18;
+  border-radius: 4px;
+  padding: 1px 4px;
+  font-size: 11.5px;
+}
+
+@media (max-width: 700px) {
+  #tutorial-panel {
+    left: 8px;
+    width: auto;
+    max-width: calc(100vw - 16px);
+  }
+
+  #tutorial-body {
+    max-height: 50vh;
+  }
+}
