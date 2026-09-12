@@ -5,6 +5,7 @@ import { Machine } from './machine.js';
 import { WorkerManager, parseMovementDirection } from './workers.js';
 import { CoinPool } from './coins.js';
 import { GoldenCoinManager } from './goldcoin.js';
+import { FlagBattleManager } from './flagbattle.js';
 import { Economy, WORKER_TYPE_DEFS, MACHINE_TIERS, SAVE_KEY } from './economy.js';
 import { remote, czyLokalnie } from './remote.js';
 import { Realtime, URL_RELAYA } from './realtime.js';
@@ -97,6 +98,8 @@ async function main() {
 
   const goldCoin = new GoldenCoinManager(scene);
   await goldCoin.init();
+
+  const flagBattle = new FlagBattleManager(scene);
 
   const vanessa = new VanessaManager(
     scene,
@@ -626,6 +629,8 @@ async function main() {
       vanessa.checkChatWord(msg.content, msg.username, msg.color);
       // Odpowiedzi na dzialania matematyczne bossa oraz komenda "pomoc" (omdlenia)
       boss.onChatMessage(msg.username, msg.content, msg.color);
+      // Odpowiedzi do bitwy o flagi
+      flagBattle.onChatMessage(msg.username, msg.content);
       // Chodzenie po siatce 2D areny - tylko dla aktywnych graczy w grze (Top 10)
       const moveDir = parseMovementDirection(msg.content);
       if (moveDir) {
@@ -713,7 +718,7 @@ async function main() {
       });
     },
   });
-  workerManager.setContext({ boss, vanessa });
+  workerManager.setContext({ boss, vanessa, flagBattle });
   vanessa.setContext({ workerManager, kickChat });
   boss.setContext({
     workerManager,
@@ -741,6 +746,11 @@ async function main() {
     coinPool,
     projectAndFloat,
     save,
+  });
+  flagBattle.setContext({
+    workerManager,
+    kickChat,
+    economy,
   });
 
   // Widz otwierajacy karte w trakcie walki z bossem podejmuje ja od razu, bez
@@ -855,6 +865,7 @@ async function main() {
     workerManager.update(delta);
     coinPool.update(delta);
     goldCoin.update(delta);
+    flagBattle.tick(delta);
     city.update(delta);
 
     // Brak dochodu pasywnego - zl powstaja WYLACZNIE z klikniec.

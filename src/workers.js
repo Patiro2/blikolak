@@ -123,11 +123,13 @@ export class WorkerManager {
     this.pending = new Map(); // typeIndex -> Promise<Entry>
     this.bossRef = null;
     this.vanessaRef = null;
+    this.flagBattleRef = null;
   }
 
-  setContext({ boss, vanessa }) {
-    this.bossRef = boss || this.bossRef;
-    this.vanessaRef = vanessa || this.vanessaRef;
+  setContext({ boss, vanessa, flagBattle }) {
+    this.bossRef = boss;
+    this.vanessaRef = vanessa;
+    this.flagBattleRef = flagBattle;
   }
 
   async _getTemplate(modelKey) {
@@ -418,6 +420,11 @@ export class WorkerManager {
     // Bankomat w centrum (0, 0) blokuje wejście
     const isATM = nextX === 0 && nextZ === 0;
 
+    let isLockedByFlagBattle = false;
+    if (this.flagBattleRef && typeof this.flagBattleRef.isTileLocked === 'function') {
+      isLockedByFlagBattle = this.flagBattleRef.isTileLocked(nextX, nextZ, typeIndex);
+    }
+
     // Kolizje MIEDZY POSTACIAMI sa celowo WYLACZONE - kilku widzow moze stac
     // na tym samym polu i przechodzic przez siebie, zeby nikt nie blokowal
     // nikomu drogi i cala siatka byla dostepna dla kazdego. Blokuja wylacznie
@@ -432,7 +439,7 @@ export class WorkerManager {
     entry.targetRotY = targetHeading;
     entry.facingAngle = targetHeading;
 
-    if (!inBounds || isATM) {
+    if (!inBounds || isATM || isLockedByFlagBattle) {
       // Gracz nie może wyjść poza obszar gry lub wejść w bankomat, ale obraca się w wybraną stronę
       entry.isMoving = true;
       entry.moveProgress = 0;
