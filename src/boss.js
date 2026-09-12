@@ -7,6 +7,7 @@ import { showBossNotification } from './ui.js';
 import { BossAttackFx } from './bossattack.js';
 import { normalizeNick } from './kick.js';
 import { audio } from './audio.js';
+import { strumien, losujInt, losujZ } from './rng.js';
 
 // Architektura gotowa na kolejnych bossow (jeden na kazdy tier bankomatu) -
 // tablica indeksowana numerem tieru, wypelniony na razie tylko indeks 1.
@@ -89,28 +90,34 @@ function pick(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
-/** Losuje dzialanie matematyczne z calkowitym, nieujemnym wynikiem. */
-function genEquation() {
-  const op = pick(['+', '-', '×', '÷']);
+/**
+ * Losuje dzialanie matematyczne z calkowitym, nieujemnym wynikiem. Bierze
+ * gotowy strumien `rng` (patrz src/rng.js) zamiast Math.random(), zeby
+ * rownanie numer N w danej walce wyszlo IDENTYCZNE na kazdej otwartej karcie
+ * gry (patrz _nextEquation - klucz strumienia zawiera seedGry, numer tieru
+ * walki i licznik rownan).
+ */
+function genEquation(rng) {
+  const op = losujZ(rng, ['+', '-', '×', '÷']);
   let a, b, result, text;
   if (op === '+') {
-    a = randInt(11, 89);
-    b = randInt(11, 89);
+    a = losujInt(rng, 11, 89);
+    b = losujInt(rng, 11, 89);
     result = a + b;
     text = `${a} + ${b} = ?`;
   } else if (op === '-') {
-    a = randInt(11, 89);
-    b = randInt(1, a);
+    a = losujInt(rng, 11, 89);
+    b = losujInt(rng, 1, a);
     result = a - b;
     text = `${a} - ${b} = ?`;
   } else if (op === '×') {
-    a = randInt(2, 12);
-    b = randInt(2, 12);
+    a = losujInt(rng, 2, 12);
+    b = losujInt(rng, 2, 12);
     result = a * b;
     text = `${a} × ${b} = ?`;
   } else {
-    b = randInt(2, 12);
-    result = randInt(2, 12);
+    b = losujInt(rng, 2, 12);
+    result = losujInt(rng, 2, 12);
     a = b * result;
     text = `${a} ÷ ${b} = ?`;
   }
@@ -182,6 +189,17 @@ export class BossManager {
     this.eqTimer = 0;
     this.interDelay = 0;
     this._lastTickSecond = null;
+
+    // Liczniki losowan zakotwiczonych we wspolnym ziarnie gry (patrz src/rng.js) -
+    // licznikRownan rosnie przy kazdym nowym dzialaniu, licznikAtakow przy
+    // kazdym ataku "wymiotow" na pole. Oba sa czescia stanu synchronizowanego
+    // do widzow (patrz getSyncState/applySync) - wyrownanie ich u widza od razu
+    // przelicza biezace rownanie ze wspolnego strumienia.
+    this.licznikRownan = 0;
+    this.licznikAtakow = 0;
+    this._licznikIdle = 0; // pomocniczy licznik dla harmonogramu bezczynnego rozgladania sie (nie synchronizowany - czysto kosmetyczny)
+    this.startWalki = null; // Date.now() z chwili startu walki - czesc stanu synchronizowanego
+
     this.faintTimer = this._randomFaintDelay();
 
     // Tryb awaryjny (patrz _hasEligibleSolvers): gdy nikt z Top 10 nie moze
@@ -200,7 +218,7 @@ export class BossManager {
     this._timeryAtakow = []; // aktywne timery atakow - anulowane przy koncu walki
     this.kosci = null;
     this._poza = null; // { typ, t, czas } - reczna poza nakladana na wheelchair-sit
-    this._idleTimer = 6 + Math.random() * 4; // co jakis czas boss rozglada sie na boki
+    this._idleTimer = 6 + Math.random() * 4; // pierwszy odstep (przed startem walki) - kosmetyczny, bez znaczenia dla synchronizacji
 
     this._headWorld = new THREE.Vector3();
     this._projected = new THREE.Vector3();
@@ -255,8 +273,17 @@ export class BossManager {
     if (this.onLog) this.onLog(null);
   }
 
+  /**
+   * Odstep do kolejnego ataku "wymiotow" na pole - zakotwiczony w liczniku
+   * atakow (nie w Math.random()), zeby kazda karta gry wylosowala ten sam
+   * odstep. Przy konstrukcji (poza walka) idWalki jest jeszcze null - to nie
+   * szkodzi, bo ta wartosc i tak zostanie nadpisana w start()/startFromSync().
+   */
   _randomFaintDelay() {
-    return FAINT_MIN + Math.random() * (FAINT_MAX - FAINT_MIN);
+    const seed = this.economy.state.seedGry;
+    const idWalki = this.pendingTier;
+    const rng = strumien(`${seed}:faintDelay:${idWalki}:${this.licznikAtakow}`);
+    return FAINT_MIN + rng() * (FAINT_MAX - FAINT_MIN);
   }
 
   setContext({ workerManager, workerOverlays, kickChat, vanessa, onDefeated }) {
@@ -500,6 +527,9 @@ export class BossManager {
     this.hp = def.hp || 100;
     this.maxHp = this.hp;
     this.faintedMap.clear();
+    this.licznikRownan = 0;
+    this.licznikAtakow = 0;
+    this.startWalki = Date.now();
     this.faintTimer = this._randomFaintDelay();
 
     this._log('spawn', `Startuje walka z bossem "${def.name}" (awans na tier ${tier})`, { tier, hp: this.hp });
@@ -759,7 +789,12 @@ export class BossManager {
     // siedzacej w wozku.
     this._idleTimer -= delta;
     if (this._idleTimer <= 0) {
-      this._idleTimer = 6 + Math.random() * 5;
+      // Odstep do kolejnego rozgladania sie jest zakotwiczony w liczniku (jak
+      // _randomFaintDelay), zeby harmonogram bezczynnosci tez byl wspolny -
+      // kierunek (lewo/prawo) jest czysto kosmetyczny, wiec zostaje losowy.
+      this._licznikIdle += 1;
+      const rng = strumien(`${this.economy.state.seedGry}:idle:${this.pendingTier}:${this._licznikIdle}`);
+      this._idleTimer = 6 + rng() * 5;
       if (!this._poza) {
         this.playAction(Math.random() < 0.5 ? 'wheelchair-look-left' : 'wheelchair-look-right', { once: true });
       }
@@ -773,8 +808,16 @@ export class BossManager {
     }
   }
 
+  /** Klucz strumienia dla N-tego rownania biezacej walki - patrz src/rng.js. */
+  _rownanieRng(numerRownania) {
+    const seed = this.economy.state.seedGry;
+    const idWalki = this.pendingTier;
+    return strumien(`${seed}:rownanie:${idWalki}:${numerRownania}`);
+  }
+
   _nextEquation() {
-    this.currentEq = genEquation();
+    this.licznikRownan += 1;
+    this.currentEq = genEquation(this._rownanieRng(this.licznikRownan));
     this.eqTimer = ANSWER_WINDOW;
     this.interDelay = 0;
     this._emergencyAnnounced = false;
@@ -980,17 +1023,23 @@ export class BossManager {
   }
 
   /**
-   * Wybor pola pod atak "wymiotow" - LOSOWE pole areny za kazdym razem.
-   * Pomijamy tylko srodek (0,0), bo tam stoi bankomat i nikt tam nie wejdzie.
+   * Wybor pola pod atak "wymiotow" - LOSOWE pole areny za kazdym razem, ale
+   * zakotwiczone w licznikAtakow (strumien `${seed}:pole:${idWalki}:${N}`),
+   * wiec kazda otwarta karta gry wybiera DOKLADNIE to samo pole. Pomijamy
+   * tylko srodek (0,0), bo tam stoi bankomat i nikt tam nie wejdzie.
    * Losowosc nie czyni ataku niesprawiedliwym: pole jest oznaczane znacznikiem
    * na VOMIT_OSTRZEZENIE sekund przed uderzeniem, wiec kazdy ma czas odejsc.
    */
   _wybierzPoleAtaku() {
+    this.licznikAtakow += 1;
+    const seed = this.economy.state.seedGry;
+    const idWalki = this.pendingTier;
+    const rng = strumien(`${seed}:pole:${idWalki}:${this.licznikAtakow}`);
     let x = 0;
     let z = 0;
     do {
-      x = randInt(-3, 3);
-      z = randInt(-3, 3);
+      x = losujInt(rng, -3, 3);
+      z = losujInt(rng, -3, 3);
     } while (x === 0 && z === 0);
     return { x, z };
   }
@@ -1322,6 +1371,7 @@ export class BossManager {
     this.currentEq = null;
     this.interDelay = 0;
     this.hp = 0;
+    this.startWalki = null;
 
     if (this.nameplateEl) this.nameplateEl.style.display = 'none';
     if (this.bubbleEl) this.bubbleEl.style.display = 'none';
@@ -1381,6 +1431,122 @@ export class BossManager {
       const showEq = this.state === 'FIGHT' && this.currentEq && this.interDelay <= 0;
       this.equationSectionEl.style.display = showEq ? 'flex' : 'none';
     }
+  }
+
+  // ================= SYNCHRONIZACJA STANU (widz dolaczajacy w trakcie walki) =================
+
+  /** Wyliczenie biezacego rownania ze wspolnego strumienia - patrz applySync. */
+  _recalcCurrentEquation() {
+    this.currentEq = genEquation(this._rownanieRng(this.licznikRownan));
+    if (this.eqTextEl) this.eqTextEl.textContent = this.currentEq.text;
+  }
+
+  /** Wycinek stanu wysylany na serwer (patrz zbierzStan w main.js). */
+  getSyncState() {
+    return {
+      aktywny: this.state === 'CUTSCENE' || this.state === 'FIGHT' || this.state === 'VICTORY',
+      tier: this.pendingTier,
+      hp: this.hp,
+      licznikRownan: this.licznikRownan,
+      licznikAtakow: this.licznikAtakow,
+      startWalki: this.startWalki,
+    };
+  }
+
+  /**
+   * Wyrownuje lokalny stan walki do tego, co przyszlo z serwera (widz, patrz
+   * synchronizujZSerwera w main.js) - admin NIGDY tego nie woluje, bo to on
+   * prowadzi walke naprawde, a to by ja nadpisalo jego wlasnym echem.
+   */
+  applySync(bossState) {
+    if (!bossState) return;
+    const localActive = this.isActive();
+
+    if (bossState.aktywny && !localActive) {
+      this.startFromSync(bossState);
+      return;
+    }
+    if (!bossState.aktywny && localActive) {
+      this._teardown();
+      return;
+    }
+    if (bossState.aktywny && localActive) {
+      if (typeof bossState.hp === 'number') {
+        this.hp = bossState.hp;
+        if (this.hpFillEl) this.hpFillEl.style.width = `${(this.hp / this.maxHp) * 100}%`;
+        if (this.hpTextEl) this.hpTextEl.textContent = `${this.hp} / ${this.maxHp}`;
+      }
+      const rownanieZmienione = bossState.licznikRownan !== undefined && bossState.licznikRownan !== this.licznikRownan;
+      if (bossState.licznikRownan !== undefined) this.licznikRownan = bossState.licznikRownan;
+      if (bossState.licznikAtakow !== undefined) this.licznikAtakow = bossState.licznikAtakow;
+      // Wyrownanie licznika rownan samo w sobie NIE zmienia this.currentEq -
+      // trzeba je jawnie przeliczyc ze wspolnego strumienia, inaczej widz
+      // dalej widzialby swoje wlasne, lokalnie wygenerowane dzialanie.
+      if (rownanieZmienione && this.state === 'FIGHT' && this.interDelay <= 0) {
+        this._recalcCurrentEquation();
+      }
+    }
+  }
+
+  /**
+   * Widz dolaczajacy do gry w trakcie walki dostaje ja od razu, BEZ cutscenki -
+   * boss staje w finalnej pozycji z bankomatem juz przechylonym, hp i licznikami
+   * wziete wprost ze stanu serwera, a biezace rownanie przeliczone ze wspolnego
+   * strumienia (patrz _recalcCurrentEquation), wiec od pierwszej klatki widz
+   * widzi TO SAMO dzialanie co reszta.
+   */
+  startFromSync(bossState) {
+    const tier = bossState.tier;
+    const def = BOSS_DEFS[tier];
+    if (!def) return false;
+    if (this.state !== 'IDLE') this._teardown();
+    if (!this.chairTemplate || !this.charTemplate) {
+      this._log('bad', 'Nie moge dolaczyc do walki (sync) - model bossa jeszcze sie nie zaladowal');
+      return false;
+    }
+    if (this.vanessaRef && this.vanessaRef.model) this.vanessaRef.despawn();
+
+    this._runId += 1;
+    this.pendingTier = tier;
+    this.def = def;
+    this.maxHp = def.hp || 100;
+    this.hp = typeof bossState.hp === 'number' ? bossState.hp : this.maxHp;
+    this.licznikRownan = bossState.licznikRownan || 0;
+    this.licznikAtakow = bossState.licznikAtakow || 0;
+    this.startWalki = bossState.startWalki || Date.now();
+    this.faintedMap.clear();
+    this.faintTimer = this._randomFaintDelay();
+
+    this._log('info', `Dolaczam do trwajacej walki z bossem "${def.name}" (sync, bez cutscenki)`, bossState);
+
+    this._buildModel();
+    if (this.machine.model) {
+      this.machine.model.rotation.z = 0.35;
+      this.machine.model.position.x = -0.12;
+      this.machine.model.position.y = -0.04;
+      this.machine.model.position.z = 0.28;
+    }
+    this.model.position.copy(FINAL_POS);
+    this.model.lookAt(this.model.position.x, this.model.position.y, this.model.position.z + 10);
+    this.playAction('wheelchair-sit', { hard: true });
+
+    this.state = 'FIGHT';
+    if (this.nameplateEl) this.nameplateEl.style.display = 'flex';
+    if (this.hpFillEl) this.hpFillEl.style.width = `${(this.hp / this.maxHp) * 100}%`;
+    if (this.hpTextEl) this.hpTextEl.textContent = `${this.hp} / ${this.maxHp}`;
+
+    this._recalcCurrentEquation();
+    this.eqTimer = ANSWER_WINDOW;
+    this.interDelay = 0;
+    this._emergencyAnnounced = false;
+    this._lastTickSecond = null;
+    if (this.bubbleEl) this.bubbleEl.style.display = 'flex';
+    if (this.timerFillEl) {
+      this.timerFillEl.style.width = '100%';
+      this.timerFillEl.classList.remove('danger');
+    }
+
+    return true;
   }
 
   // ================= RESET GRY =================

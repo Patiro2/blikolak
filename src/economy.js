@@ -2,6 +2,8 @@
 // na aktywnosc czatu Kick.com. Gracz (streamer) nic nie kupuje - klika tylko
 // czasem sam, a widzowie napedzaja postep pisac "klik" na czacie.
 
+import { strumien } from './rng.js';
+
 export const SAVE_KEY = 'bankomat-clicker-v3';
 const OLD_SAVE_KEY = 'bankomat-clicker-v2'; // stary zapis z systemem kupowania - migrujemy tylko tier automatu
 
@@ -51,6 +53,11 @@ const COMBO_WINDOW_MS = 700;
 const COMBO_STEP = 0.04; // +4% za stopien kombo
 const COMBO_MAX = 25; // maks. +100%
 
+/** Losuje nowe 32-bitowe ziarno gry - wywolywane raz przy pierwszym starcie i przy kazdym resecie. */
+function losujSeedGry() {
+  return Math.floor(Math.random() * 0xffffffff) >>> 0;
+}
+
 function defaultState() {
   return {
     money: 0, // wspolna pula czatu (nie portfel gracza!)
@@ -58,6 +65,17 @@ function defaultState() {
     totalChatClicks: 0, // laczna liczba klikniec "klik" z czatu - napedza awans tieru
     machineTier: 0,
     bossesDefeated: [], // numery tierow, dla ktorych boss zostal juz pokonany (anty-powtorka)
+    // Wspolne ziarno calej rozgrywki - wylosowane RAZ (tu albo przy resecie) i
+    // zapisywane w stanie, wiec trafia do KV i do localStorage jak reszta pol.
+    // Kazda otwarta karta gry losuje NIEZALEZNIE (wlasne polaczenie z czatem,
+    // wlasna symulacja - patrz src/kick.js), ale widzac to samo seedGry i ten
+    // sam klucz zdarzenia (patrz src/rng.js), wszystkie karty licza DOKLADNIE
+    // to samo - rownania bossa, pola atakow, krytyki, Vanesse, zlota moneta.
+    seedGry: losujSeedGry(),
+    // Znacznik czasu (ms) ustawiany razem z seedGry - kotwica dla zdarzen
+    // czasowych (harmonogram Vanessy, zlotej monety), patrz src/vanessa.js
+    // i src/goldcoin.js: numer cyklu = floor((Date.now()-epokaStartu)/dlugoscCyklu).
+    epokaStartu: Date.now(),
     lastSave: Date.now(),
   };
 }
@@ -92,6 +110,14 @@ export class Economy {
           merged.bossesDefeated = [];
         } else {
           merged.bossesDefeated = merged.bossesDefeated.filter((t) => typeof t === 'number' && t >= 0);
+        }
+        if (typeof merged.seedGry !== 'number' || !isFinite(merged.seedGry) || merged.seedGry < 0) {
+          merged.seedGry = losujSeedGry();
+        } else {
+          merged.seedGry = merged.seedGry >>> 0;
+        }
+        if (typeof merged.epokaStartu !== 'number' || !isFinite(merged.epokaStartu) || merged.epokaStartu <= 0) {
+          merged.epokaStartu = Date.now();
         }
         return merged;
       }
@@ -193,11 +219,25 @@ export class Economy {
    * dolicza kase do wspolnej puli. `isChatClick` = true dla klikniec widzow
    * (napedzaja awans tieru automatu), false dla reczengo klikniecia streamera
    * w model 3D (dolicza kase, ale NIE liczy sie do progu awansu tieru).
+   *
+   * `msgId` to id wiadomosci czatu Kicka, ktora wywolala to klikniecie (patrz
+   * chatItem.id w src/kick.js) - trafienie krytyczne jest zakotwiczone w tym
+   * id (strumien `${seedGry}:kryt:${msgId}`), wiec KAZDA otwarta karta gry,
+   * widzac te sama wiadomosc, losuje DOKLADNIE ten sam wynik. Reczny klik
+   * gracza (streamera) myszka w model nie ma zadnej wiadomosci czatu za soba
+   * (msgId = null) - dotyczy WYLACZNIE jego wlasnej karty, wiec zostaje
+   * zwykle, lokalnie losowe.
    */
-  performClick(nowMs, isChatClick = false) {
+  performClick(nowMs, isChatClick = false, msgId = null) {
     this._updateCombo(nowMs);
     const base = this.baseClickValue() * this.comboMultFactor();
-    const isCrit = Math.random() < this.critChance();
+    let isCrit;
+    if (msgId) {
+      const rng = strumien(`${this.state.seedGry}:kryt:${msgId}`);
+      isCrit = rng() < this.critChance();
+    } else {
+      isCrit = Math.random() < this.critChance();
+    }
     const value = isCrit ? base * this.critMultFactor() : base;
     this.addMoney(value);
 

@@ -25,6 +25,10 @@ async function main() {
   // najpierw wsiewamy tam to, co przyszlo z serwera. Gdy API nie odpowiada
   // (np. lokalne serve.py), zostaje dotychczasowe zachowanie z localStorage.
   const stanZdalny = await remote.zainicjuj().catch(() => null);
+  // Sekcja "boss" nie idzie przez localStorage (economy/leaderboard/assignments
+  // wystarcza to zrobic, bo Economy/KickChatClient czytaja je w konstruktorach) -
+  // walka z bossem jest aplikowana rownolegle po zbudowaniu BossManager nizej.
+  const poczatkowyStanBossa = stanZdalny ? stanZdalny.boss : null;
   if (stanZdalny) {
     try {
       if (stanZdalny.economy) localStorage.setItem(SAVE_KEY, JSON.stringify(stanZdalny.economy));
@@ -161,6 +165,7 @@ async function main() {
       economy: economy.state,
       leaderboard: kickChat.leaderboard,
       assignments: kickChat.assignments,
+      boss: boss.getSyncState(),
     };
   }
 
@@ -200,6 +205,11 @@ async function main() {
     kickChat.updateAssignments();
     if (machine.currentTier !== economy.state.machineTier) {
       await machine.setTier(economy.state.machineTier);
+    }
+    // Stan walki z bossem - widz, ktory wchodzi w trakcie walki, podejmuje ja
+    // bez cutscenki z tym samym hp i tym samym rownaniem (patrz boss.applySync).
+    if (stan.boss) {
+      boss.applySync(stan.boss);
     }
     try {
       await syncLeaderboardAndOverlays();
@@ -395,7 +405,7 @@ async function main() {
         workerManager.triggerInteract(entry);
       }
     },
-    onKlik: async (sender) => {
+    onKlik: async (sender, chatItem) => {
       const nick = sender.username || 'Widz';
 
       // Omdlony przez bossa widz nie moze klikac - jego komenda jest w calosci
@@ -404,7 +414,14 @@ async function main() {
         return;
       }
 
-      const { value, isCrit, combo, tierAdvanced } = economy.performClick(performance.now(), true);
+      // id wiadomosci czatu, ktora wywolala klik - zakotwicza losowanie krytyka
+      // (patrz economy.performClick), zeby kazda otwarta karta gry, widzac ta
+      // sama wiadomosc z tego samego kanalu Kicka, wylosowala ten sam wynik.
+      const { value, isCrit, combo, tierAdvanced } = economy.performClick(
+        performance.now(),
+        true,
+        chatItem && chatItem.id,
+      );
       machine.triggerClickAnim();
       audio.play('klik');
       if (isCrit) audio.play('kryt');
@@ -477,6 +494,14 @@ async function main() {
     projectAndFloat,
     save,
   });
+
+  // Widz otwierajacy karte w trakcie walki z bossem podejmuje ja od razu, bez
+  // cutscenki, z tym samym hp/licznikami co u admina (patrz boss.applySync).
+  // Admin sam prowadzi walke lokalnie - u niego to by ja nadpisalo.
+  if (!remote.czyAdmin() && poczatkowyStanBossa) {
+    boss.applySync(poczatkowyStanBossa);
+  }
+
   try {
     await syncLeaderboardAndOverlays();
   } catch (err) {

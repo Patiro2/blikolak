@@ -212,6 +212,37 @@ window.__game.vanessa.clearLog();     // wyczyszczenie
 window.__game.vanessa.logToConsole = false;  // tylko panel, bez konsoli
 ```
 
+## Synchronizacja: dlaczego wszyscy widzą to samo
+
+Każda otwarta karta gry prowadzi własną symulację - sama łączy się z czatem
+Kicka i sama liczy rozgrywkę. Gdyby losowała niezależnie, każdy widz miałby
+inne równania nad bossem, inne pola ataków i inne hasło Vanessy. Tak właśnie
+było na początku.
+
+Zamiast transmitować stan z karty właściciela (co wymagałoby zapisu kilka razy
+na sekundę i wyczerpałoby darmowy limit Upstash w kilka godzin streamu), gra
+jest **deterministyczna ze wspólnego ziarna**:
+
+- w stanie gry żyją `seedGry` i `epokaStartu`, losowane raz i trafiające do KV
+  razem z resztą save'a, więc każda karta dostaje te same wartości,
+- każde losowanie mające wpływ na rozgrywkę jest zakotwiczone w zdarzeniu,
+  które **widzą wszyscy**: klucz strumienia to np. `ziarno:kryt:id-wiadomości`,
+  `ziarno:równanie:tier:numer` albo `ziarno:pole:tier:numer`. Wiadomości z
+  czatu Kicka mają własne `id` i docierają identycznie do każdej karty,
+- zdarzenia czasowe (Vanessa, złota moneta, kadencja ataków) liczą się od
+  `epokaStartu`, a nie od momentu wczytania karty, więc harmonogram jest wspólny,
+- stan synchronizowany zawiera sekcję bossa (czy walka trwa, HP, liczniki),
+  więc widz wchodzący w trakcie walki podejmuje ją w miejscu, w którym jest.
+
+Generator (`src/rng.js`) to `mulberry32` zasiany hashem klucza. Zero dodatkowego
+ruchu sieciowego, działa przy dowolnej liczbie widzów.
+
+**Czego to nie daje:** zgodność jest na poziomie zdarzeń, nie klatek - animacja
+może u kogoś ruszyć o ułamek sekundy później. Trafienia krytyczne z kliknięć
+myszą właściciela w model zostają losowe lokalnie, bo nie ma ich w czacie i nie
+da się ich zakotwiczyć w zdarzeniu widocznym dla innych; cała progresja z czatu
+jest zgodna. Losowe pozostają też teksty dymków - nie wpływają na stan gry.
+
 ## Wdrożenie na Vercel (save po stronie serwera)
 
 Gra może stać na Vercelu ze **wspólnym zapisem w Vercel KV**, tak że postęp

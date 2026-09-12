@@ -2,8 +2,10 @@ import * as THREE from 'three';
 import { loadDungeon } from './assets.js';
 import { showTopAnnouncement } from './vanessa.js';
 import { audio } from './audio.js';
+import { strumien, losujInt } from './rng.js';
 
 const SPAWN_INTERVAL = 10; // sekundy do pojawienia się kolejnej monety
+const SPAWN_INTERVAL_MS = SPAWN_INTERVAL * 1000;
 const LIFETIME = 25; // maksymalny czas obecności monety na planszy, jeśli nikt do niej nie dobiegnie
 const COIN_REWARD = 25; // nagroda 25 zł dla pierwszego gracza, który dobiegnie
 
@@ -29,7 +31,9 @@ export class GoldenCoinManager {
     this.gridX = null;
     this.gridZ = null;
 
-    this.timeToSpawn = SPAWN_INTERVAL; // pierwsza moneta po 10 sekundach
+    // Numer ostatnio sprawdzonego cyklu wspolnej osi czasu (patrz update()) -
+    // null oznacza "jeszcze nie sprawdzono ani razu" (pierwsza klatka po starcie).
+    this._ostatniCykl = null;
     this.life = 0;
     this.bobT = 0;
     this._arcRebuildAcc = 0;
@@ -57,7 +61,7 @@ export class GoldenCoinManager {
     this.template = gltf.scene;
   }
 
-  _pickRandomTile() {
+  _pickRandomTile(rng) {
     const occupied = new Set();
     occupied.add('0,0'); // Bankomat w centrum
 
@@ -85,14 +89,25 @@ export class GoldenCoinManager {
       return { x: 2, z: 2 };
     }
 
-    const idx = Math.floor(Math.random() * available.length);
+    const idx = rng ? losujInt(rng, 0, available.length - 1) : Math.floor(Math.random() * available.length);
     return available[idx];
   }
 
-  _spawn(forcedTile = null) {
+  /**
+   * `numerMonety` to numer wyliczony z wspolnej epoki gry (patrz update()) -
+   * pole spawnu jest zakotwiczone w strumieniu `${seedGry}:moneta:${numerMonety}`,
+   * wiec kazda otwarta karta gry wybiera to samo pole. Reczne wywolanie z
+   * konsoli/testow (bez numeru) zostaje lokalnie losowe.
+   */
+  _spawn(forcedTile = null, numerMonety = null) {
     if (!this.template || this.mesh) return;
 
-    const tile = forcedTile || this._pickRandomTile();
+    let tile = forcedTile;
+    if (!tile) {
+      const seed = this.economy ? this.economy.state.seedGry : 0;
+      const numer = numerMonety !== null ? numerMonety : `test-${Date.now()}`;
+      tile = this._pickRandomTile(strumien(`${seed}:moneta:${numer}`));
+    }
     this.gridX = tile.x;
     this.gridZ = tile.z;
 
@@ -226,7 +241,6 @@ export class GoldenCoinManager {
     }
     this.gridX = null;
     this.gridZ = null;
-    this.timeToSpawn = SPAWN_INTERVAL;
   }
 
   _collectByWorker(entry) {
@@ -283,7 +297,9 @@ export class GoldenCoinManager {
 
   reset() {
     this._despawn();
-    this.timeToSpawn = SPAWN_INTERVAL;
+    // Nowy reset gry losuje tez nowe seedGry/epokaStartu (patrz economy.js),
+    // wiec numeracja cykli zaczyna sie efektywnie od nowa.
+    this._ostatniCykl = null;
   }
 
   update(delta) {
@@ -318,9 +334,20 @@ export class GoldenCoinManager {
       return;
     }
 
-    this.timeToSpawn -= delta;
-    if (this.timeToSpawn <= 0) {
-      this._spawn();
+    // Harmonogram liczony od wspolnej epoki gry (economy.state.epokaStartu),
+    // nie od lokalnego odliczania tej karty - patrz komentarz przy _spawn().
+    // Kazda karta liczy ten sam numer cyklu i spawnuje w tej samej "logicznej"
+    // chwili, a pole wybiera ze wspolnego strumienia zamiast Math.random().
+    const epoka = (this.economy && this.economy.state.epokaStartu) || 0;
+    const cykl = Math.floor((Date.now() - epoka) / SPAWN_INTERVAL_MS);
+    if (this._ostatniCykl === null) {
+      // Pierwsza klatka po zaladowaniu karty - czekamy na kolejna zmiane cyklu.
+      this._ostatniCykl = cykl;
+      return;
+    }
+    if (cykl !== this._ostatniCykl) {
+      this._ostatniCykl = cykl;
+      this._spawn(null, cykl);
     }
   }
 }

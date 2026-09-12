@@ -3,9 +3,17 @@ import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { loadArcade } from './assets.js';
 import { fmtShort } from './format.js';
 import { audio } from './audio.js';
+import { strumien, losujInt, losujZ } from './rng.js';
 
 const SPAWN_MIN = 35; // sekundy do kolejnego pojawienia się
 const SPAWN_MAX = 70;
+// Harmonogram Vanessy jest teraz zakotwiczony we wspolnej osi czasu (patrz
+// economy.state.epokaStartu) zamiast w lokalnym timerze karty: co CYKL_MS
+// sprawdzamy, czy numer cyklu sie zmienil, i jesli tak, probujemy spawnu -
+// dlugosc cyklu to srodek dawnego zakresu 35-70s. Kazda karta liczy numer
+// cyklu z tego samego wzoru, wiec wszystkie proboja spawnowac w tej samej
+// "logicznej" chwili (rozjazd zegarow rzedu setek ms jest akceptowalny).
+const CYKL_MS = Math.round(((SPAWN_MIN + SPAWN_MAX) / 2) * 1000);
 const MODEL_KEY = 'character-female-e';
 
 // Parametry tykania kradziezy - co ile sekund i jaki ulamek dorobku ofiary
@@ -132,7 +140,9 @@ export class VanessaManager {
 
     this.paused = false; // ustawiane z main.js, gdy boss.isActive() - blokuje nowy spawn Vanessy
 
-    this.spawnTimer = this._randomSpawnDelay();
+    // Numer ostatnio sprawdzonego cyklu wspolnej osi czasu (patrz CYKL_MS) -
+    // null oznacza "jeszcze nie sprawdzono ani razu" (pierwsza klatka po starcie).
+    this._ostatniCykl = null;
     this.stealTimer = 0;
     this.stealTickAcc = 0;
     this.totalStolen = 0; // suma skradzionych zl w biezacym wystapieniu
@@ -269,10 +279,6 @@ export class VanessaManager {
     if (this.onLog) this.onLog(null);
   }
 
-  _randomSpawnDelay() {
-    return SPAWN_MIN + Math.random() * (SPAWN_MAX - SPAWN_MIN);
-  }
-
   _createDOMOverlays() {
     // 1. Plakietka z imieniem Vanessa i hasłem nad głową
     const np = document.createElement('div');
@@ -366,9 +372,14 @@ export class VanessaManager {
   }
 
   /**
-   * Ręczne lub losowe wywołanie pojawienia się Vanessy w scenie.
+   * Ręczne lub losowe wywołanie pojawienia się Vanessy w scenie. `cykl` to
+   * numer cyklu wspolnej osi czasu (patrz CYKL_MS/update) - gdy podany, WSZYSTKIE
+   * losowania tego wystapienia (hasło, ofiara, narozniki) sa zakotwiczone w
+   * strumieniu `${seedGry}:vanessa*:${cykl}`, wiec kazda karta gry wybiera to
+   * samo. Reczne wywolanie z panelu testowego (`force`, bez `cykl`) zostaje
+   * lokalnie losowe - to narzedzie administracyjne, nie wymaga synchronizacji.
    */
-  spawn(force = false) {
+  spawn(force = false, cykl = null) {
     if (this.model) {
       if (!force) return;
       this.despawn();
@@ -379,9 +390,12 @@ export class VanessaManager {
     }
 
     this._runId += 1;
+    const seed = this.economy ? this.economy.state.seedGry : 0;
+    const numer = cykl !== null ? cykl : `test-${this._runId}`;
 
     // Losowe krótkie polskie słowo - hasło do odstraszenia
-    this.secretWord = VANESSA_WORDS[Math.floor(Math.random() * VANESSA_WORDS.length)];
+    const rngHaslo = strumien(`${seed}:vanessaHaslo:${numer}`);
+    this.secretWord = losujZ(rngHaslo, VANESSA_WORDS);
 
     if (this.secretTagEl) {
       this.secretTagEl.innerHTML = `HASŁO: <strong class="vanessa-word">${this.secretWord}</strong>`;
@@ -397,7 +411,8 @@ export class VanessaManager {
     if (this.kickChat) {
       const top10 = this.kickChat.getTopEarners(10).filter((u) => (u.totalEarned || 0) > 0);
       if (top10.length > 0) {
-        const randPlayer = top10[Math.floor(Math.random() * top10.length)];
+        const rngOfiara = strumien(`${seed}:vanessaOfiara:${numer}`);
+        const randPlayer = top10[losujInt(rngOfiara, 0, top10.length - 1)];
         const workerIndex = this.kickChat.getWorkerForUser(randPlayer.username);
         let workerObj = null;
         if (workerIndex !== null && this.workerManager) {
@@ -429,11 +444,10 @@ export class VanessaManager {
 
     if (!chosenVictim) {
       // Nikt w Top 10 nie ma z czego kraść - Vanessa nie ma po co sie pojawiac.
-      // Probujemy ponownie po kolejnym losowym odstepie czasu.
+      // Probujemy ponownie w kolejnym cyklu wspolnej osi czasu (patrz update()).
       this._log('info', 'Nie pojawia sie: nikt w Top 10 nie ma dodatniego dorobku', {
         wTop10: this.kickChat ? this.kickChat.getTopEarners(10).length : 0,
       });
-      this.spawnTimer = this._randomSpawnDelay();
       return;
     }
 
@@ -446,7 +460,8 @@ export class VanessaManager {
     }
 
     // Wybór losowego narożnika areny
-    const corner = CORNERS[Math.floor(Math.random() * CORNERS.length)];
+    const rngNaroznik = strumien(`${seed}:vanessaNaroznik:${numer}`);
+    const corner = losujZ(rngNaroznik, CORNERS);
     this.spawnPos.set(corner.x, 0, corner.z);
     this.exitPos.set(corner.x, 0, corner.z);
 
@@ -700,22 +715,34 @@ export class VanessaManager {
 
     this.mixer = null;
     this.currentAction = null;
-    this.spawnTimer = this._randomSpawnDelay();
   }
 
   reset() {
     this._clearVictimRobbed();
     this.despawn();
-    this.spawnTimer = this._randomSpawnDelay();
+    // Nowy reset gry losuje tez nowe seedGry/epokaStartu (patrz economy.js),
+    // wiec numeracja cykli zaczyna sie efektywnie od nowa.
+    this._ostatniCykl = null;
   }
 
   update(delta, camera, canvasRect) {
-    // 1. Oczekiwanie na losowy spawn
+    // 1. Oczekiwanie na spawn - harmonogram liczony od wspolnej epoki gry
+    // (economy.state.epokaStartu), nie od lokalnego timera tej karty - patrz
+    // komentarz przy CYKL_MS. Kazda karta liczy ten sam numer cyklu i probuje
+    // spawnu w tej samej "logicznej" chwili.
     if (this.state === 'IDLE') {
       if (this.paused) return; // boss.isActive() - Vanessa nie ma sie prawa pojawic w trakcie walki
-      this.spawnTimer -= delta;
-      if (this.spawnTimer <= 0) {
-        this.spawn();
+      const epoka = (this.economy && this.economy.state.epokaStartu) || 0;
+      const cykl = Math.floor((Date.now() - epoka) / CYKL_MS);
+      if (this._ostatniCykl === null) {
+        // Pierwsza klatka po zaladowaniu karty - nie spawnuj natychmiast,
+        // czekamy na zmiane numeru cyklu jak przy kazdym kolejnym.
+        this._ostatniCykl = cykl;
+        return;
+      }
+      if (cykl !== this._ostatniCykl) {
+        this._ostatniCykl = cykl;
+        this.spawn(false, cykl);
       }
       return;
     }
