@@ -14,7 +14,7 @@ export default async function handler(req, res) {
   if (!kvSkonfigurowane()) {
     return res.status(503).json({
       ok: false,
-      blad: 'Magazyn KV nie jest skonfigurowany (brak KV_REST_API_URL / KV_REST_API_TOKEN).',
+      blad: 'Magazyn KV nie jest skonfigurowany (brak zmiennych KV_REST_API_* ani UPSTASH_REDIS_REST_*).',
     });
   }
 

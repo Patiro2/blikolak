@@ -7,15 +7,21 @@
 //
 // Zmienne srodowiskowe (ustawiane AUTOMATYCZNIE przez integracje Storage -> KV
 // w panelu Vercela):
-//   KV_REST_API_URL, KV_REST_API_TOKEN
+//   KV_REST_API_URL / KV_REST_API_TOKEN            (dawne "Vercel KV")
+//   UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN  (Marketplace: Upstash for Redis)
+// Obsluzone sa oba warianty nazw.
 // Zmienna ustawiana RECZNIE przez wlasciciela:
 //   ADMIN_TOKEN - haslo admina, bez niego nikt nie zapisze ani nie zresetuje gry.
 
 export const KLUCZ_STANU = 'bankomat-clicker:stan';
 
 function konfiguracja() {
-  const url = process.env.KV_REST_API_URL;
-  const token = process.env.KV_REST_API_TOKEN;
+  // Vercel wpina te dane pod ROZNYMI nazwami zaleznie od tego, jak zalozono
+  // magazyn: dawne "Vercel KV" dawalo KV_REST_API_*, a integracja z
+  // Marketplace (Upstash for Redis) daje UPSTASH_REDIS_REST_*. Akceptujemy
+  // oba warianty, zeby konfiguracja dzialala niezaleznie od drogi zalozenia.
+  const url = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
+  const token = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
   if (!url || !token) return null;
   return { url: url.replace(/\/+$/, ''), token };
 }
