@@ -132,8 +132,8 @@ export async function buildRoom(scene) {
   const SIZE = 7;
   const HALF = Math.floor(SIZE / 2); // 3 (kafle od -3 do +3)
 
-  const [floorGltf, wallGltf, cornerGltf, columnGltf] = await Promise.all([
-    loadArcade('floor'), loadArcade('wall'), loadArcade('wall-corner'), loadArcade('column'),
+  const [floorGltf, wallGltf, cornerGltf] = await Promise.all([
+    loadArcade('floor'), loadArcade('wall'), loadArcade('wall-corner'),
   ]);
 
   const group = new THREE.Group();
@@ -183,31 +183,35 @@ export async function buildRoom(scene) {
     group.add(wallW);
   }
 
-  // 4 Narożniki w rogach (3.5, 3.5) na poziomie y = 0.025
+  // 4 Narożniki w rogach (3.5, 3.5) na poziomie y = 0.025.
+  //
+  // UWAGA na asymetrie modelu wall-corner.glb: jego lokalny bounding box to
+  // x[-0.5, 0.3], z[-0.3, 0.5] - NIE jest symetryczny (0.8 x 0.8, srodek
+  // przesuniety o (-0.1, +0.1) wzgledem pivota). W efekcie jedno "ramie"
+  // naroznika siega pelne 0.5 j. (styka sie ze sciana idealnie), a drugie,
+  // prostopadle, tylko 0.3 j. (o 0.2 j. za krotko - zostawia szczeline na
+  // pelnej wysokosci sciany). Zmierzone bbox-y (skrypt w opisie zadania +
+  // przeliczenie transformacji rotacji/translacji) pokazuja, ze kazdy z 4
+  // naroznikow ma te "krotka" strone na innej osi swiata (bo kazdy ma inny
+  // ry). Przesuniecie kazdego naroznika o 0.2 j. wzdluz WLASNIE tej krotkiej
+  // osi domyka pierscien: krotkie ramie dociaga sie do konca sciany (styk
+  // 3.0/-3.0), a dlugie ramie nie zmienia polozenia na drugiej osi (bo dla
+  // katow 0/90/180/270 rotacja nie miesza osi x/z), wiec zostaje tak samo
+  // idealnie styczne jak wczesniej. Wynik: wszystkie 4 narozniki zajmuja
+  // symetryczne 0.8x0.8 w rogu, zewnetrzna sciana naroznika (3.8/-3.8)
+  // pokrywa sie z zewnetrznym licem scian (edge +- 0.3) - zero szczeliny,
+  // zero nakladania (dowod w raporcie zadania 1).
   const cornerPositions = [
-    { x: edge, z: edge, ry: Math.PI },
-    { x: -edge, z: edge, ry: Math.PI / 2 },
-    { x: edge, z: -edge, ry: -Math.PI / 2 },
-    { x: -edge, z: -edge, ry: 0 },
+    { x: edge - 0.2, z: edge, ry: Math.PI },
+    { x: -edge, z: edge - 0.2, ry: Math.PI / 2 },
+    { x: edge, z: -edge + 0.2, ry: -Math.PI / 2 },
+    { x: -edge + 0.2, z: -edge, ry: 0 },
   ];
   for (const c of cornerPositions) {
     const corner = cornerGltf.scene.clone(true);
     corner.position.set(c.x, wallY, c.z);
     corner.rotation.y = c.ry;
     group.add(corner);
-  }
-
-  // Ozdobne kolumny narożne wewnątrz pokoju
-  const columnPositions = [
-    { x: HALF - 0.5, z: HALF - 0.5 },
-    { x: -(HALF - 0.5), z: HALF - 0.5 },
-    { x: HALF - 0.5, z: -(HALF - 0.5) },
-    { x: -(HALF - 0.5), z: -(HALF - 0.5) },
-  ];
-  for (const c of columnPositions) {
-    const col = columnGltf.scene.clone(true);
-    col.position.set(c.x, wallY, c.z);
-    group.add(col);
   }
 
   // Wizualna neonowa siatka 2D na podłodze areny (7x7 pól, każde pole 1.0 x 1.0 m)

@@ -37,6 +37,8 @@ export const MACHINE_KEYS = [
 const ARCADE_PATH = 'assets/arcade/';
 const DUNGEON_PATH = 'assets/dungeon/';
 const FOREST_PATH = 'assets/forest/';
+const PIRATE_PATH = 'assets/pirate/';
+const ARENA_PATH = 'assets/arena/';
 
 function fixMaterials(root) {
   root.traverse((node) => {
@@ -163,6 +165,17 @@ export function loadDungeon(name) {
 // sekcja "Texture filenames collide across packs").
 export function loadForest(name) {
   return loadGltf(`${FOREST_PATH}${name}.glb`);
+}
+
+// kenney_pirate-kit ma WLASNY Textures/colormap.png (inna tresc niz arcade/dungeon/forest) -
+// stad osobny katalog assets/pirate/ i osobna funkcja ladujaca (patrz CLAUDE.md).
+export function loadPirate(name) {
+  return loadGltf(`${PIRATE_PATH}${name}.glb`);
+}
+
+// kenney_mini-arena ma rowniez WLASNY Textures/colormap.png - osobny katalog assets/arena/.
+export function loadArena(name) {
+  return loadGltf(`${ARENA_PATH}${name}.glb`);
 }
 
 /**

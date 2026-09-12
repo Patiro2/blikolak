@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { loadForest, loadArcade } from './assets.js';
+import { loadForest, loadArcade, loadDungeon, loadPirate, loadArena } from './assets.js';
 
 // Tlo gry: proceduralne miasto noca wokol i ponizej areny. Arena (pokoj 7x7
 // ze scianami, patrz scene.js) zostaje DOKLADNIE taka, jaka jest - stoi na
@@ -280,14 +280,54 @@ export class CityBackground {
    * niezaleznie od liczby instancji.
    */
   async _buildForegroundProps(scene, renderer) {
-    const [tree, treeHigh, plant, rocksHigh, rocksLow, stones, fence, bStruct, bRoof] = await Promise.all([
+    const [
+      tree, treeHigh, plant, rocksHigh, rocksLow, stones, fence, bStruct, bRoof,
+      pTower, pStructure, pPalmStraight, pPalmBend, pFlag, pBarrel, pCrate,
+      aStatue, aBanner,
+      mFruit, mCart, mBasket, mFreezer, mBottleReturn,
+      dWoodStruct, dWoodSupport, dBarrel, dTable,
+    ] = await Promise.all([
       loadForest('tree'), loadForest('tree-high'), loadForest('plant'),
       loadForest('rocks-high'), loadForest('rocks-low'), loadForest('stones'),
       loadForest('fence'), loadForest('building-structure'), loadForest('building-roof'),
+      loadPirate('tower-watch'), loadPirate('structure'), loadPirate('palm-detailed-straight'),
+      loadPirate('palm-bend'), loadPirate('flag-high-pennant'), loadPirate('barrel'), loadPirate('crate'),
+      loadArena('statue'), loadArena('banner'),
+      loadArcade('display-fruit'), loadArcade('shopping-cart'), loadArcade('shopping-basket'),
+      loadArcade('freezers-standing'), loadArcade('bottle-return'),
+      loadDungeon('wood-structure'), loadDungeon('wood-support'), loadDungeon('barrel'), loadDungeon('table'),
     ]);
 
     const dummy = new THREE.Object3D();
-    const color = new THREE.Color();
+
+    /** Umieszcza pojedynczy InstancedMesh z podanej listy transformacji (pos/rot/scale). */
+    const makeInstanced = (gltf, placements) => {
+      const mesh = this._firstMesh(gltf);
+      const inst = new THREE.InstancedMesh(mesh.geometry, mesh.material, Math.max(1, placements.length));
+      inst.castShadow = true;
+      inst.receiveShadow = true;
+      inst.frustumCulled = false;
+      placements.forEach((p, i) => {
+        dummy.position.set(p.x, p.y || 0, p.z);
+        dummy.rotation.set(0, p.ry || 0, 0);
+        dummy.scale.setScalar(p.scale != null ? p.scale : 1);
+        dummy.updateMatrix();
+        inst.setMatrixAt(i, dummy.matrix);
+      });
+      inst.instanceMatrix.needsUpdate = true;
+      scene.add(inst);
+      return inst;
+    };
+
+    /** Zwraca (x,z) na okregu wokol anchor (angle,radius) przesuniete lokalnie
+     * o offsetRadial (wzdluz promienia, od centrum areny) i offsetTangent
+     * (stycznie, wzdluz okregu) - pozwala ulozyc kilka rekwizytow obok siebie
+     * jako spojny "zestaw" (np. stragan + wozek + skrzynie), zamiast czysto
+     * losowego rozrzutu. */
+    const clusterXZ = (angle, radius, offsetRadial = 0, offsetTangent = 0) => ({
+      x: Math.sin(angle) * radius + Math.sin(angle) * offsetRadial + Math.cos(angle) * offsetTangent,
+      z: Math.cos(angle) * radius + Math.cos(angle) * offsetRadial - Math.sin(angle) * offsetTangent,
+    });
 
     // --- Niska zielen (promien 6.7-8.6): rosliny, kamienie, ogrodzenia ---
     const lowDefs = [
@@ -323,52 +363,59 @@ export class CityBackground {
       scene.add(inst);
     }
 
-    // --- Wysoka zielen/zabudowa (promien 9.4-10.3): drzewa + male "domki" ---
-    const treeCount = Math.round(FOREGROUND_SLOTS * 0.42);
-    const treeHighCount = Math.round(FOREGROUND_SLOTS * 0.27);
-    const hutCount = Math.round(FOREGROUND_SLOTS * 0.31);
+    // --- Wysoka zielen/zabudowa (promien 9.4-10.3): drzewa mini-forest + wieze,
+    // budynki i palmy z pirate-kit. Zastepuje dawne proceduralne bryly
+    // (BoxGeometry + vertexColors) prawdziwymi modelami Kenney - patrz CLAUDE.md,
+    // pirate-kit jest ~1.5-2x wiekszy od siatki mini-*, wiec kazdy typ dostaje
+    // wlasny wspolczynnik skali dobrany tak, zeby sylwetka pasowala do reszty
+    // pierscienia (drzewa ~1.7-2.3 j., wieze/budynki ~2.2-3.1 j. - patrz komentarz
+    // przy TALL_TYPES nizej z konkretnymi wysokosciami zmierzonymi z bbox GLB).
+    const TALL_TYPES = [
+      { key: 'tree', gltf: tree, count: 5, scaleRange: [0.85, 1.25] }, // h ~1.4-2.1
+      { key: 'treeHigh', gltf: treeHigh, count: 3, scaleRange: [0.85, 1.2] }, // h ~1.9-2.7
+      { key: 'tower', gltf: pTower, count: 4, scaleRange: [0.85, 1.05] }, // h (2.785 lokalnie) ~2.4-2.9
+      { key: 'structure', gltf: pStructure, count: 4, scaleRange: [1.0, 1.3] }, // h (2.2 lokalnie) ~2.2-2.9
+      { key: 'palmStraight', gltf: pPalmStraight, count: 3, scaleRange: [0.5, 0.65] }, // h (4.21 lokalnie) ~2.1-2.7
+      { key: 'palmBend', gltf: pPalmBend, count: 2, scaleRange: [0.5, 0.62] }, // h (4.25 lokalnie) ~2.1-2.6
+      { key: 'flag', gltf: pFlag, count: 1, scaleRange: [0.6, 0.7] }, // h (3.6 lokalnie) ~2.2-2.5
+    ];
+    const HUT_COUNT = 4; // "domki" mini-forest (struktura+dach) licza sie osobno - stackowana para
 
-    const treeMesh = this._firstMesh(tree);
-    const treeInst = new THREE.InstancedMesh(treeMesh.geometry, treeMesh.material, treeCount);
-    treeInst.castShadow = true; treeInst.receiveShadow = true; treeInst.frustumCulled = false;
-
-    const treeHighMesh = this._firstMesh(treeHigh);
-    const treeHighInst = new THREE.InstancedMesh(treeHighMesh.geometry, treeHighMesh.material, treeHighCount);
-    treeHighInst.castShadow = true; treeHighInst.receiveShadow = true; treeHighInst.frustumCulled = false;
-
+    for (const t of TALL_TYPES) {
+      t.mesh = this._firstMesh(t.gltf);
+      t.inst = new THREE.InstancedMesh(t.mesh.geometry, t.mesh.material, t.count);
+      t.inst.castShadow = true; t.inst.receiveShadow = true; t.inst.frustumCulled = false;
+      t.idx = 0;
+    }
     const structMesh = this._firstMesh(bStruct);
     const roofMesh = this._firstMesh(bRoof);
-    const structInst = new THREE.InstancedMesh(structMesh.geometry, structMesh.material, hutCount);
-    const roofInst = new THREE.InstancedMesh(roofMesh.geometry, roofMesh.material, hutCount);
+    const structInst = new THREE.InstancedMesh(structMesh.geometry, structMesh.material, HUT_COUNT);
+    const roofInst = new THREE.InstancedMesh(roofMesh.geometry, roofMesh.material, HUT_COUNT);
     structInst.castShadow = true; structInst.receiveShadow = true; structInst.frustumCulled = false;
     roofInst.castShadow = true; roofInst.receiveShadow = true; roofInst.frustumCulled = false;
 
-    // Sloty katowe - "skomponowany" pierscien: kazdy slot losuje jeden typ
-    // wysokiego elementu (drzewo / wysokie drzewo / domek), zeby zabudowa nie
-    // wygladala jak czysto losowy rozrzut, tylko jak swiadomie ulozony pierscien.
-    let ti = 0, thi = 0, hi = 0;
-    for (let slot = 0; slot < FOREGROUND_SLOTS; slot++) {
-      const angle = (slot / FOREGROUND_SLOTS) * Math.PI * 2 + randRange(-0.06, 0.06);
+    // Kolejka slotow: kazdy typ tyle razy, ile ma "count" (+ HUT_COUNT domkow),
+    // przetasowana (Fisher-Yates) - kazdy z 26 slotow katowych dostaje losowy,
+    // ale z gory ustalony w proporcjach typ. Dzieki temu zabudowa czyta sie jako
+    // swiadomie skomponowany, zroznicowany pierscien (a nie czysty przypadek),
+    // a jednoczesnie zaden typ nie grupuje sie przypadkiem w jednym miejscu.
+    const slotQueue = [];
+    for (const t of TALL_TYPES) for (let i = 0; i < t.count; i++) slotQueue.push(t.key);
+    for (let i = 0; i < HUT_COUNT; i++) slotQueue.push('hut');
+    for (let i = slotQueue.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [slotQueue[i], slotQueue[j]] = [slotQueue[j], slotQueue[i]];
+    }
+
+    let hi = 0;
+    for (let slot = 0; slot < slotQueue.length; slot++) {
+      const angle = (slot / slotQueue.length) * Math.PI * 2 + randRange(-0.06, 0.06);
       const radius = randRange(FOREGROUND_TALL_MIN, FOREGROUND_TALL_MAX);
       const x = Math.sin(angle) * radius;
       const z = Math.cos(angle) * radius;
-      const pick = slot % 3;
+      const key = slotQueue[slot];
 
-      if (pick === 0 && ti < treeCount) {
-        const s = randRange(0.85, 1.25);
-        dummy.position.set(x, 0, z);
-        dummy.rotation.set(0, randRange(0, Math.PI * 2), 0);
-        dummy.scale.setScalar(s);
-        dummy.updateMatrix();
-        treeInst.setMatrixAt(ti++, dummy.matrix);
-      } else if (pick === 1 && thi < treeHighCount) {
-        const s = randRange(0.85, 1.2);
-        dummy.position.set(x, 0, z);
-        dummy.rotation.set(0, randRange(0, Math.PI * 2), 0);
-        dummy.scale.setScalar(s);
-        dummy.updateMatrix();
-        treeHighInst.setMatrixAt(thi++, dummy.matrix);
-      } else if (hi < hutCount) {
+      if (key === 'hut') {
         const s = randRange(1.0, 1.6);
         const ry = randRange(0, Math.PI * 2);
         dummy.position.set(x, 0, z);
@@ -380,54 +427,93 @@ export class CityBackground {
         dummy.updateMatrix();
         roofInst.setMatrixAt(hi, dummy.matrix);
         hi++;
-      } else if (ti < treeCount) {
-        // rezerwowe miejsce w razie wyczerpania puli domkow
-        const s = randRange(0.85, 1.25);
-        dummy.position.set(x, 0, z);
-        dummy.rotation.set(0, randRange(0, Math.PI * 2), 0);
-        dummy.scale.setScalar(s);
-        dummy.updateMatrix();
-        treeInst.setMatrixAt(ti++, dummy.matrix);
+        continue;
       }
+      const t = TALL_TYPES.find((tt) => tt.key === key);
+      const s = randRange(t.scaleRange[0], t.scaleRange[1]);
+      dummy.position.set(x, 0, z);
+      dummy.rotation.set(0, randRange(0, Math.PI * 2), 0);
+      dummy.scale.setScalar(s);
+      dummy.updateMatrix();
+      t.inst.setMatrixAt(t.idx++, dummy.matrix);
     }
-    // Niewykorzystane sloty (np. zaokraglenia liczby hutCount) - schowaj poza scena
-    for (; ti < treeCount; ti++) { dummy.position.set(0, -1000, 0); dummy.scale.setScalar(0.0001); dummy.updateMatrix(); treeInst.setMatrixAt(ti, dummy.matrix); }
-    for (; thi < treeHighCount; thi++) { dummy.position.set(0, -1000, 0); dummy.scale.setScalar(0.0001); dummy.updateMatrix(); treeHighInst.setMatrixAt(thi, dummy.matrix); }
-    for (; hi < hutCount; hi++) { dummy.position.set(0, -1000, 0); dummy.scale.setScalar(0.0001); dummy.updateMatrix(); structInst.setMatrixAt(hi, dummy.matrix); roofInst.setMatrixAt(hi, dummy.matrix); }
 
-    treeInst.instanceMatrix.needsUpdate = true;
-    treeHighInst.instanceMatrix.needsUpdate = true;
+    for (const t of TALL_TYPES) t.inst.instanceMatrix.needsUpdate = true;
     structInst.instanceMatrix.needsUpdate = true;
     roofInst.instanceMatrix.needsUpdate = true;
-    scene.add(treeInst, treeHighInst, structInst, roofInst);
+    scene.add(...TALL_TYPES.map((t) => t.inst), structInst, roofInst);
 
-    // --- Kilka cieplej zabarwionych, proceduralnych brył budynkow (jak dalekie
-    // miasto, ale bez przygaszenia mgla-dystansem) dla zroznicowanej wysokosci
-    // sylwetki tuz za pierscieniem drzew. ---
-    const closeCount = 9;
-    const closeGeo = new THREE.BoxGeometry(1, 1, 1);
-    const closeMat = new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.85, metalness: 0.08 });
-    const closeInst = new THREE.InstancedMesh(closeGeo, closeMat, closeCount);
-    closeInst.castShadow = true; closeInst.receiveShadow = true; closeInst.frustumCulled = false;
-    const closePalette = [0x33404a, 0x3a2f45, 0x2f4a3a, 0x4a3a2f];
-    for (let i = 0; i < closeCount; i++) {
-      const angle = (i / closeCount) * Math.PI * 2 + randRange(-0.1, 0.1) + 0.12;
-      const radius = randRange(FOREGROUND_TALL_MIN + 0.2, FOREGROUND_TALL_MAX);
-      const x = Math.sin(angle) * radius;
-      const z = Math.cos(angle) * radius;
-      const height = randRange(2.2, 4.2);
-      const footprint = randRange(1.1, 1.6);
-      dummy.position.set(x, height / 2, z);
-      dummy.scale.set(footprint, height, footprint);
-      dummy.rotation.y = randRange(0, Math.PI * 2);
-      dummy.updateMatrix();
-      closeInst.setMatrixAt(i, dummy.matrix);
-      color.setHex(closePalette[i % closePalette.length]);
-      closeInst.setColorAt(i, color);
+    // --- Skomponowane zestawy przy niskim pierscieniu (promien 6.7-8.6):
+    // stragan targowy (mini-market), oboz z mini-dungeon, pomnik z mini-areny,
+    // rekwizyty portowe z pirate-kit - kazdy zestaw stoi w jednym miejscu jako
+    // spojna scenka, nie rozrzucony losowo (patrz clusterXZ powyzej). Rozstawione
+    // co 45 stopni, na przemian z "zielona" obreczą roslin/kamieni z lowDefs
+    // powyzej - z kazdej strony areny jest wiec na co popatrzec. ---
+    const CLUSTER_RADIUS = (FOREGROUND_LOW_MIN + FOREGROUND_LOW_MAX) / 2; // 7.65
+    const deg = (d) => (d * Math.PI) / 180;
+
+    const clusterPlacements = {}; // key -> [{x,y,z,ry,scale}]
+    const addToCluster = (key, gltf, p) => {
+      if (!clusterPlacements[key]) clusterPlacements[key] = { gltf, list: [] };
+      clusterPlacements[key].list.push(p);
+    };
+
+    // Stragan targowy (glowny, 0 stopni) - piec rekwizytow mini-market obok siebie
+    {
+      const a = deg(0);
+      const facing = a + Math.PI;
+      addToCluster('mFreezer', mFreezer, { ...clusterXZ(a, CLUSTER_RADIUS, 0, -0.9), ry: facing, scale: 1 });
+      addToCluster('mFruit', mFruit, { ...clusterXZ(a, CLUSTER_RADIUS, 0.1, -0.3), ry: facing, scale: 1 });
+      addToCluster('mBasket', mBasket, { ...clusterXZ(a, CLUSTER_RADIUS, 0.35, 0.15), ry: facing + 0.4, scale: 1 });
+      addToCluster('mCart', mCart, { ...clusterXZ(a, CLUSTER_RADIUS, 0.15, 0.6), ry: facing - 0.5, scale: 1 });
+      addToCluster('mBottleReturn', mBottleReturn, { ...clusterXZ(a, CLUSTER_RADIUS, -0.1, 1.0), ry: facing, scale: 1 });
     }
-    closeInst.instanceMatrix.needsUpdate = true;
-    if (closeInst.instanceColor) closeInst.instanceColor.needsUpdate = true;
-    scene.add(closeInst);
+    // Stragan targowy (drugi, 180 stopni) - mniejszy wariant
+    {
+      const a = deg(180);
+      const facing = a + Math.PI;
+      addToCluster('mCart', mCart, { ...clusterXZ(a, CLUSTER_RADIUS, 0, -0.35), ry: facing, scale: 1 });
+      addToCluster('mBasket', mBasket, { ...clusterXZ(a, CLUSTER_RADIUS, 0.2, 0.25), ry: facing + 0.3, scale: 1 });
+      addToCluster('mFruit', mFruit, { ...clusterXZ(a, CLUSTER_RADIUS, -0.2, 0.15), ry: facing, scale: 1 });
+    }
+    // Oboz z mini-dungeon (glowny, 60 stopni)
+    {
+      const a = deg(60);
+      const facing = a + Math.PI;
+      addToCluster('dWoodStruct', dWoodStruct, { ...clusterXZ(a, CLUSTER_RADIUS, 0, -0.6), ry: facing, scale: 1.1 });
+      addToCluster('dWoodSupport', dWoodSupport, { ...clusterXZ(a, CLUSTER_RADIUS, 0.6, -0.6), ry: facing + 1.6, scale: 1.1 });
+      addToCluster('dBarrel', dBarrel, { ...clusterXZ(a, CLUSTER_RADIUS, 0.3, 0.4), ry: facing, scale: 1.2 });
+      addToCluster('dTable', dTable, { ...clusterXZ(a, CLUSTER_RADIUS, -0.3, 0.5), ry: facing + 0.7, scale: 1.15 });
+    }
+    // Oboz z mini-dungeon (drugi, 300 stopni)
+    {
+      const a = deg(300);
+      const facing = a + Math.PI;
+      addToCluster('dTable', dTable, { ...clusterXZ(a, CLUSTER_RADIUS, 0, 0), ry: facing, scale: 1.15 });
+      addToCluster('dBarrel', dBarrel, { ...clusterXZ(a, CLUSTER_RADIUS, 0.35, 0.35), ry: facing, scale: 1.2 });
+    }
+    // Pomnik z mini-areny (120 stopni) - posag + sztandar obok
+    {
+      const a = deg(120);
+      const facing = a + Math.PI;
+      addToCluster('aStatue', aStatue, { ...clusterXZ(a, CLUSTER_RADIUS, 0, 0), ry: facing, scale: 1.0 });
+      addToCluster('aBanner', aBanner, { ...clusterXZ(a, CLUSTER_RADIUS, -0.1, 0.75), ry: facing, scale: 1.0 });
+    }
+    // Rekwizyty portowe z pirate-kit (240 stopni) - beczki i skrzynie, w skali
+    // obnizonej wzgledem oryginalu (pirate-kit jest ~2x wiekszy - patrz CLAUDE.md)
+    {
+      const a = deg(240);
+      const facing = a + Math.PI;
+      addToCluster('pBarrel', pBarrel, { ...clusterXZ(a, CLUSTER_RADIUS, 0, -0.35), ry: facing, scale: 0.5 });
+      addToCluster('pBarrel', pBarrel, { ...clusterXZ(a, CLUSTER_RADIUS, 0.35, 0.25), ry: facing + 0.9, scale: 0.48 });
+      addToCluster('pCrate', pCrate, { ...clusterXZ(a, CLUSTER_RADIUS, -0.3, 0.3), ry: facing, scale: 0.55 });
+      addToCluster('pCrate', pCrate, { ...clusterXZ(a, CLUSTER_RADIUS, -0.15, 0.75), ry: facing + 0.4, scale: 0.52 });
+    }
+
+    const clusterMeshes = [];
+    for (const { gltf, list } of Object.values(clusterPlacements)) {
+      clusterMeshes.push(makeInstanced(gltf, list));
+    }
 
     // --- Kilka kolumn z mini-arcade jako ozdobne pilastry przy co trzecim domku ---
     const columnGltf = await loadArcade('column');
@@ -455,7 +541,7 @@ export class CityBackground {
     columnInst.instanceMatrix.needsUpdate = true;
     scene.add(columnInst);
 
-    this.foregroundMeshes = [treeInst, treeHighInst, structInst, roofInst, closeInst, columnInst];
+    this.foregroundMeshes = [...TALL_TYPES.map((t) => t.inst), structInst, roofInst, ...clusterMeshes, columnInst];
   }
 
   // --- Plac pod arena - jedna bryla betonu, wierzch na y=0 (poziom podlogi areny) ---

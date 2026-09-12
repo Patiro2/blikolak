@@ -93,6 +93,28 @@ export function parseMovementDirection(text) {
   return null;
 }
 
+/**
+ * Bezpieczny powrot dowolnej akcji do animacji spoczynku.
+ *
+ * crossFadeTo() TYLKO rozpisuje rampy wag - NIE uruchamia akcji docelowej.
+ * Gdy idle bylo wczesniej wygaszone do zera i zatrzymane (a tak robi kazde
+ * przejscie do chodu czy do uderzenia w bankomat), przejscie z powrotem
+ * prowadzilo donikad: obie akcje konczyly z waga 0 i zatrzymane, mikser nie
+ * mial czego nakladac, a szkielet wracal do pozy spoczynkowej rigu - czyli
+ * postac stawala w T-pozie. Dlatego idle jest tu jawnie wznawiane i dostaje
+ * pelna wage PRZED rozpoczeciem przejscia.
+ */
+function wrocDoIdle(entry, zAkcji, czas = 0.2) {
+  if (!entry || !entry.idleAction) return;
+  entry.idleAction.enabled = true;
+  entry.idleAction.setEffectiveTimeScale(1);
+  entry.idleAction.setEffectiveWeight(1);
+  entry.idleAction.play();
+  if (zAkcji && zAkcji !== entry.idleAction) {
+    zAkcji.crossFadeTo(entry.idleAction, czas, false);
+  }
+}
+
 export class WorkerManager {
   constructor(scene) {
     this.scene = scene;
@@ -271,7 +293,8 @@ export class WorkerManager {
         if (entry.interactAction && e.action === entry.interactAction) {
           entry.playingInteract = false;
           if (entry.idleAction && !entry.isFainted && !entry.isMoving) {
-            entry.interactAction.crossFadeTo(entry.idleAction, 0.3, false);
+            // idle MUSI byc wznowione przed przejsciem - patrz _wrocDoIdle.
+            wrocDoIdle(entry, entry.interactAction, 0.3);
           }
         }
       });
@@ -519,7 +542,7 @@ export class WorkerManager {
           entry.gridZ = entry.targetGridZ;
 
           if (entry.walkAction && entry.idleAction && !entry.isFainted) {
-            entry.walkAction.crossFadeTo(entry.idleAction, 0.16, false);
+            wrocDoIdle(entry, entry.walkAction, 0.16);
           }
         }
       }

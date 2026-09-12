@@ -63,11 +63,15 @@ export const SOUND_MAP = {
     wysokoscVar: 0.03,
   },
   'moneta-zebrana': {
-    pliki: ['Steel jingles/jingles_STEEL01.ogg'],
-    glosnosc: 0.55,
+    // Krotki, jasny dzwiek nagrody zamiast poprzedniego jingla stalowego
+    // (jingles_STEEL01) - ten byl dluzszy i bardziej muzyczny niz trzeba przy
+    // zdarzeniu, ktore moze sie powtarzac co kilkanascie sekund. Do podmiany
+    // wystarczy zmienic nazwe pliku ponizej.
+    pliki: ['powerUp2.ogg'],
+    glosnosc: 0.6,
     cooldownMs: 200,
     maxJednoczesnie: 1,
-    wysokoscVar: 0.0,
+    wysokoscVar: 0.04,
   },
   'awans-bankomatu': {
     pliki: ['Sax jingles/jingles_SAX00.ogg'],
@@ -157,11 +161,17 @@ export const SOUND_MAP = {
     wysokoscVar: 0.0,
   },
   'vanessa-spawn': {
-    pliki: ['doorOpen_001.ogg', 'glitch_002.ogg'],
-    tryb: 'wszystkie',
+    // Jingiel pizzicato - krotki, "skradajacy sie na paluszkach" motyw smyczkowy,
+    // lepiej pasujacy do zlodziejki niz poprzedni doorOpen+glitch (odglos
+    // otwieranych drzwi + cyfrowy usterkowy szum). Wybrany z 17 plikow w
+    // assets/audio/Pizzicato jingles/ - zdekodowane dlugosci (AudioBuffer.duration,
+    // Web Audio API) wahaly sie od 0.46 do 1.32 s; PIZZI07 (1.324 s) jest
+    // najdluzszy z calej paczki, co przy tym stylu (pizzicato) odpowiada pelnej
+    // wstepujaco-zstepujacej frazie "na paluszkach", a nie tylko 2-3 nutom.
+    pliki: ['Pizzicato jingles/jingles_PIZZI07.ogg'],
     glosnosc: 0.5,
     cooldownMs: 500,
-    maxJednoczesnie: 2,
+    maxJednoczesnie: 1,
     wysokoscVar: 0.03,
   },
   'vanessa-kradnie': {
