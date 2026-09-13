@@ -26,6 +26,40 @@ import { pokazGameOver } from './gameover.js';
 import { pokazZwyciestwoWilkolaka } from './wilkolak-zwyciestwo.js';
 import * as arena from './arena.js';
 
+/**
+ * Fabryka pomocnika izolacji bledow dla animate() - zamyka WLASNY licznik
+ * bledow i zbior "zepsutych" nazw (per wywolanie utworzBezpiecznyTick, wiec
+ * kazdy modul dostaje niezalezny stan, tak jak dawniej osobna para zmiennych
+ * <modul>Bledy/<modul>Zepsuta). Zachowuje DOKLADNIE dawne zachowanie: 3 bledy
+ * pod rzad = modul wylaczony na stale (dalsze wywolania bezpiecznyTick dla tej
+ * nazwy sa cichym no-op), licznik zerowany po kazdym udanym wywolaniu.
+ *
+ * opcje.opisAkcji/opcje.komunikatWylaczenia pozwalaja dopasowac tresc logu do
+ * tego, co bylo w oryginalnym kodzie per modul (np. jetpack mowi "Blad w
+ * tick() (n/3)" bez slowa "minigry", warstwa-minigier mowi "Blad w update()").
+ */
+function utworzBezpiecznyTick() {
+  const liczniki = Object.create(null);
+  const zepsute = Object.create(null);
+  return function bezpiecznyTick(nazwa, fn, opcje = {}) {
+    if (zepsute[nazwa]) return;
+    const opisAkcji = opcje.opisAkcji || 'tick() minigry';
+    const komunikatWylaczenia = opcje.komunikatWylaczenia
+      || 'Minigra wylaczona po trzech bledach pod rzad - reszta gry dziala normalnie.';
+    try {
+      fn();
+      liczniki[nazwa] = 0;
+    } catch (err) {
+      liczniki[nazwa] = (liczniki[nazwa] || 0) + 1;
+      console.error(`[${nazwa}] Blad w ${opisAkcji} (${liczniki[nazwa]}/3):`, err);
+      if (liczniki[nazwa] >= 3) {
+        zepsute[nazwa] = true;
+        console.error(`[${nazwa}] ${komunikatWylaczenia}`);
+      }
+    }
+  };
+}
+
 async function main() {
   // Sprzatanie po usunietym panelu logu Vanessy - osierocony klucz pozycji
   // (przeciagania okna) nie jest juz nigdzie odczytywany, wiec go kasujemy.
@@ -166,39 +200,46 @@ async function main() {
   await goldCoin.init();
 
   const flagBattle = new FlagBattleManager(scene, renderer);
-  let flagBattleBledy = 0;
-  let flagBattleZepsuta = false;
 
   // Jetpack z sekretnego kodu czatu "rocketman" (patrz src/jetpack.js i
   // KODY w kick.js) - wylacznie wizualny efekt, izolacja bledow tick() tym
-  // samym wzorcem co flagBattle/tlumaczenia/panstwaMiasta/bitwaMarek nizej.
+  // samym wzorcem co flagBattle/tlumaczenia/panstwaMiasta/bitwaMarek nizej
+  // (patrz bezpiecznyTick).
   const jetpack = new JetpackManager(scene);
-  let jetpackBledy = 0;
-  let jetpackZepsuty = false;
 
   // Minigra "Tlumaczenia" - druga minigra na siatce areny, obok bitwy o
-  // flagi. Ta sama polityka izolacji bledow (patrz komentarz przy
-  // flagBattleZepsuta nizej w animate()) - blad w tick() degraduje WYLACZNIE
-  // te minigre, reszta gry dziala dalej.
+  // flagi. Ta sama polityka izolacji bledow (patrz bezpiecznyTick nizej) -
+  // blad w tick() degraduje WYLACZNIE te minigre, reszta gry dziala dalej.
   const tlumaczenia = new TlumaczeniaManager(scene, renderer);
-  let tlumaczeniaBledy = 0;
-  let tlumaczeniaZepsuta = false;
 
   // Minigra "Panstwa-Miasta" - czwarta minigra na siatce areny, obok bitwy o
-  // flagi i bitwy tlumaczen. Ta sama polityka izolacji bledow (patrz komentarz
-  // przy flagBattleZepsuta nizej w animate()) - blad w tick() degraduje
-  // WYLACZNIE te minigre, reszta gry dziala dalej.
+  // flagi i bitwy tlumaczen. Ta sama polityka izolacji bledow (patrz
+  // bezpiecznyTick nizej) - blad w tick() degraduje WYLACZNIE te minigre,
+  // reszta gry dziala dalej.
   const panstwaMiasta = new PanstwaMiastaManager(scene, renderer);
-  let panstwaMiastaBledy = 0;
-  let panstwaMiastaZepsuta = false;
 
   // Minigra "Zgadnij marke" - piata minigra na siatce areny, obok bitwy o
   // flagi, bitwy tlumaczen i panstw-miast. Ta sama polityka izolacji bledow
-  // (patrz komentarz przy flagBattleZepsuta nizej w animate()) - blad w
-  // tick() degraduje WYLACZNIE te minigre, reszta gry dziala dalej.
+  // (patrz bezpiecznyTick nizej) - blad w tick() degraduje WYLACZNIE te
+  // minigre, reszta gry dziala dalej.
   const bitwaMarek = new BitwaMarekManager(scene, renderer);
-  let bitwaMarekBledy = 0;
-  let bitwaMarekZepsuta = false;
+
+  // Jedna wspolna izolacja bledow (3 bledy pod rzad = modul wylaczony na
+  // stale) dla wszystkich szesciu miejsc w animate(), ktore dawniej mialy
+  // wlasna, przeklejona parę liczników - patrz utworzBezpiecznyTick.
+  const bezpiecznyTick = utworzBezpiecznyTick();
+
+  // Cztery minigry areny w jednej tablicy [instancja, nazwa-zdarzenia-realtime,
+  // klucz-w-stanie] - uzywana do zbiorczego setContext (patrz nizej), petli
+  // onAnnounce/onRewardTick i petli applySync w zastosujStanZSerwera. NIE
+  // uzywana w zbierzStan()/animate() - te dwa miejsca zostaja bez zmian
+  // (patrz zadanie: "nie ruszaj zbierzStan").
+  const MINIGRY_ARENY = [
+    [flagBattle, 'flaga-info', 'flagBattle'],
+    [tlumaczenia, 'tlumaczenia-info', 'tlumaczenia'],
+    [panstwaMiasta, 'panstwa-miasta-info', 'panstwaMiasta'],
+    [bitwaMarek, 'marki-info', 'bitwaMarek'],
+  ];
 
   // Warstwa wymuszajaca pierwszenstwo kart minigier nad modelami 3D i nad
   // HTML-owymi nickami/dymkami pracownikow (patrz src/warstwa-minigier.js -
@@ -211,8 +252,6 @@ async function main() {
     panstwaMiasta,
     bitwaMarek,
   });
-  let warstwaMinigierBledy = 0;
-  let warstwaMinigierZepsuta = false;
 
   const vanessa = new VanessaManager(
     scene,
@@ -473,25 +512,15 @@ async function main() {
     await krokStanu('workerManager.applySync', () => {
       if (stan.workers && !remote.czyAdmin()) workerManager.applySync(stan.workers);
     });
-    // Minigra "Bitwa o flagi" - patrz komentarz przy isHost w flagbattle.js:
-    // widz nie losuje juz nic sam, tylko odgrywa to, co przyslal host.
-    await krokStanu('flagBattle.applySync', () => {
-      if (!remote.czyAdmin()) flagBattle.applySync(stan.flagBattle || null);
-    });
-    // Minigra "Tlumaczenia" - ten sam wzorzec co flagBattle.applySync wyzej.
-    await krokStanu('tlumaczenia.applySync', () => {
-      if (!remote.czyAdmin()) tlumaczenia.applySync(stan.tlumaczenia || null);
-    });
-    // Minigra "Panstwa-Miasta" - ten sam wzorzec co flagBattle.applySync/
-    // tlumaczenia.applySync wyzej.
-    await krokStanu('panstwaMiasta.applySync', () => {
-      if (!remote.czyAdmin()) panstwaMiasta.applySync(stan.panstwaMiasta || null);
-    });
-    // Minigra "Zgadnij marke" - ten sam wzorzec co flagBattle.applySync/
-    // tlumaczenia.applySync/panstwaMiasta.applySync wyzej.
-    await krokStanu('bitwaMarek.applySync', () => {
-      if (!remote.czyAdmin()) bitwaMarek.applySync(stan.bitwaMarek || null);
-    });
+    // Cztery minigry areny - widz nie losuje juz nic sam, tylko odgrywa to,
+    // co przyslal host (patrz komentarz przy isHost w minigra-bazowa.js).
+    // Ten sam wzorzec dla wszystkich czterech, zwiniety w petle po
+    // MINIGRY_ARENY (klucz w stanie = trzeci element krotki).
+    for (const [minigra, , klucz] of MINIGRY_ARENY) {
+      await krokStanu(`${klucz}.applySync`, () => {
+        if (!remote.czyAdmin()) minigra.applySync(stan[klucz] || null);
+      });
+    }
     // Jetpack z kodu czatu "rocketman" - ten sam wzorzec co pozostale minigry
     // powyzej (patrz src/jetpack.js).
     await krokStanu('jetpack.applySync', () => {
@@ -1138,114 +1167,46 @@ async function main() {
     projectAndFloat,
     save,
   });
-  flagBattle.setContext({
-    workerManager,
-    kickChat,
-    economy,
-    isHost: remote.czyAdmin(),
-    boss,
-    tlumaczenia, // wylacznie do odczytu tlumaczenia.tile - patrz komentarz w flagbattle.js/setContext
-    panstwaMiasta, // wylacznie do odczytu panstwaMiasta.tile - patrz komentarz w flagbattle.js/setContext
-    bitwaMarek, // wylacznie do odczytu bitwaMarek.tile - patrz komentarz w flagbattle.js/setContext
-  });
-  tlumaczenia.setContext({
-    workerManager,
-    kickChat,
-    economy,
-    isHost: remote.czyAdmin(),
-    boss,
-    flagBattle, // wylacznie do odczytu flagBattle.tile - patrz komentarz w tlumaczenia.js/setContext
-    panstwaMiasta, // wylacznie do odczytu panstwaMiasta.tile - patrz komentarz w tlumaczenia.js/setContext
-    bitwaMarek, // wylacznie do odczytu bitwaMarek.tile - patrz komentarz w tlumaczenia.js/setContext
-  });
-  // Minigra "Panstwa-Miasta" - ten sam wzorzec co flagBattle/tlumaczenia
-  // powyzej, z referencjami do OBU pozostalych minigier (wylacznie do
-  // odczytu ich .tile - patrz komentarz w panstwa-miasta.js/setContext).
-  panstwaMiasta.setContext({
-    workerManager,
-    kickChat,
-    economy,
-    isHost: remote.czyAdmin(),
-    boss,
-    flagBattle,
-    tlumaczenia,
-    bitwaMarek, // wylacznie do odczytu bitwaMarek.tile - patrz komentarz w panstwa-miasta.js/setContext
-  });
-  // Minigra "Zgadnij marke" - ten sam wzorzec co pozostale trzy minigry
-  // powyzej, z referencjami do WSZYSTKICH pozostalych trzech minigier
-  // (wylacznie do odczytu ich .tile - patrz komentarz w
-  // bitwa-marek.js/setContext).
-  bitwaMarek.setContext({
-    workerManager,
-    kickChat,
-    economy,
-    isHost: remote.czyAdmin(),
-    boss,
-    flagBattle,
-    tlumaczenia,
-    panstwaMiasta,
-  });
-  // Narracja bitwy ("Bitwa o flagi! X vs Y!", "X wygrywa!"...) dociera do
-  // widza z hostowej karty natychmiast przez kanal realtime, zamiast czekac
-  // do najblizszego snapshotu co 2 s. U widza announce() (wywolane z
-  // zastosujZdarzenieZdalne nizej) i tak dopisuje ten sam tekst lokalnie -
-  // onAnnounce tam jest no-op (bo isHost=false), wiec nie ma petli.
-  flagBattle.onAnnounce = (text) => {
-    if (remote.czyAdmin()) {
-      realtime.wyslijZdarzenie('flaga-info', { text });
-    }
-  };
-  // Dymek "+100 zl" nad zwyciezca minigry, RAZ przy wejsciu w REWARD (patrz
-  // komentarz przy onRewardTick w flagbattle.js). Samo naliczanie kasy juz
-  // dziala jednorazowo (economy.addMoney w endBattle) - to WYLACZNIE wizualne
-  // potwierdzenie, idzie przez ten sam sprawdzony projectAndFloat co kazdy
-  // inny dymek w grze (a wiec przez #floaters, nie przez nieistniejacy
-  // #ui-layer, ktory kiedys polozyl produkcje - patrz historia tego pliku).
-  flagBattle.onRewardTick = (winner) => {
-    const w = workerManager.getWorkerType(winner.typeIndex);
-    if (!w || !w.obj) return;
-    const origin = w.obj.position.clone().add(new THREE.Vector3(0, 1.8, 0));
-    projectAndFloat(origin, '+100 zł', { crit: false });
-  };
-  // Ten sam wzorzec co flagBattle.onAnnounce/onRewardTick powyzej, dla
-  // minigry tlumaczen.
-  tlumaczenia.onAnnounce = (text) => {
-    if (remote.czyAdmin()) {
-      realtime.wyslijZdarzenie('tlumaczenia-info', { text });
-    }
-  };
-  tlumaczenia.onRewardTick = (winner) => {
-    const w = workerManager.getWorkerType(winner.typeIndex);
-    if (!w || !w.obj) return;
-    const origin = w.obj.position.clone().add(new THREE.Vector3(0, 1.8, 0));
-    projectAndFloat(origin, '+100 zł', { crit: false });
-  };
-  // Ten sam wzorzec co flagBattle.onAnnounce/onRewardTick i
-  // tlumaczenia.onAnnounce/onRewardTick powyzej, dla minigry panstw-miast.
-  panstwaMiasta.onAnnounce = (text) => {
-    if (remote.czyAdmin()) {
-      realtime.wyslijZdarzenie('panstwa-miasta-info', { text });
-    }
-  };
-  panstwaMiasta.onRewardTick = (winner) => {
-    const w = workerManager.getWorkerType(winner.typeIndex);
-    if (!w || !w.obj) return;
-    const origin = w.obj.position.clone().add(new THREE.Vector3(0, 1.8, 0));
-    projectAndFloat(origin, '+100 zł', { crit: false });
-  };
-  // Ten sam wzorzec co flagBattle/tlumaczenia/panstwaMiasta onAnnounce/
-  // onRewardTick powyzej, dla minigry "Zgadnij marke".
-  bitwaMarek.onAnnounce = (text) => {
-    if (remote.czyAdmin()) {
-      realtime.wyslijZdarzenie('marki-info', { text });
-    }
-  };
-  bitwaMarek.onRewardTick = (winner) => {
-    const w = workerManager.getWorkerType(winner.typeIndex);
-    if (!w || !w.obj) return;
-    const origin = w.obj.position.clone().add(new THREE.Vector3(0, 1.8, 0));
-    projectAndFloat(origin, '+100 zł', { crit: false });
-  };
+  // Cztery minigry areny - kazda dostaje referencje do POZOSTALYCH TRZECH
+  // (wylacznie do odczytu ich .tile, zeby zadne dwie nie wylosowaly tego
+  // samego pola - patrz komentarz w MinigraBazowa.setContext) oraz narracje
+  // (onAnnounce -> zdarzenie realtime) i dymek nagrody (onRewardTick) - ten
+  // sam wzorzec dla wszystkich czterech, zwiniety w jedna petle po
+  // MINIGRY_ARENY (patrz deklaracja wyzej).
+  for (const [minigra] of MINIGRY_ARENY) {
+    minigra.setContext({
+      workerManager,
+      kickChat,
+      economy,
+      isHost: remote.czyAdmin(),
+      boss,
+      inne: MINIGRY_ARENY.filter(([inna]) => inna !== minigra).map(([inna]) => inna),
+    });
+  }
+  for (const [minigra, eventInfo] of MINIGRY_ARENY) {
+    // Narracja bitwy ("Bitwa o flagi! X vs Y!", "X wygrywa!"...) dociera do
+    // widza z hostowej karty natychmiast przez kanal realtime, zamiast czekac
+    // do najblizszego snapshotu co 2 s. U widza announce() (wywolane z
+    // zastosujZdarzenieZdalne nizej) i tak dopisuje ten sam tekst lokalnie -
+    // onAnnounce tam jest no-op (bo isHost=false), wiec nie ma petli.
+    minigra.onAnnounce = (text) => {
+      if (remote.czyAdmin()) {
+        realtime.wyslijZdarzenie(eventInfo, { text });
+      }
+    };
+    // Dymek "+100 zl" nad zwyciezca minigry, RAZ przy wejsciu w REWARD.
+    // Samo naliczanie kasy juz dziala jednorazowo (economy.addMoney w
+    // endBattle) - to WYLACZNIE wizualne potwierdzenie, idzie przez ten sam
+    // sprawdzony projectAndFloat co kazdy inny dymek w grze (a wiec przez
+    // #floaters, nie przez nieistniejacy #ui-layer, ktory kiedys polozyl
+    // produkcje - patrz historia tego pliku).
+    minigra.onRewardTick = (winner) => {
+      const w = workerManager.getWorkerType(winner.typeIndex);
+      if (!w || !w.obj) return;
+      const origin = w.obj.position.clone().add(new THREE.Vector3(0, 1.8, 0));
+      projectAndFloat(origin, '+100 zł', { crit: false });
+    };
+  }
 
   // Widz otwierajacy karte w trakcie walki z bossem podejmuje ja od razu, bez
   // cutscenki, z tym samym hp/licznikami co u admina (patrz boss.applySync).
@@ -1391,82 +1352,25 @@ async function main() {
     // WYLACZNIE minigre: po trzech bledach pod rzad przestajemy ja tykac,
     // a gra leci dalej. Rdzen gry zostaje bez oslony celowo - tam bledy maja
     // byc glosne.
-    if (!flagBattleZepsuta) {
-      try {
-        flagBattle.tick(delta);
-        flagBattleBledy = 0;
-      } catch (err) {
-        flagBattleBledy += 1;
-        console.error(`[flagi] Blad w tick() minigry (${flagBattleBledy}/3):`, err);
-        if (flagBattleBledy >= 3) {
-          flagBattleZepsuta = true;
-          console.error('[flagi] Minigra wylaczona po trzech bledach pod rzad - reszta gry dziala normalnie.');
-        }
-      }
-    }
+    bezpiecznyTick('flagi', () => flagBattle.tick(delta));
     // Ta sama izolacja bledow co flagBattle powyzej - minigra tlumaczen jest
     // rowniez mlodym modulem, blad w jej tick() nie moze polozyc calej gry.
-    if (!tlumaczeniaZepsuta) {
-      try {
-        tlumaczenia.tick(delta);
-        tlumaczeniaBledy = 0;
-      } catch (err) {
-        tlumaczeniaBledy += 1;
-        console.error(`[tlumaczenia] Blad w tick() minigry (${tlumaczeniaBledy}/3):`, err);
-        if (tlumaczeniaBledy >= 3) {
-          tlumaczeniaZepsuta = true;
-          console.error('[tlumaczenia] Minigra wylaczona po trzech bledach pod rzad - reszta gry dziala normalnie.');
-        }
-      }
-    }
+    bezpiecznyTick('tlumaczenia', () => tlumaczenia.tick(delta));
     // Ta sama izolacja bledow co flagBattle/tlumaczenia powyzej - minigra
     // panstw-miast jest rowniez mlodym modulem, blad w jej tick() nie moze
     // polozyc calej gry.
-    if (!panstwaMiastaZepsuta) {
-      try {
-        panstwaMiasta.tick(delta);
-        panstwaMiastaBledy = 0;
-      } catch (err) {
-        panstwaMiastaBledy += 1;
-        console.error(`[panstwa-miasta] Blad w tick() minigry (${panstwaMiastaBledy}/3):`, err);
-        if (panstwaMiastaBledy >= 3) {
-          panstwaMiastaZepsuta = true;
-          console.error('[panstwa-miasta] Minigra wylaczona po trzech bledach pod rzad - reszta gry dziala normalnie.');
-        }
-      }
-    }
+    bezpiecznyTick('panstwa-miasta', () => panstwaMiasta.tick(delta));
     // Ta sama izolacja bledow co flagBattle/tlumaczenia/panstwaMiasta powyzej -
     // minigra "Zgadnij marke" jest rowniez mlodym modulem, blad w jej tick()
     // nie moze polozyc calej gry.
-    if (!bitwaMarekZepsuta) {
-      try {
-        bitwaMarek.tick(delta);
-        bitwaMarekBledy = 0;
-      } catch (err) {
-        bitwaMarekBledy += 1;
-        console.error(`[marki] Blad w tick() minigry (${bitwaMarekBledy}/3):`, err);
-        if (bitwaMarekBledy >= 3) {
-          bitwaMarekZepsuta = true;
-          console.error('[marki] Minigra wylaczona po trzech bledach pod rzad - reszta gry dziala normalnie.');
-        }
-      }
-    }
+    bezpiecznyTick('marki', () => bitwaMarek.tick(delta));
     // Ta sama izolacja bledow co flagBattle/tlumaczenia/panstwaMiasta/bitwaMarek
     // powyzej - jetpack (kod czatu "rocketman", patrz src/jetpack.js) jest
     // rowniez wylacznie kosmetycznym, mlodym modulem.
-    if (!jetpackZepsuty) {
-      try {
-        jetpack.tick(delta);
-        jetpackBledy = 0;
-      } catch (err) {
-        jetpackBledy += 1;
-        console.error(`[jetpack] Blad w tick() (${jetpackBledy}/3):`, err);
-        if (jetpackBledy >= 3) {
-          jetpackZepsuty = true;
-          console.error('[jetpack] Wylaczony po trzech bledach pod rzad - reszta gry dziala normalnie.');
-        }
-      }
-    }
+    bezpiecznyTick('jetpack', () => jetpack.tick(delta), {
+      opisAkcji: 'tick()',
+      komunikatWylaczenia: 'Wylaczony po trzech bledach pod rzad - reszta gry dziala normalnie.',
+    });
     city.update(delta);
 
     // Brak dochodu pasywnego - zl powstaja WYLACZNIE z klikniec.
@@ -1492,19 +1396,10 @@ async function main() {
     // Karty minigier na pierwszej warstwie (patrz src/warstwa-minigier.js) -
     // ta sama izolacja bledow co flagBattle/tlumaczenia/panstwaMiasta/
     // bitwaMarek/jetpack powyzej.
-    if (!warstwaMinigierZepsuta) {
-      try {
-        warstwaMinigier.update(canvasRect);
-        warstwaMinigierBledy = 0;
-      } catch (err) {
-        warstwaMinigierBledy += 1;
-        console.error(`[warstwa-minigier] Blad w update() (${warstwaMinigierBledy}/3):`, err);
-        if (warstwaMinigierBledy >= 3) {
-          warstwaMinigierZepsuta = true;
-          console.error('[warstwa-minigier] Wylaczona po trzech bledach pod rzad - reszta gry dziala normalnie.');
-        }
-      }
-    }
+    bezpiecznyTick('warstwa-minigier', () => warstwaMinigier.update(canvasRect), {
+      opisAkcji: 'update()',
+      komunikatWylaczenia: 'Wylaczona po trzech bledach pod rzad - reszta gry dziala normalnie.',
+    });
 
     renderer.render(scene, camera);
   }

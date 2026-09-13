@@ -1,104 +1,42 @@
 import * as THREE from 'three';
 import { KATEGORIE, LITERY_DOZWOLONE, dopasujOdpowiedzi } from './panstwa-miasta-dane.js';
 import { usunTagiEmotek } from './kick.js';
-import { loadForest } from './assets.js';
-import { strumien, losujInt, pozycjaBezPowtorek } from './rng.js';
-import { Bojka } from './bojka.js';
-import { arenaHalf } from './arena.js';
+import { pozycjaBezPowtorek } from './rng.js';
+import { MinigraBazowa, klipAtakuDlaRundy, NAGRODA_WYGRANEJ } from './minigra-bazowa.js';
 
-
-// Minimalny odstep miedzy polami minigier areny (odleglosc "krolem": max z |dx|,|dz|).
-// 3 = miedzy dwoma polami minigier zostaja co najmniej 2 wolne pola, takze po skosie.
-const MIN_ODSTEP_MINIGIER = 3;
-function zaBliskoMinigry(x, z, tile) {
-  return !!tile && Math.max(Math.abs(x - tile.x), Math.abs(z - tile.z)) < MIN_ODSTEP_MINIGIER;
-}
-
-// Nagroda za wygrana minigre: jednorazowa wyplata w momencie zakonczenia
-// bitwy (endBattle), zamiast dawnych 2 zl/s przez 30 s w stanie REWARD.
-const NAGRODA_WYGRANEJ = 100;
-
-// Minigra "Panstwa-Miasta" - CZWARTA minigra na siatce areny, obok bitwy o
-// flagi i bitwy tlumaczen. Mechanika jest CELOWO skopiowana z
-// src/tlumaczenia.js/src/flagbattle.js (stany IDLE -> WAITING -> BATTLE ->
-// REWARD, wejscie dwoch graczy na kafelek, getSyncState/applySync, setHost,
-// przerwanie przez bossa, wysuwane plotki...) - a NIE wyciagnieta z nich jako
-// wspolna klasa bazowa. Patrz obszerny komentarz na gorze tlumaczenia.js po
-// pelne uzasadnienie tej decyzji (bitwa o flagi dwa razy w historii projektu
-// polozyla cala produkcje - dorzucanie abstrakcji na potrzeby TRZECIEJ kopii
-// zwiekszaloby ryzyko regresji w JUZ DZIALAJACYM kodzie). NIE modyfikujemy
-// flagbattle.js/tlumaczenia.js poza (opisanym w ich naglowkach) minimalnym
-// dopiskiem do kolizji kafelkow.
-//
-// Roznica wzgledem flag/tlumaczen: losowana jest litera, a kazdy z dwoch
-// graczy ma wlasna rubryke trzech kategorii (Panstwo/Imie/Owoc - patrz
-// src/panstwa-miasta-dane.js), ktora wypelnia odpowiedziami z czatu. Ta sama
-// odpowiedz (to samo `id`) nie moze wystapic dwa razy w jednej rundzie -
-// ani u tego samego gracza, ani u przeciwnika (patrz onChatMessage nizej).
-
-// Wysokosc znacznika kontestowanego pola. Zajete poziomy w projekcie: 0.025
-// wierzch kafla podlogi (scene.js), 0.035 neonowa siatka areny (scene.js),
-// 0.042 znaczniki atakow bossa (bossattack.js), 0.048 wskaznik zlotej monety
-// (goldcoin.js), 0.052 znacznik bitwy o flagi (flagbattle.js), 0.056 znacznik
-// bitwy tlumaczen (tlumaczenia.js). 0.060 jest KOLEJNYM wolnym poziomem ponad
-// wszystkimi - wejscie w cudzy poziom odtworzyloby migotanie podlogi
-// (z-fighting), ktore w tym projekcie juz raz naprawiono.
-const MARKER_Y = 0.060;
-
-// Kolor minigry: POMARANCZOWY - wyraznie inny niz zajete kolory w projekcie
-// (neonowa zielen siatki areny 0x53fc18, czerwien rakiet bossa 0xff3b30,
-// niebiesko-fioletowe tlumaczenia 0x3d5cff, zloto monety, czerwien flag).
-const KOLOR_BAZOWY = 0xff9f1c;
+// Minigra "Panstwa-Miasta" - patrz MinigraBazowa (src/minigra-bazowa.js) po
+// wspolny cykl zycia pola/rund/nagrody/plotek/synchronizacji. Ten plik
+// zawiera WYLACZNIE to, czym ta minigra realnie sie rozni: losowana jest
+// litera, a kazdy z dwoch graczy ma wlasna rubryke trzech kategorii
+// (Panstwo/Imie/Owoc - patrz src/panstwa-miasta-dane.js), ktora wypelnia
+// odpowiedziami z czatu, plus wlasny wyswietlacz rubryk nad glowami graczy
+// (_aktualizujRubryki/_zapewnijRubryki/_usunRubryki/_rysujRubrykeTekstura),
+// ktorego pozostale minigry nie maja.
 
 // Prog zwyciestwa bitwy panstw-miast: pierwszy gracz, ktory wygra
 // PUNKTY_DO_WYGRANEJ RUND (nie pojedynczych odpowiedzi - runda = jedna
-// litera), wygrywa cala bitwe. WSZYSTKIE miejsca w tym pliku (tekst
-// ogloszenia na czacie, warunek konca bitwy) MUSZA czytac ta stala, a nie
-// miec wpisanej liczby na sztywno - inaczej przy kolejnej zmianie progu
-// znowu by sie rozjechaly (patrz analogiczny komentarz w tlumaczenia.js).
+// litera), wygrywa cala bitwe.
 const PUNKTY_DO_WYGRANEJ = 3;
 
 // Limit czasu POJEDYNCZEJ RUNDY (jednej litery) - zabezpieczenie przed
 // zwisem rundy, gdy zaden gracz nie zdola wypelnic rubryki. Liczony
-// WYLACZNIE przez hosta w tick() (this.rundaTimer, zerowany w kazdym
-// nextRound()), tak samo jak LIMIT_CZASU_FLAGI_S/flagRoundTimer we
-// flagbattle.js.
+// WYLACZNIE przez hosta w _tickBitwy (this.rundaTimer, zerowany w kazdym
+// nextRound()).
 const LIMIT_CZASU_RUNDY_S = 90;
 
-// Klipy walki - identyczne jak w tlumaczenia.js/flagbattle.js (kazda postac w
-// projekcie ma je w swoim wspolnym slowniku animacji). Deterministyczny
-// wybor wzgledem liczby rozegranych rund z wygrana - patrz uzycie w
-// onChatMessage/applySync.
-const KLIPY_ATAKU = ['attack-melee-right', 'attack-melee-left', 'attack-kick-right', 'attack-kick-left'];
-function klipAtakuDlaRundy(numerRundy) {
-  const i = ((numerRundy % KLIPY_ATAKU.length) + KLIPY_ATAKU.length) % KLIPY_ATAKU.length;
-  return KLIPY_ATAKU[i];
-}
-
-// Szablon plotki (assets/forest/fence.glb) - loadForest() sam cache'uje
-// wynik (patrz assets.js), a ten sam plik jest juz ladowany przez
-// flagbattle.js/tlumaczenia.js/city.js pod tym samym kluczem, wiec to nie
-// jest dodatkowe pobieranie ani osobna kopia geometrii/materialu.
-let szablonPlotkiPromise = null;
-function pobierzSzablonPlotki() {
-  if (!szablonPlotkiPromise) szablonPlotkiPromise = loadForest('fence');
-  return szablonPlotkiPromise;
-}
-
-// Rozmiar canvasu karty z litera (analogicznie do SZEROKOSC_KARTY/WYSOKOSC_KARTY
-// w tlumaczenia.js).
+// Rozmiar canvasu karty z litera.
 const SZEROKOSC_KARTY = 384;
 const WYSOKOSC_KARTY = 384;
 
 // Wszystkie trzy karty (litera + 2 rubryki) w JEDNYM poziomym pasie nad
 // kafelkiem bitwy. Rzut na ekran (1280x720) pokazal, ze nad kafelkiem jest
-// tylko waski pas widoczny w kadrze - poziom y=2.5 uzywany przez istniejace
-// minigry (flagbattle.js, tlumaczenia.js) lezy juz przy samej gornej
-// krawedzi ekranu na dalekich polach, wiec pietrowy uklad (karta wyzej niz
-// rubryki) nie miesci sie. Dlatego karty ida OBOK SIEBIE w osi X wzgledem
-// srodka kafelka (this.tile), a nie jedna nad druga.
-// KARTY_WYSOKOSC = 2.05: karta o wysokosci 1.1 zajmuje wtedy Y 1.50-2.60,
-// co miesci sie w kadrze nawet na najgorszym polu.
+// tylko waski pas widoczny w kadrze - poziom y=2.5 uzywany przez flagbattle/
+// tlumaczenia lezy juz przy samej gornej krawedzi ekranu na dalekich polach,
+// wiec pietrowy uklad (karta wyzej niz rubryki) nie miesci sie. Dlatego karty
+// ida OBOK SIEBIE w osi X wzgledem srodka kafelka (this.tile), a nie jedna
+// nad druga.
+// KARTY_WYSOKOSC = 2.05: karta o wysokosci 1.1 zajmuje wtedy Y 1.50-2.60, co
+// miesci sie w kadrze nawet na najgorszym polu.
 // KARTY_ODSTEP_X = 1.5: rubryka ma szerokosc 1.7 (patrz scale w
 // _zapewnijRubryki), wiec przy tym odstepie zajmuje X od -2.35 do -0.65
 // (gracz 0) oraz 0.65 do 2.35 (gracz 1) - 0.1 przeswitu z kazdej strony
@@ -111,11 +49,9 @@ const KARTY_ODSTEP_X = 1.5;
 
 /**
  * Rysuje kafelek-karte z duza, czytelna litera na canvasie i zwraca
- * THREE.CanvasTexture. Czysto lokalne rysowanie tekstu (bez fetch, bez
- * asynchronicznego wyscigu) - wiec funkcja jest SYNCHRONICZNA, tak samo jak
- * zaladujTeksturaSlowa w tlumaczenia.js. Wynik cache'owany po literze (Map w
- * module) - ta sama litera nigdy nie rysuje canvasu drugi raz w tej samej
- * sesji karty.
+ * THREE.CanvasTexture. Czysto lokalne rysowanie tekstu - SYNCHRONICZNA, tak
+ * samo jak zaladujTeksturaSlowa w tlumaczenia.js. Wynik cache'owany po
+ * literze.
  */
 const cacheTeksturLiter = new Map();
 function zaladujTeksturaLitery(litera, renderer) {
@@ -156,18 +92,9 @@ function zaladujTeksturaLitery(litera, renderer) {
 }
 
 /**
- * Rysuje kilka wierszy tekstu na canvasie karty litery (SZEROKOSC_KARTY x
- * WYSOKOSC_KARTY) i zwraca CanvasTexture - uzywane do kartki ze zwyciezca
- * bitwy (patrz _pokazZwyciezce nizej). Lokalny odpowiednik
- * renderujTekstNaCanvasie z flagbattle.js - zgodnie z konwencja tego
- * projektu duplikujemy wzorzec zamiast wyciagac go do wspolnego modulu
- * (patrz obszerny komentarz na gorze tlumaczenia.js). NIE cache'owane po
+ * Rysuje kilka wierszy tekstu na canvasie karty litery i zwraca
+ * CanvasTexture - uzywane do kartki ze zwyciezca bitwy. NIE cache'owane po
  * kluczu - nick zwyciezcy jest jednorazowy.
- *
- * Dopasowanie fontu: kazda linia dostaje WLASNY rozmiar, zmierzony przez
- * ctx.measureText i zmniejszany o 2px, dopoki nie zmiesci sie w szerokosci
- * karty (margines 20px z kazdej strony) albo nie osiagnie minimalnego
- * czytelnego rozmiaru (16px) - identyczny wzorzec co w flagbattle.js.
  */
 function renderujTekstNaCanvasie(linie) {
   const canvas = document.createElement('canvas');
@@ -203,15 +130,34 @@ function renderujTekstNaCanvasie(linie) {
   return texture;
 }
 
-export class PanstwaMiastaManager {
-  constructor(scene, renderer) {
-    this.scene = scene;
-    this.renderer = renderer;
+/** Pusta rubryka: jeden klucz per kategoria z panstwa-miasta-dane.js, wartosc null = jeszcze nie wypelnione. */
+function pustaRubryka() {
+  return Object.fromEntries(KATEGORIE.map((k) => [k.id, null]));
+}
 
-    this.state = 'IDLE'; // IDLE, WAITING, BATTLE, REWARD
-    this.timer = 0;
-    this.tile = null; // {x, z}
-    this.players = []; // [{ typeIndex, username, score, rubryka: {panstwo, imie, owoc} }]
+export class PanstwaMiastaManager extends MinigraBazowa {
+  constructor(scene, renderer) {
+    super(scene, renderer, {
+      logTag: 'panstwa-miasta',
+      nazwaAnnounce: 'Panstwa-Miasta',
+      kolorAnnounce: '#ff9f1c',
+      nazwaBitwy: 'bitwa panstw-miast',
+      // Wysokosc znacznika: 0.060 - kolejny wolny poziom ponad flagbattle.js
+      // (0.052) i tlumaczenia.js (0.056).
+      markerY: 0.060,
+      // Kolor minigry: POMARANCZOWY.
+      kolorBazowy: 0xff9f1c,
+      spriteScale: [1.1, 1.1, 1.0],
+      spriteY: KARTY_WYSOKOSC,
+      kluczPola: 'panstwa-miasta-pole',
+      kluczBojki: 'panstwa-miasta-bojka',
+    });
+
+    // Alias na sprite bazowej klasy - src/warstwa-minigier.js (POZA zakresem
+    // tego refaktoru, nie wolno go edytowac) czyta go PO NAZWIE
+    // ('letterSprite') przez manager[pole]. Ten sam obiekt pod dwiema
+    // nazwami, zadnej kopii. rubrykaSprites zostaje bez zmian (patrz nizej).
+    this.letterSprite = this.mainSprite;
 
     this.litera = null;
     this._loadedLitera = null; // ostatnia litera zaladowana na sprite (applySync u widza)
@@ -219,379 +165,87 @@ export class PanstwaMiastaManager {
     // uzyteId - zbior identyfikatorow odpowiedzi juz wykorzystanych W TEJ
     // RUNDZIE (przez KTOREGOKOLWIEK z dwoch graczy) - patrz onChatMessage.
     // Zerowany w kazdym nextRound(). NIE synchronizowany osobno - widz
-    // odtwarza go posrednio z players[].rubryka w applySync (patrz tam).
+    // odtwarza go posrednio z players[].rubryka w applySync.
     this.uzyteId = new Set();
 
     // rundWygranych - ile rund w TEJ BITWIE zostalo juz rozstrzygnietych
-    // wygrana (nie licza sie rundy zakonczone bez zwyciezcy po uplywie
-    // limitu czasu). Sluzy WYLACZNIE do deterministycznego wyboru klipu ataku
-    // (klipAtakuDlaRundy) - ten sam wzorzec co wordsGuessed/flagsGuessed w
-    // tlumaczenia.js/flagbattle.js.
+    // wygrana. Sluzy WYLACZNIE do deterministycznego wyboru klipu ataku.
     this.rundWygranych = 0;
 
-    // Limit czasu pojedynczej rundy (patrz LIMIT_CZASU_RUNDY_S) - liczony
-    // WYLACZNIE przez hosta w tick(), zerowany w kazdym nextRound(). NIE
-    // synchronizowany (host-only decyzja, jak flagRoundTimer we flagbattle.js).
+    // Limit czasu pojedynczej rundy - liczony WYLACZNIE przez hosta,
+    // zerowany w kazdym nextRound(). NIE synchronizowany (host-only decyzja).
     this.rundaTimer = 0;
-
-    // battleId - patrz spawnBattleSquare()/nextRound(). Synchronizowany
-    // (getSyncState/applySync), inkrementowany WYLACZNIE przez hosta.
-    this.battleId = 0;
-
-    this.rewardTimer = 0;
-    this.winner = null;
-
-    this.onAnnounce = () => {};
-    this.onRewardTick = () => {};
-
-    // Znacznik kontestowanego pola - pierscien + wypelnienie, kolor
-    // pomaranczowy (KOLOR_BAZOWY), MARKER_Y = 0.060 (patrz komentarz przy stalej).
-    const wspolneMat = {
-      transparent: true,
-      depthWrite: false,
-      side: THREE.DoubleSide,
-      polygonOffset: true,
-      polygonOffsetFactor: -5,
-      polygonOffsetUnits: -5,
-    };
-    this.highlightMesh = new THREE.Group();
-    this.highlightMesh.rotation.x = -Math.PI / 2;
-    this.highlightMesh.position.y = MARKER_Y;
-    this.highlightMesh.visible = false;
-
-    this.markerPierscien = new THREE.Mesh(
-      new THREE.RingGeometry(0.36, 0.49, 40),
-      new THREE.MeshBasicMaterial({ color: KOLOR_BAZOWY, opacity: 0.95, ...wspolneMat }),
-    );
-    this.highlightMesh.add(this.markerPierscien);
-
-    this.markerWypelnienie = new THREE.Mesh(
-      new THREE.CircleGeometry(0.36, 32),
-      new THREE.MeshBasicMaterial({ color: KOLOR_BAZOWY, opacity: 0.18, ...wspolneMat }),
-    );
-    this.highlightMesh.add(this.markerWypelnienie);
-
-    this.scene.add(this.highlightMesh);
-
-    this.plotki = [];
-    this._plotkiWTrakcieBudowy = false;
-    this._ostatniaSekundaDymka = null;
-
-    // Sprite z wylosowana litera - analogicznie do wordSprite w tlumaczenia.js.
-    this.letterMaterial = new THREE.SpriteMaterial({ color: 0xffffff, toneMapped: false });
-    this.letterSprite = new THREE.Sprite(this.letterMaterial);
-    this.letterSprite.scale.set(1.1, 1.1, 1.0);
-    this.letterSprite.position.y = KARTY_WYSOKOSC;
-    this.letterSprite.visible = false;
-    this.scene.add(this.letterSprite);
 
     // Rubryki nad glowami graczy - 2 sprite'y (jeden na gracza), tworzone
     // leniwie dopiero gdy bitwa faktycznie startuje i sprzatane natychmiast
-    // po jej koncu (patrz _zapewnijRubryki/_usunRubryki/_aktualizujRubryki
-    // nizej) - identyczny wzorzec cyklu zycia co plotki (this.plotki wyzej).
+    // po jej koncu - identyczny wzorzec cyklu zycia co plotki.
     this.rubrykaSprites = [];
-
-    // Tekstura kartki ze zwyciezca (patrz _pokazZwyciezce) - jednorazowa, NIE
-    // cache'owana (nick jest unikalny per bitwa) - patrz identyczny
-    // komentarz w flagbattle.js przy tym samym polu.
-    this._winnerTexture = null;
-
-    this.isHost = false;
-
-    // Bijatyka + chmura kurzu (patrz src/bojka.js) - identyczny wzorzec co w
-    // tlumaczenia.js/flagbattle.js: jedna wspoldzielona instancja na cale
-    // zycie tej minigry.
-    this.bojka = new Bojka(this.scene);
   }
 
-  setContext({ workerManager, kickChat, economy, isHost, boss, flagBattle, tlumaczenia, bitwaMarek }) {
-    this.workerManager = workerManager;
-    this.kickChat = kickChat;
-    this.economy = economy;
-    this.boss = boss || null;
-    // Referencje do minigier "Bitwa o flagi", "Tlumaczenia" i "Zgadnij marke" -
-    // WYLACZNIE do odczytu ich biezacych kafelkow (.tile), zeby losowanie
-    // pola panstw-miast nigdy nie trafilo w kafelek zajety przez
-    // ktorakolwiek z nich (patrz spawnBattleSquare nizej). Ten sam
-    // czworostronny kontrakt "tylko do odczytu cudzego .tile", jaki juz
-    // laczy flagBattle/tlumaczenia/bitwaMarek nawzajem (patrz ich setContext).
-    this.flagBattleRef = flagBattle || null;
-    this.tlumaczeniaRef = tlumaczenia || null;
-    this.bitwaMarekRef = bitwaMarek || null;
-    this.setHost(isHost);
+  _kolorPulsBitwy(s) {
+    // Puls pomaranczowy (miejsce zielonego pulsu flag/niebiesko-fioletowego
+    // tlumaczen).
+    return [1, 0.5 + s * 0.3, 0.05 + s * 0.2];
   }
 
-  /**
-   * Patrz obszerny komentarz przy tej samej metodzie w flagbattle.js -
-   * identyczne uzasadnienie: isHost moze sie zmienic PO starcie (logowanie/
-   * wylogowanie admina w locie), wiec main.js musi wolac to przy KAZDEJ
-   * zmianie trybu admina, nie tylko raz w setContext. Kazda faktyczna zmiana
-   * roli czysci lokalnie minigre do IDLE.
-   */
-  setHost(isHost) {
-    const nowy = !!isHost;
-    if (nowy === this.isHost) return;
-    this.isHost = nowy;
-    this.reset();
+  _kolorPulsReward(s) {
+    return [1, 0.7 + s * 0.3, 0.2];
   }
 
   /**
    * Minigra jest odblokowana dopiero po pokonaniu bossa tieru 3 (Dzordzo).
-   * Sprawdzane NA BIEZACO (economy.state.bossesDefeated.includes(3)) w
-   * KAZDYM ticku, a NIE zamrazane przy starcie - dokladnie ten sam blad
-   * ("warunek zamrozony przy starcie") juz raz wystapil w tym projekcie z
-   * isHost (patrz komentarz w flagbattle.js/setHost), wiec go tu nie powielamy.
+   * Sprawdzane NA BIEZACO w kazdym ticku.
    */
   _czyOdblokowana() {
     return !!(this.economy && Array.isArray(this.economy.state.bossesDefeated) && this.economy.state.bossesDefeated.includes(3));
   }
 
-  isTileLocked(x, z, typeIndex) {
-    if (this.boss && this.boss.isActive()) return false;
-    if (!this.tile) return false;
-    if (this.tile.x !== x || this.tile.z !== z) return false;
-
-    if (this.state === 'WAITING') return false;
-
-    if (this.state === 'BATTLE') {
-      return !this.players.some((p) => p.typeIndex === typeIndex);
-    }
-
-    return false;
+  _licznikPola() {
+    return this.economy.state.licznikLiter;
   }
 
-  isPlayerLocked(typeIndex) {
-    if (this.boss && this.boss.isActive()) return false;
-    if (this.state !== 'BATTLE') return false;
-    return this.players.some((p) => p.typeIndex === typeIndex);
-  }
-
-  tick(dt) {
-    if (this.state === 'BATTLE') {
-      // Puls pomaranczowy (miejsce zielonego pulsu flag/niebiesko-fioletowego
-      // tlumaczen) - funkcja Date.now(), nie losowania, wiec host i widz
-      // pulsuja identycznie.
-      const s = Math.sin(Date.now() * 0.005) * 0.5 + 0.5;
-      this.markerPierscien.material.color.setRGB(1, 0.5 + s * 0.3, 0.05 + s * 0.2);
-      this.markerPierscien.material.opacity = 0.95;
-      this.markerWypelnienie.material.opacity = 0.18;
-    } else if (this.state === 'REWARD') {
-      const s = Math.sin(Date.now() * 0.003) * 0.5 + 0.5;
-      this.markerPierscien.material.color.setRGB(1, 0.7 + s * 0.3, 0.2);
-      const frac = Math.max(0, Math.min(1, 1 - this.rewardTimer / 30));
-      this.markerPierscien.material.opacity = 0.95 * frac;
-      this.markerWypelnienie.material.opacity = 0.18 * frac;
-
-      // Dymek "+100 zl" TYLKO RAZ przy wejsciu w REWARD - patrz identyczny
-      // komentarz w flagbattle.js (kasa jest juz wyplacona jednorazowo w
-      // endBattle, dymek to jej jedyne, jednorazowe potwierdzenie).
-      if (this.winner && this._ostatniaSekundaDymka === null) {
-        this._ostatniaSekundaDymka = Math.floor(Date.now() / 1000);
-        try {
-          this.onRewardTick(this.winner);
-        } catch (err) {
-          console.warn('[panstwa-miasta] Blad w onRewardTick:', err);
-        }
+  _tickBitwy(dt) {
+    if (this.litera) {
+      this.rundaTimer += dt;
+      if (this.rundaTimer >= LIMIT_CZASU_RUNDY_S) {
+        this._czasRundyUplynal();
       }
     }
+  }
 
-    this._aktualizujPlotki(dt);
-    // Rubryki graczy - pozycja + tresc, patrz komentarz przy metodzie. Kosmetyka
-    // wyprowadzona ze zsynchronizowanego stanu (this.state/this.players),
-    // dziala tak samo u hosta i widza - dokladnie jak _aktualizujPlotki wyzej.
+  _aktualizujDodatkoweWizualia(_dt) {
     this._aktualizujRubryki();
-
-    // Bijatyka + chmura kurzu - identyczny wzorzec co w tlumaczenia.js/flagbattle.js.
-    this.bojka.update(dt, this.workerManager);
-
-    if (!this.isHost) return;
-
-    const bossAktywny = !!(this.boss && this.boss.isActive());
-    if (bossAktywny && this.state !== 'IDLE') {
-      this._przerwijPrzezBossa();
-      return;
-    }
-
-    const odblokowana = this._czyOdblokowana();
-
-    if (this.state === 'IDLE') {
-      if (bossAktywny || !odblokowana) {
-        this.timer = 0;
-      } else {
-        this.timer += dt;
-        if (this.timer >= 30) {
-          this.spawnBattleSquare();
-        }
-      }
-    } else if (this.state === 'WAITING') {
-      this.checkPlayersEntry();
-    } else if (this.state === 'BATTLE') {
-      if (this.litera) {
-        this.rundaTimer += dt;
-        if (this.rundaTimer >= LIMIT_CZASU_RUNDY_S) {
-          this._czasRundyUplynal();
-        }
-      }
-      this._sprawdzWyjscieAwaryjne();
-    } else if (this.state === 'REWARD') {
-      // Kasa (NAGRODA_WYGRANEJ) jest juz wyplacona jednorazowo w endBattle -
-      // ten blok REWARD trwa nadal 30 s, ale wylacznie dla wizualiow.
-      this.rewardTimer += dt;
-
-      if (this.rewardTimer >= 30) {
-        this.reset();
-      }
-    }
   }
 
-  /**
-   * Losuje wolne pole na siatce -3..3, z wykluczeniem: bankomatu (0,0) i pol
-   * zajetych PRZEZ POZOSTALE DWIE MINIGRY (flagBattleRef.tile,
-   * tlumaczeniaRef.tile) - wszystkie trzy minigry moga dzialac rownolegle,
-   * ale zadne dwie nie moga stanac na tym samym kafelku (patrz komentarz przy
-   * refs w setContext). Losowanie jest DETERMINISTYCZNE - z tego samego
-   * wspolnego strumienia co reszta gry (src/rng.js), kluczem
-   * `${seedGry}:panstwa-miasta-pole:${licznikLiter}:${battleId}`, wiec host i
-   * kazdy widz wyliczaja DOKLADNIE to samo pole z tych samych danych.
-   *
-   * Kolejne proby przy kolizji ciagna z TEGO SAMEGO strumienia, ograniczone
-   * do MAX_PROB_LOSOWANIA_POLA, z deterministycznym skanem siatki jako
-   * awaryjnym fallbackiem - identycznie jak w tlumaczenia.js/flagbattle.js.
-   */
-  static MAX_PROB_LOSOWANIA_POLA = 50;
-
-  spawnBattleSquare() {
-    this.battleId += 1;
-
-    const zajeteFlag = this.flagBattleRef && this.flagBattleRef.tile ? this.flagBattleRef.tile : null;
-    const zajeteTlumaczenia = this.tlumaczeniaRef && this.tlumaczeniaRef.tile ? this.tlumaczeniaRef.tile : null;
-    // Kolizja z minigra "Zgadnij marke" - ten sam wzorzec co zajeteFlag/zajeteTlumaczenia powyzej.
-    const zajeteMarki = this.bitwaMarekRef && this.bitwaMarekRef.tile ? this.bitwaMarekRef.tile : null;
-    const klucz = `${this.economy.state.seedGry}:panstwa-miasta-pole:${this.economy.state.licznikLiter}:${this.battleId}`;
-    const rng = strumien(klucz);
-
-    const half = arenaHalf(this.economy); // rozmiar CZYTANY W MOMENCIE UZYCIA - patrz arena.js
-    let rx = null;
-    let rz = null;
-    for (let proba = 0; proba < PanstwaMiastaManager.MAX_PROB_LOSOWANIA_POLA; proba++) {
-      const kx = losujInt(rng, -half, half);
-      const kz = losujInt(rng, -half, half);
-      if (kx === 0 && kz === 0) continue; // bankomat
-      if (zaBliskoMinigry(kx, kz, zajeteFlag)) continue; // pole flag
-      if (zaBliskoMinigry(kx, kz, zajeteTlumaczenia)) continue; // pole tlumaczen
-      if (zaBliskoMinigry(kx, kz, zajeteMarki)) continue; // pole marek
-      rx = kx;
-      rz = kz;
-      break;
-    }
-    if (rx === null) {
-      // Awaryjny deterministyczny skan siatki (praktycznie nieosiagalne) -
-      // ale petla wyzej MUSI miec koniec.
-      szukanie: for (let x = -half; x <= half; x++) {
-        for (let z = -half; z <= half; z++) {
-          if (x === 0 && z === 0) continue;
-          if (zaBliskoMinigry(x, z, zajeteFlag)) continue;
-          if (zaBliskoMinigry(x, z, zajeteTlumaczenia)) continue;
-          if (zaBliskoMinigry(x, z, zajeteMarki)) continue;
-          rx = x;
-          rz = z;
-          break szukanie;
-        }
-      }
-    }
-    if (rx === null) {
-      console.warn('[panstwa-miasta] Brak wolnego pola na siatce - pomijam spawn tej rundy.');
-      this.battleId -= 1;
-      return;
-    }
-
-    this.tile = { x: rx, z: rz };
-    this.state = 'WAITING';
-    this.timer = 0;
-
-    this.highlightMesh.position.x = rx;
-    this.highlightMesh.position.z = rz;
-    this.markerPierscien.material.color.setHex(KOLOR_BAZOWY);
-    this.markerWypelnienie.material.color.setHex(KOLOR_BAZOWY);
-    this.markerPierscien.material.opacity = 0.95;
-    this.markerWypelnienie.material.opacity = 0.18;
-    this.highlightMesh.visible = true;
-
-    this.letterSprite.position.set(rx, KARTY_WYSOKOSC, rz);
-    this.letterSprite.visible = false;
+  _usunDodatkoweWizualia() {
+    this._usunRubryki();
   }
 
-  checkPlayersEntry() {
-    if (!this.tile) return;
-
-    const workersOnTile = this.workerManager.entries.filter((e) => {
-      const tx = e.targetGridX !== undefined ? e.targetGridX : e.gridX;
-      const tz = e.targetGridZ !== undefined ? e.targetGridZ : e.gridZ;
-      return tx === this.tile.x && tz === this.tile.z && !e.isFainted;
-    });
-
-    if (workersOnTile.length >= 2) {
-      const p1 = workersOnTile[0];
-      const p2 = workersOnTile[1];
-
-      const p1User = this.kickChat.assignments.workerToUser[p1.typeIndex]?.username || 'Gracz 1';
-      const p2User = this.kickChat.assignments.workerToUser[p2.typeIndex]?.username || 'Gracz 2';
-
-      this.players = [
-        { typeIndex: p1.typeIndex, username: p1User, score: 0, rubryka: pustaRubryka() },
-        { typeIndex: p2.typeIndex, username: p2User, score: 0, rubryka: pustaRubryka() },
-      ];
-
-      this.state = 'BATTLE';
-      this.rundWygranych = 0;
-
-      const angleP1 = Math.atan2(p2.obj.position.x - p1.obj.position.x, p2.obj.position.z - p1.obj.position.z);
-      p1.targetRotY = angleP1;
-      p1.facingAngle = angleP1;
-      p2.targetRotY = angleP1 + Math.PI;
-      p2.facingAngle = angleP1 + Math.PI;
-
-      // Animacja bijatyki (ciosy + chmura kurzu) - patrz src/bojka.js.
-      this.bojka.start(this.tile, this.players, `${this.economy.state.seedGry}:panstwa-miasta-bojka:${this.battleId}`);
-
-      this.nextRound();
-      this.announce(
-        `Panstwa-Miasta! ${p1User} vs ${p2User}! Wpisujcie na czacie Panstwo/Imie/Owoc na litere. Kto pierwszy zdobedzie ${PUNKTY_DO_WYGRANEJ} rundy wygrywa!`,
-      );
-    }
+  _stworzGraczy(p1, p1User, p2, p2User) {
+    return [
+      { typeIndex: p1.typeIndex, username: p1User, score: 0, rubryka: pustaRubryka() },
+      { typeIndex: p2.typeIndex, username: p2User, score: 0, rubryka: pustaRubryka() },
+    ];
   }
 
-  /** Identyczne uzasadnienie co _sprawdzWyjscieAwaryjne w tlumaczenia.js/flagbattle.js. */
-  _sprawdzWyjscieAwaryjne() {
-    const zaginieni = this.players.filter((p) => {
-      const w = this.workerManager && this.workerManager.getWorkerType(p.typeIndex);
-      return !w || w.isFainted;
-    });
-    if (zaginieni.length === 0) return;
+  _resetLicznikRund() {
+    this.rundWygranych = 0;
+  }
 
-    const ocalali = this.players.filter((p) => !zaginieni.includes(p));
-    if (ocalali.length === 1) {
-      this.announce(`${zaginieni[0].username} traci awatara w trakcie bitwy - walkower dla ${ocalali[0].username}!`);
-      this.endBattle(ocalali[0]);
-    } else {
-      this.announce('Obaj walczacy tracą awatara w trakcie bitwy - bitwa panstw-miast anulowana.');
-      this.reset();
-    }
+  _komunikatStartBitwy(p1User, p2User) {
+    return `Panstwa-Miasta! ${p1User} vs ${p2User}! Wpisujcie na czacie Panstwo/Imie/Owoc na litere. Kto pierwszy zdobedzie ${PUNKTY_DO_WYGRANEJ} rundy wygrywa!`;
   }
 
   nextRound() {
     if (this.state !== 'BATTLE') return;
-    this.rundaTimer = 0; // nowa litera = nowy limit czasu (patrz LIMIT_CZASU_RUNDY_S w tick())
+    this.rundaTimer = 0; // nowa litera = nowy limit czasu (patrz LIMIT_CZASU_RUNDY_S)
 
     for (const p of this.players) p.rubryka = pustaRubryka();
     this.uzyteId = new Set();
 
     // Bez powtorek, dopoki nie zostanie wylosowana CALA pula liter w tej
     // ROZGRYWCE (nie tylko w tej bitwie) - patrz pozycjaBezPowtorek w rng.js
-    // i licznikLiter w economy.js (trwaly, zapisywany licznik). Wolane
-    // WYLACZNIE przez hosta (nextRound woluja tylko checkPlayersEntry i
-        // _czasRundyUplynal/onChatMessage, wszystkie za straza isHost), wiec
-    // tylko host inkrementuje.
+    // i licznikLiter w economy.js (trwaly, zapisywany licznik).
     this.litera = pozycjaBezPowtorek(
       this.economy.state.seedGry,
       'panstwa-miasta-litery',
@@ -603,48 +257,32 @@ export class PanstwaMiastaManager {
   }
 
   /**
-   * Ustawia teksture sprite'a litery - synchroniczne rysowanie canvasu
-   * (patrz zaladujTeksturaLitery), tak samo jak _stosujTeksturaSlowa w
-   * tlumaczenia.js - bez ochrony przed wyscigiem, bo nie ma tu nic asynchronicznego.
+   * Ustawia teksture sprite'a litery - synchroniczne rysowanie canvasu, tak
+   * samo jak _stosujTeksturaSlowa w tlumaczenia.js - bez ochrony przed
+   * wyscigiem, bo nie ma tu nic asynchronicznego.
    */
   _stosujTeksturaLitery(litera) {
     const texture = zaladujTeksturaLitery(litera, this.renderer);
-    this.letterMaterial.map = texture;
-    this.letterMaterial.needsUpdate = true;
-    this.letterSprite.visible = true;
+    this.mainMaterial.map = texture;
+    this.mainMaterial.needsUpdate = true;
+    this.mainSprite.visible = true;
+  }
+
+  _renderujTekstNaCanvasie(linie) {
+    return renderujTekstNaCanvasie(linie);
   }
 
   /**
-   * Wolane WYLACZNIE przez hosta z tick() (patrz LIMIT_CZASU_RUNDY_S), gdy
-   * zaden z dwoch graczy nie wypelnil rubryki w limicie czasu. Bez punktu dla
-   * kogokolwiek - od razu nowa litera (w odroznieniu od _czasFlagiUplynal we
-   * flagbattle.js nie ma tu opoznionego "odsloniecia" - spec tej minigry nie
-   * przewiduje pokazywania poprawnych odpowiedzi, bo kategorie maja wiele
-   * poprawnych odpowiedzi na litere, nie jedna).
+   * Wolane WYLACZNIE przez hosta z _tickBitwy (patrz LIMIT_CZASU_RUNDY_S),
+   * gdy zaden z dwoch graczy nie wypelnil rubryki w limicie czasu. Bez
+   * punktu dla kogokolwiek - od razu nowa litera (w odroznieniu od
+   * _czasFlagiUplynal we flagbattle.js nie ma tu opoznionego "odsloniecia" -
+   * spec tej minigry nie przewiduje pokazywania poprawnych odpowiedzi, bo
+   * kategorie maja wiele poprawnych odpowiedzi na litere, nie jedna).
    */
   _czasRundyUplynal() {
     this.announce('⏰ Czas minął! Nikt nie zdążył wypełnić rubryki - nowa litera!');
     this.nextRound();
-  }
-
-  /**
-   * Podmienia teksture GLOWNEJ kartki (letterSprite/letterMaterial) na kartke
-   * ze zwyciezca bitwy - kartka zostaje widoczna przez caly stan REWARD, w
-   * tym samym miejscu co karta litery w trakcie gry (patrz identyczne
-   * uzasadnienie w flagbattle.js/_pokazZwyciezce). Wolane zarowno przez
-   * hosta (endBattle) jak i widza (applySync, strażnik wejscia w REWARD).
-   */
-  _pokazZwyciezce(winnerPlayer) {
-    if (this._winnerTexture) this._winnerTexture.dispose();
-    this._winnerTexture = renderujTekstNaCanvasie(['🎉 WYGRYWA', winnerPlayer.username]);
-    this.letterMaterial.map = this._winnerTexture;
-    this.letterMaterial.needsUpdate = true;
-    this.letterSprite.visible = true;
-    // Kartka zwyciezcy tylko przez 2 s (nagroda 30 s trwa dalej bez niej).
-    const idBitwy = this.battleId;
-    setTimeout(() => {
-      if (this.battleId === idBitwy && this.state === 'REWARD') this.letterSprite.visible = false;
-    }, 2000);
   }
 
   onChatMessage(username, content) {
@@ -654,8 +292,6 @@ export class PanstwaMiastaManager {
     const player = this.players.find((p) => p.username.toLowerCase() === username.toLowerCase());
     if (!player) return; // widzowie spoza bitwy sa ignorowani
 
-    // usunTagiEmotek - ten sam wstepny krok co w tlumaczenia.js/flagbattle.js
-    // przed przekazaniem tekstu do logiki dopasowania z panstwa-miasta-dane.js.
     const dopasowania = dopasujOdpowiedzi(this.litera, usunTagiEmotek(content));
     if (!Array.isArray(dopasowania) || dopasowania.length === 0) return;
 
@@ -690,139 +326,8 @@ export class PanstwaMiastaManager {
     }
   }
 
-  endBattle(winnerPlayer) {
-    this.state = 'REWARD';
-    this.rewardTimer = 0;
-    this._lastRewardTime = 0;
-    this.winner = winnerPlayer;
-
-    // Nagroda: jednorazowa wyplata NAGRODA_WYGRANEJ w momencie zakonczenia
-    // bitwy (host - endBattle jest wolane wylacznie z kodu za straza isHost,
-    // ta sama bramka co dawne naliczanie 2 zl/s pilnuje jednorazowosci u widza).
-    this.economy.addMoney(NAGRODA_WYGRANEJ);
-    if (winnerPlayer.username) {
-      this.kickChat.recordEarned(winnerPlayer.username, NAGRODA_WYGRANEJ);
-    }
-
-    // Kartka litery zostaje na scenie, ale z podmieniona tekstura zwyciezcy
-    // (patrz _pokazZwyciezce) - zadanie: zwyciezca ma byc widoczny w tym
-    // samym miejscu co karta litery w trakcie gry, nie chowany.
-    this._pokazZwyciezce(winnerPlayer);
-    // Gwiazdka za wygrana minigre (ranking + plakietka) - patrz kick.js.
-    if (this.kickChat) this.kickChat.zapiszWygranaMinigry(winnerPlayer.username);
-
-    this.highlightMesh.visible = false;
-    this._usunPlotki();
-    this._usunRubryki();
-
-    this.bojka.stop(this.workerManager);
-
-    const loser = this.players.find((p) => p.typeIndex !== winnerPlayer.typeIndex);
-    if (loser) {
-      const lw = this.workerManager.getWorkerType(loser.typeIndex);
-      if (lw) {
-        const kickHalf = arenaHalf(this.economy);
-        let kickX = this.tile.x + (Math.random() > 0.5 ? 1 : -1);
-        let kickZ = this.tile.z + (Math.random() > 0.5 ? 1 : -1);
-        if (kickX < -kickHalf) kickX = -kickHalf + 1;
-        if (kickX > kickHalf) kickX = kickHalf - 1;
-        if (kickZ < -kickHalf) kickZ = -kickHalf + 1;
-        if (kickZ > kickHalf) kickZ = kickHalf - 1;
-        if (kickX === 0 && kickZ === 0) kickX = 1;
-
-        lw.gridX = kickX;
-        lw.gridZ = kickZ;
-        lw.targetGridX = kickX;
-        lw.targetGridZ = kickZ;
-        lw.obj.position.set(kickX, 0, kickZ);
-        lw.startPos.set(kickX, 0, kickZ);
-        lw.targetPos.set(kickX, 0, kickZ);
-      }
-    }
-
-    this.announce(`🎉 ${winnerPlayer.username} WYGRYWA BITWĘ PAŃSTWA-MIASTA! Dostaje ${NAGRODA_WYGRANEJ} zł!`);
-  }
-
-  /**
-   * Identyczne uzasadnienie co _przerwijPrzezBossa w tlumaczenia.js/flagbattle.js -
-   * nagroda (NAGRODA_WYGRANEJ) jest juz wyplacona w calosci w endBattle,
-   * przerwanie w trakcie REWARD sprzata tylko wizualia.
-   */
-  _przerwijPrzezBossa() {
-    if (this.state === 'REWARD' && this.winner) {
-      this.announce(`⚔️ Boss atakuje! Bitwa panstw-miast przerwana - koniec swietowania dla ${this.winner.username}.`);
-    } else if (this.state === 'BATTLE' || this.state === 'WAITING') {
-      this.announce('⚔️ Boss atakuje! Bitwa panstw-miast przerwana - pole zwolnione.');
-    }
-
-    this.bojka.stop(this.workerManager);
-
-    this.reset();
-  }
-
-  /** Identyczne uzasadnienie co _aktualizujPlotki w tlumaczenia.js/flagbattle.js. */
-  _aktualizujPlotki(dt) {
-    const chceWidoczne = (this.state === 'WAITING' || this.state === 'BATTLE') && !!this.tile;
-
-    if (chceWidoczne && !this.plotki.length && !this._plotkiWTrakcieBudowy) {
-      this._zapewnijPlotki();
-    }
-    if (!this.plotki.length) return;
-
-    const cel = chceWidoczne ? 0.55 : 0.001;
-    let wszystkieDoszly = true;
-    for (const obj of this.plotki) {
-      const nowa = obj.scale.y + (cel - obj.scale.y) * Math.min(1, dt * 6);
-      obj.scale.y = nowa;
-      if (Math.abs(nowa - cel) > 0.01) wszystkieDoszly = false;
-    }
-    if (!chceWidoczne && wszystkieDoszly) {
-      this._usunPlotki();
-    }
-  }
-
-  async _zapewnijPlotki() {
-    this._plotkiWTrakcieBudowy = true;
-    try {
-      const gltf = await pobierzSzablonPlotki();
-      if (!this.tile || (this.state !== 'WAITING' && this.state !== 'BATTLE')) return;
-
-      const boki = [
-        { dx: 0, dz: 0.5, rot: 0 },
-        { dx: 0, dz: -0.5, rot: Math.PI },
-        { dx: 0.5, dz: 0, rot: Math.PI / 2 },
-        { dx: -0.5, dz: 0, rot: -Math.PI / 2 },
-      ];
-      const nowePlotki = [];
-      for (const bok of boki) {
-        const obj = gltf.scene.clone(true);
-        obj.scale.set(0.95, 0.001, 0.95);
-        obj.rotation.y = bok.rot;
-        obj.userData.dx = bok.dx;
-        obj.userData.dz = bok.dz;
-        obj.position.set(this.tile.x + bok.dx, 0, this.tile.z + bok.dz);
-        obj.traverse((n) => {
-          if (n.isMesh) {
-            n.castShadow = true;
-            n.receiveShadow = true;
-          }
-        });
-        this.scene.add(obj);
-        nowePlotki.push(obj);
-      }
-      this.plotki = nowePlotki;
-    } catch (err) {
-      console.error('[panstwa-miasta] Blad ladowania plotek pola bitwy:', err);
-    } finally {
-      this._plotkiWTrakcieBudowy = false;
-    }
-  }
-
-  _usunPlotki() {
-    for (const obj of this.plotki) {
-      this.scene.remove(obj);
-    }
-    this.plotki = [];
+  _komunikatWygranej(winnerPlayer) {
+    return `🎉 ${winnerPlayer.username} WYGRYWA BITWĘ PAŃSTWA-MIASTA! Dostaje ${NAGRODA_WYGRANEJ} zł!`;
   }
 
   /**
@@ -831,8 +336,8 @@ export class PanstwaMiastaManager {
    * klatke z tick() (u hosta i u widza - kosmetyka wyprowadzona ze
    * zsynchronizowanego stanu this.state/this.players, dokladnie jak
    * _aktualizujPlotki). Tekstura przerysowywana TYLKO gdy zawartosc rubryki
-   * FAKTYCZNIE sie zmienila (porownanie z ostatnio narysowanym podpisem) - nie
-   * co klatke.
+   * FAKTYCZNIE sie zmienila (porownanie z ostatnio narysowanym podpisem) -
+   * nie co klatke.
    */
   _aktualizujRubryki() {
     const chce = this.state === 'BATTLE' && this.players.length === 2;
@@ -879,7 +384,7 @@ export class PanstwaMiastaManager {
     }
   }
 
-  /** Usuwa sprite'y rubryk ze sceny i zwalnia ich tekstury/materialy (patrz zadanie: "chowasz i sprzątasz"). */
+  /** Usuwa sprite'y rubryk ze sceny i zwalnia ich tekstury/materialy. */
   _usunRubryki() {
     for (const info of this.rubrykaSprites) {
       this.scene.remove(info.sprite);
@@ -927,99 +432,31 @@ export class PanstwaMiastaManager {
     return texture;
   }
 
-  reset() {
-    if (this.bojka) this.bojka.stop(this.workerManager);
-    this.state = 'IDLE';
-    this.timer = 0;
-    this.tile = null;
-    this.players = [];
+  _resetPolaWlasne() {
     this.litera = null;
     this._loadedLitera = null;
     this.uzyteId = new Set();
     this.rundWygranych = 0;
     this.rundaTimer = 0;
-    this.winner = null;
-    this.rewardTimer = 0;
-    this._lastRewardTime = 0;
-    this.highlightMesh.visible = false;
-    this.letterSprite.visible = false;
-    // Kartka ze zwyciezca znika razem z reszta planszy - tekstura jest
-    // jednorazowa (NIE z cacheTeksturLiter), wiec dispose'ujemy ja tutaj;
-    // sam letterMaterial zostaje (wspoldzielony, kolejna bitwa nadpisze .map).
-    if (this._winnerTexture) {
-      this._winnerTexture.dispose();
-      this._winnerTexture = null;
-    }
-    this.markerPierscien.material.opacity = 0.95;
-    this.markerWypelnienie.material.opacity = 0.18;
-    this._ostatniaSekundaDymka = null;
-    this._usunPlotki();
-    this._usunRubryki();
   }
 
-  getSyncState() {
+  _syncPolaWlasne() {
     return {
-      state: this.state,
-      tile: this.tile,
-      players: this.players,
       litera: this.litera,
       rundWygranych: this.rundWygranych,
-      winner: this.winner,
-      rewardTimer: this.rewardTimer,
-      battleId: this.battleId,
     };
   }
 
-  applySync(s) {
-    if (this.isHost) return;
-    if (!s || s.state === 'IDLE' || !s.tile) {
-      if (this.state !== 'IDLE') this.reset();
-      return;
-    }
-
-    const prevState = this.state;
-    const prevPlayers = this.players;
-    const prevRundWygranych = this.rundWygranych;
-    this.state = s.state;
-    this.tile = s.tile;
-    this.players = Array.isArray(s.players) ? s.players : [];
-    this.rundWygranych = s.rundWygranych || 0;
-    this.winner = s.winner || null;
-    this.rewardTimer = s.rewardTimer || 0;
-    this.battleId = s.battleId || 0;
+  _zastosujPolaWlasne(s) {
     this.litera = s.litera || null;
+    this.rundWygranych = s.rundWygranych || 0;
+  }
 
-    if (this.state === 'BATTLE' && prevState !== 'BATTLE') {
-      this.bojka.start(this.tile, this.players, `${this.economy.state.seedGry}:panstwa-miasta-bojka:${this.battleId}`);
-    } else if (prevState === 'BATTLE' && this.state !== 'BATTLE') {
-      this.bojka.stop(this.workerManager);
-    }
+  _licznikRundy() {
+    return this.rundWygranych;
+  }
 
-    if (this.state === 'BATTLE' && this.rundWygranych > prevRundWygranych) {
-      const zwyciezcaRundy = this.players.find((p) => {
-        const stary = prevPlayers.find((op) => op.typeIndex === p.typeIndex);
-        return stary ? p.score > stary.score : p.score > 0;
-      });
-      if (zwyciezcaRundy) {
-        const w = this.workerManager && this.workerManager.getWorkerType(zwyciezcaRundy.typeIndex);
-        if (w) this.workerManager.triggerAttack(w, klipAtakuDlaRundy(this.rundWygranych));
-      }
-    }
-
-    this.highlightMesh.position.x = this.tile.x;
-    this.highlightMesh.position.z = this.tile.z;
-    this.letterSprite.position.set(this.tile.x, KARTY_WYSOKOSC, this.tile.z);
-
-    if (this.state === 'REWARD') {
-      this.highlightMesh.visible = false;
-      this._usunPlotki();
-    } else {
-      this.highlightMesh.visible = true;
-    }
-
-    // Kartka ze zwyciezca (patrz _pokazZwyciezce) - pokazujemy ja WYLACZNIE w
-    // momencie WEJSCIA w REWARD (prevState !== 'REWARD'), nie przy kazdym
-    // snapshocie - identyczny strażnik co w flagbattle.js/applySync.
+  _zastosujWizualiaRundy(prevState) {
     if (this.state === 'REWARD') {
       if (prevState !== 'REWARD' && this.winner) {
         this._pokazZwyciezce(this.winner);
@@ -1030,33 +467,11 @@ export class PanstwaMiastaManager {
         this._stosujTeksturaLitery(this.litera);
       }
     } else {
-      // WAITING (jeszcze bez litery). REWARD jest juz obsluzony osobno wyzej
-      // (kartka zwyciezcy zostaje widoczna, nie chowana tutaj).
-      this.letterSprite.visible = false;
+      // WAITING (jeszcze bez litery). REWARD jest juz obsluzony osobno wyzej.
+      this.mainSprite.visible = false;
     }
     // Rubryki: tworzone/sprzatane/przerysowywane w tick() -> _aktualizujRubryki(),
-    // ktora czyta this.state/this.players juz zaktualizowane wyzej - nie trzeba
-    // tu nic dodatkowo robic (ten sam wzorzec co plotki, patrz _aktualizujPlotki).
+    // ktora czyta this.state/this.players juz zaktualizowane wczesniej w
+    // applySync - nie trzeba tu nic dodatkowo robic (ten sam wzorzec co plotki).
   }
-
-  announce(text) {
-    const messagesEl = document.getElementById('kick-messages');
-    if (messagesEl) {
-      const div = document.createElement('div');
-      div.className = 'chat-message';
-      div.innerHTML = `<strong style="color: #ff9f1c">[Panstwa-Miasta]</strong> <span>${text}</span>`;
-      messagesEl.appendChild(div);
-      messagesEl.scrollTop = messagesEl.scrollHeight;
-    }
-    try {
-      this.onAnnounce(text);
-    } catch (err) {
-      console.warn('[panstwa-miasta] Blad w onAnnounce:', err);
-    }
-  }
-}
-
-/** Pusta rubryka: jeden klucz per kategoria z panstwa-miasta-dane.js, wartosc null = jeszcze nie wypelnione. */
-function pustaRubryka() {
-  return Object.fromEntries(KATEGORIE.map((k) => [k.id, null]));
 }
