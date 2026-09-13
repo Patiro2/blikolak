@@ -29,8 +29,8 @@ function buildDaySkyDome() {
   const mat = new THREE.MeshBasicMaterial({ side: THREE.BackSide, vertexColors: true, fog: false, toneMapped: false });
   const pos = geo.attributes.position;
   const colors = new Float32Array(pos.count * 3);
-  const colorTop = new THREE.Color(0x4c8fd9); // nasycony blekit zenitu
-  const colorHorizon = new THREE.Color(0xdcecf7); // jasny, lekko cieply horyzont (zamglone popoludnie)
+  const colorTop = new THREE.Color(0x3f6f9e); // przyciemniony blekit zenitu (toneMapped:false - ekspozycja go nie przygasza)
+  const colorHorizon = new THREE.Color(0xaec4d6); // przygaszony horyzont (lekko pochmurne popoludnie, nie biel)
   const tmp = new THREE.Color();
   for (let i = 0; i < pos.count; i++) {
     const t = THREE.MathUtils.clamp((pos.getY(i) / 90 + 0.12) / 0.55, 0, 1);
@@ -77,13 +77,13 @@ export function createScene(canvas) {
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   // Obnizone z 1.05 - przy pelnym rigu (slonce+niebo+IBL) 1.05 przepalalo
   // arene/trawe/bankomat; 0.85 to nadal jasny dzien, bez przepaleń.
-  renderer.toneMappingExposure = 0.85;
+  renderer.toneMappingExposure = 0.7; // dalej obnizone z 0.85 - wlasciciel: nadal za jasno
 
   const scene = new THREE.Scene();
   // Plaski fallback w kolorze horyzontu - widoczny tylko, gdyby kopula nieba
   // (buildDaySkyDome, dodawana ponizej) z jakiegos powodu nie pokryla calego
   // kadru (np. pierwsza klatka przed jej dodaniem do sceny).
-  scene.background = new THREE.Color(0xdcecf7);
+  scene.background = new THREE.Color(0xaec4d6); // zgodne z horyzontem kopuly ponizej - bez szwu
   scene.add(buildDaySkyDome());
 
   // Environment map (IBL) - generowana RAZ, przy starcie (PMREMGenerator,
@@ -103,7 +103,7 @@ export function createScene(canvas) {
   pmremGenerator.dispose();
   // RoomEnvironment to jasne studio - w pelnej sile (1.0) dokladalo sie do
   // slonca/hemi i przepalalo powierzchnie; przycięte jako subtelny odblask.
-  scene.environmentIntensity = 0.35;
+  scene.environmentIntensity = 0.18; // dalej obnizone z 0.35
 
   // Zwiększenie near z 0.05 do 0.1 podwaja precyzję bufora głębokości (eliminacja Z-fightingu kamery)
   const camera = new THREE.PerspectiveCamera(BASE_FOV, window.innerWidth / window.innerHeight, 0.1, 100);
@@ -115,7 +115,7 @@ export function createScene(canvas) {
   // Intensywnosc 0.65 (podniesiona z nocnego 0.22) - w dzien niebo samo w
   // sobie jest silnym, rozproszonym zrodlem swiatla wypelniajacego (nie tylko
   // kontrastowym akcentem jak noca).
-  const hemi = new THREE.HemisphereLight(0xbfe0ff, 0x8a7256, 0.5); // obnizone z 0.65 - dublowalo sie z IBL
+  const hemi = new THREE.HemisphereLight(0xbfe0ff, 0x8a7256, 0.35); // dalej obnizone z 0.5
   scene.add(hemi);
 
   // 2. Slonce (Key Light) - cieply, biały kierunkowy key z twardymi cieniami
@@ -133,7 +133,7 @@ export function createScene(canvas) {
   // ono bylo glowne, cien dirWide przyciemnialby otoczenie areny o ledwie
   // ~16% i rekwizyty poza arena wygladalyby jak bez cienia (sprawdzone
   // zrzutem). Tutaj tylko doostrza cienie na samej arenie.
-  const dir = new THREE.DirectionalLight(0xfff2d9, 0.8);
+  const dir = new THREE.DirectionalLight(0xfff2d9, 0.65); // lekko w dol z 0.8 - cien areny zostaje wyrazny
   dir.position.set(5, 8, 3);
   dir.castShadow = true;
   dir.shadow.mapSize.set(4096, 4096);
@@ -183,7 +183,7 @@ export function createScene(canvas) {
   // areny. To swiatlo niesie wiekszosc jasnosci slonca (2.3 z 3.1), zeby
   // cienie rekwizytow poza arena byly rownie wyrazne jak na arenie; mapa
   // 4096, bo przy 2048 na +-13.5 cienie drobnych kepek sie rozmywaly.
-  const dirWide = new THREE.DirectionalLight(0xfff2d9, 1.6); // obnizone z 2.3 - glowne zrodlo przepalen
+  const dirWide = new THREE.DirectionalLight(0xfff2d9, 1.2); // dalej obnizone z 1.6
   dirWide.position.set(15, 24, 9); // ten sam kierunek co dir (x3), dalej od sceny
   dirWide.castShadow = true;
   dirWide.shadow.mapSize.set(4096, 4096);
@@ -210,7 +210,7 @@ export function createScene(canvas) {
   // dzien slonce+niebo juz same w sobie dobrze oswietlaja automat, wiec to
   // zostaje jako SUBTELNY, cieply akcent (jak wymaga zadanie), nie jako
   // dominujace zrodlo swiatla - stad duzo nizsza intensywnosc.
-  const spot = new THREE.SpotLight(0xffd9a0, 0.9, 6.0, Math.PI / 5, 0.5, 1.25); // obnizone z 1.3 - przepalal bankomat
+  const spot = new THREE.SpotLight(0xffd9a0, 0.6, 6.0, Math.PI / 5, 0.5, 1.25); // dalej obnizone z 0.9
   spot.position.set(0, 4.2, 1.2);
   spot.target.position.copy(LOOK_TARGET);
   scene.add(spot);

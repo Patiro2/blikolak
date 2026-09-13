@@ -462,14 +462,10 @@ export class CityBackground {
   }
 
   build(scene, renderer) {
-    // Mgla dopasowana do koloru horyzontu dziennej kopuly nieba (buildDaySkyDome
-    // w scene.js, 0xdcecf7) - odlegle budynki rozmywaja sie plynnie w jasna,
-    // zamglona poswiata popoludnia zamiast urywac sie ostra krawedzia albo
-    // (gdyby zostal stary, nocny granat 0x0e1118) tworzyc wyrazny, ciemny pas
-    // na tle jasnego nieba. near/far NIE ruszane wzgledem nocnej wersji -
-    // dotycza tylko geometrii kamery/areny (patrz komentarze przy FOG_NEAR/
-    // FOG_FAR powyzej), nie nastroju/pory dnia.
-    scene.fog = new THREE.Fog(0xdcecf7, FOG_NEAR, FOG_FAR);
+    // Kolor mgly = kolor horyzontu kopuly nieba (buildDaySkyDome w scene.js,
+    // teraz przygaszony 0xaec4d6, nie 0xdcecf7) - musza sie zgadzac, inaczej
+    // widac szew na styku odleglych budynkow i nieba.
+    scene.fog = new THREE.Fog(0xaec4d6, FOG_NEAR, FOG_FAR);
 
     this._buildPlaza(scene, renderer);
     this._buildStreetGround(scene);
