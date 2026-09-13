@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { COUNTRIES, COUNTRY_CODES, tokenizujOdpowiedz, INDEKS_WARIANTOW } from './countries.js';
+import { COUNTRIES, COUNTRY_CODES, tokenizujOdpowiedz, INDEKS_WARIANTOW, FLAGI_BLIZNIACZE } from './countries.js';
 import { usunTagiEmotek } from './kick.js';
 import { loadForest } from './assets.js';
 import { strumien, losujInt, tasuj } from './rng.js';
@@ -768,10 +768,19 @@ export class FlagBattleManager {
     const tokeny = tokenizujOdpowiedz(usunTagiEmotek(content));
     const dopasowanyKod = najlepszyKodDlaOdpowiedzi(tokeny);
 
-    if (dopasowanyKod && dopasowanyKod === this.currentFlag) {
+    // Flagi z FLAGI_BLIZNIACZE (patrz countries.js) sa nie do odroznienia na
+    // rasteryzowanym sprite - odpowiedz na "bliznika" tez sie liczy.
+    const grupaBliznieakow = FLAGI_BLIZNIACZE.find((grupa) => grupa.includes(this.currentFlag));
+    const trafienie = dopasowanyKod === this.currentFlag
+      || (dopasowanyKod && grupaBliznieakow && grupaBliznieakow.includes(dopasowanyKod));
+
+    if (trafienie) {
       player.score += 1;
       this.flagsGuessed += 1;
       const properName = COUNTRIES[this.currentFlag];
+      const dopisekBliznika = dopasowanyKod !== this.currentFlag
+        ? ` (albo ${COUNTRIES[dopasowanyKod]} - flagi wygladaja identycznie)`
+        : '';
       this.currentFlag = null; // blokada by nie nabić 2x na 1 wiadomości
 
       // Animacja ciosu za poprawna odpowiedz - klip wybrany deterministycznie
@@ -783,7 +792,7 @@ export class FlagBattleManager {
         this.workerManager.triggerAttack(workerEntry, klipAtakuDlaRundy(this.flagsGuessed));
       }
 
-      this.announce(`${username} zgaduje poprawnie: ${properName}! (Punkty: ${player.score})`);
+      this.announce(`${username} zgaduje poprawnie: ${properName}!${dopisekBliznika} (Punkty: ${player.score})`);
 
       if (player.score >= 3) {
         this.endBattle(player);

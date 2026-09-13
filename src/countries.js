@@ -224,6 +224,28 @@ export const COUNTRIES = {
 export const COUNTRY_CODES = Object.keys(COUNTRIES);
 
 /**
+ * Grupy flag praktycznie nie do odroznienia na rasteryzowanym sprite 512x384
+ * (patrz ROZMIAR_TEKSTURY_FLAGI_* w flagbattle.js) - odpowiedz podajaca
+ * NAZWE INNEGO kraju z tej samej grupy tez sie liczy (patrz onChatMessage).
+ * Kazda para zweryfikowana porownaniem hex kolorow i geometrii w SVG
+ * (assets/flags-vector/<KOD>.svg):
+ * - RO/TD: identyczny uklad (3 pionowe pasy) i niemal identyczne odcienie
+ *   (granat 00319c/002664, zolty ffde00/fecb00, czerwien de2110/c60c30).
+ * - MC/ID: identyczny uklad (2 poziome pasy 50/50) i niemal identyczna
+ *   czerwien (f31830/e70011) na bieli.
+ * Odrzucone kandydatury (realnie odrozniane): NL/LU (granat 21468b vs
+ * blekit 00a1de - wyraznie inny odcien), AD/MD (inne herby, inny uklad
+ * kolorow), SN/ML i GN/ML (te same kolory, ale w LUSTRZANYM ukladzie -
+ * ktory kolor jest po ktorej stronie to ostra, widoczna roznica, nie
+ * subtelny odcien), AU/NZ (inna liczba i uklad gwiazd), IE/CI (lustrzany
+ * uklad jak SN/ML).
+ */
+export const FLAGI_BLIZNIACZE = [
+  ['RO', 'TD'],
+  ['MC', 'ID'],
+];
+
+/**
  * Dodatkowe akceptowane warianty odpowiedzi na czacie, poza pełną nazwą z
  * COUNTRIES (ta zawsze jest akceptowana automatycznie - patrz getWarianty
  * niżej). Skróty, nazwy potoczne i angielskie odpowiedniki dla popularnych
