@@ -1,7 +1,7 @@
 // Nakladka "game over" - pokazywana WYLACZNIE gdy pula gracza spadnie do
-// zera (lub ponizej) po przegranej rundzie blackjacka z bossem 3 (Kristofer,
+// zera (lub ponizej) po przegranej rundzie blackjacka z bossem 3 (Dzordzo,
 // patrz src/boss-blackjack.js). Ekran plynnie ciemnieje (~1.5 s), potem
-// POWOLI (~3 s) pojawia sie duzy czerwony napis "game over kristofer",
+// POWOLI (~3 s) pojawia sie duzy czerwony napis "game over dżordżo",
 // trzyma sie kilka sekund, na koniec nakladka zanika. Zwraca Promise
 // rozwiazywane po pelnym ściemnieniu + napisie - to jest moment, w ktorym
 // wolajacy (main.js) ma wykonac reset gry (patrz onGameOver w main.js).
@@ -20,7 +20,7 @@ function zapewnijDOM() {
   overlayEl.id = 'game-over-overlay';
   textEl = document.createElement('div');
   textEl.id = 'game-over-tekst';
-  textEl.textContent = 'game over kristofer';
+  textEl.textContent = 'game over dżordżo';
   overlayEl.appendChild(textEl);
   document.body.appendChild(overlayEl);
 }

@@ -32,7 +32,7 @@ export const BOSS_DEFS = [
   },
   {
     tier: 3,
-    name: 'Kristofer',
+    name: 'Dżordżo',
     subtitle: 'KRÓL BLACKJACKA',
     hp: 100,
     mechanika: 'blackjack',
@@ -223,7 +223,7 @@ export class BossManager {
     this.orcTemplate = null; // character-orc.glb (kenney_mini-dungeon) - cialo Kowala_88
     this.orcAnimations = [];
     this.kowal = null; // instancja BossKowal - tylko gdy def.mechanika === 'kowal' (patrz src/boss-kowal.js)
-    this.blackjackTemplate = null; // character-male-b.glb (kenney_mini-arcade) - cialo Kristofera
+    this.blackjackTemplate = null; // character-male-b.glb (kenney_mini-arcade) - cialo Dzordzo
     this.blackjackAnimations = [];
     this.blackjack = null; // instancja BossBlackjack - tylko gdy def.mechanika === 'blackjack' (patrz src/boss-blackjack.js)
 
@@ -488,7 +488,7 @@ export class BossManager {
     document.body.appendChild(dymek);
     this.dymekEl = dymek;
 
-    // Panel HUD Kristofera (tier 3, blackjack) - pozycja STALA (nie
+    // Panel HUD Dzordzo (tier 3, blackjack) - pozycja STALA (nie
     // rzutowana z 3D, patrz style.css .boss-bj-panel), bo dotyczy calej
     // planszy (obie polfoki DOBIERZ/PASUJ), nie tylko samego bossa.
     const bjPanel = document.createElement('div');
@@ -665,7 +665,7 @@ export class BossManager {
       }
     } else if (def.mechanika === 'blackjack') {
       if (!this.blackjackTemplate) {
-        this._log('bad', 'Nie moge wystartowac - model Kristofera jeszcze sie nie zaladowal');
+        this._log('bad', 'Nie moge wystartowac - model Dzordzo jeszcze sie nie zaladowal');
         return false;
       }
     } else if (!this.chairTemplate || !this.charTemplate) {
@@ -839,7 +839,7 @@ export class BossManager {
   }
 
   /**
-   * Wejscie Kristofera (tier 3, blackjack) - ta sama karta tytulowa/letterbox
+   * Wejscie Dzordzo (tier 3, blackjack) - ta sama karta tytulowa/letterbox
    * co Kowal, BEZ blokady kamery (patrz zadanie wlasciciela: "Pokaż tę samą
    * kartę tytułową/letterbox co przy Kowalu, bez blokady kamery"). Faktyczny
    * marsz z tylu sceny prowadzi BossBlackjack.update() (patrz beginEntrance).
@@ -873,7 +873,7 @@ export class BossManager {
     this.titleCardEl.classList.remove('show');
 
     this.state = 'FIGHT';
-    this._log('info', 'Kristofer dotarl na arene - start walki blackjacka');
+    this._log('info', 'Dzordzo dotarl na arene - start walki blackjacka');
   }
 
   /** Czy boss aktualnie ma pelna kontrole nad kamera (main.js pomija wtedy controls.update()). */
@@ -1129,7 +1129,7 @@ export class BossManager {
       return;
     }
 
-    // Kristofer (tier 3, blackjack): decyzje graczy ida przez POZYCJE
+    // Dzordzo (tier 3, blackjack): decyzje graczy ida przez POZYCJE
     // awatarow na siatce (patrz BossBlackjack._countBySide), nie przez czat -
     // czat nie ma tu zadnej roli, wiec po prostu nic nie robimy.
     if (this.def && this.def.mechanika === 'blackjack') {
@@ -1709,14 +1709,14 @@ export class BossManager {
     }
 
     if (this.def && this.def.mechanika === 'blackjack') {
-      // Kristofer stoi (nie siedzi w wozku) - standardowy klip "die" pasuje
+      // Dzordzo stoi (nie siedzi w wozku) - standardowy klip "die" pasuje
       // tu wprost, tak samo jak u Kowala.
       if (this.blackjack) this.blackjack.playAction('die', { hard: true, once: true });
       this._victoryT = 0;
       if (this.bjPanelEl) this.bjPanelEl.classList.remove('show');
       showBossNotification(
         'boss',
-        '🏆 KRISTOFER POKONANY!',
+        '🏆 DŻORDŻO POKONANY!',
         'Czat wygrał 3 rozdania blackjacka! Bankomat wraca na nowym tierze.',
       );
       return;
@@ -1986,7 +1986,7 @@ export class BossManager {
       }
     } else if (def.mechanika === 'blackjack') {
       if (!this.blackjackTemplate) {
-        this._log('bad', 'Nie moge dolaczyc do walki (sync) - model Kristofera jeszcze sie nie zaladowal');
+        this._log('bad', 'Nie moge dolaczyc do walki (sync) - model Dzordzo jeszcze sie nie zaladowal');
         return false;
       }
     } else if (!this.chairTemplate || !this.charTemplate) {

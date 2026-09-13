@@ -202,7 +202,7 @@ export const SOUND_MAP = {
     maxJednoczesnie: 2,
     wysokoscVar: 0.02,
   },
-  // Boss 3 (Kristofer, blackjack) - patrz src/boss-blackjack.js
+  // Boss 3 (Dzordzo, blackjack) - patrz src/boss-blackjack.js
   'bj-rozdanie': {
     pliki: ['card-shuffle.ogg', 'cards-pack-open-1.ogg'],
     tryb: 'wszystkie',

@@ -4,7 +4,7 @@ import { strumien, tasuj } from './rng.js';
 import { showBossNotification } from './ui.js';
 import { audio } from './audio.js';
 
-// Mechanika trzeciego bossa (tier 3 bankomatu) - Kristofer, "KROL BLACKJACKA".
+// Mechanika trzeciego bossa (tier 3 bankomatu) - Dzordzo, "KROL BLACKJACKA".
 // Trzymana w OSOBNYM pliku (patrz CLAUDE.md w bankomat-clicker/ i wzorzec
 // src/boss-kowal.js), zeby nie dotykac zweryfikowanej logiki bossow 1 i 2.
 // BossManager tworzy instancje tej klasy w start() (gdy def.mechanika ===
@@ -61,21 +61,49 @@ const KROKI_ROZDANIA = [0.6, 1.2, 1.9, 2.5];
 const KONIEC_ROZDANIA = 3.0;
 
 // Wysokosc pracownika w jednostkach swiata - ta sama zmierzona wartosc co w
-// boss-kowal.js (character-employee.glb). Kristofer ma byc DOKLADNIE 2x
+// boss-kowal.js (character-employee.glb). Dzordzo ma byc DOKLADNIE 2x
 // wyzszy - patrz build() nizej.
 const WORKER_HEIGHT = 0.7233532667160034;
 
-// Wejscie na arene: boss idzie z tylu sceny do neutralnej kolumny x=0.
-const SPAWN_POS = new THREE.Vector3(0, 0, -4.5);
+// Pozycja bossa na arenie (neutralna kolumna x=0). Boss sie juz NIE
+// przemieszcza (patrz beginEntrance) - CZAS_WEJSCIA zostaje tylko jako czas
+// trwania fazy wejscia, zeby nie skrocic karty tytulowej/letterboxu.
 const FINAL_POS = new THREE.Vector3(0, 0, -2.0);
-const CZAS_WEJSCIA = 3.2; // sekund marszu
+const CZAS_WEJSCIA = 3.2; // sekund (timing karty tytulowej/letterboxu)
 
 // Pozycje 3D kart - reka bossa nad/przy bossem, reka graczy blisko kamery
-// przed bankomatem (bankomat stoi w (0,0,0)).
-const BOSS_KARTY_ORIGIN = new THREE.Vector3(-0.55, 1.85, -2.0);
-const GRACZE_KARTY_ORIGIN = new THREE.Vector3(-0.55, 0.55, 1.35);
-const ODSTEP_KART = 0.32;
-const ROZMIAR_KARTY = [0.26, 0.37];
+// przed bankomatem (bankomat stoi w (0,0,0)). Powiekszone wzgledem
+// pierwotnych [0.26, 0.37]/0.32 (patrz zadanie wlasciciela: "prawie nie
+// widac, co na kartach jest") - originy X przeliczone tak, zeby reka do 6
+// kart (origin.x + 2.5*odstep, czyli srodek miedzy 1. a 6. karta) wypadala
+// wysrodkowana (x=0) pod domyslna kamera gry (zmierzone w konsoli przez
+// rzutowanie NDC rogow reki).
+//
+// UWAGA - reka graczy i reka bossa NIE dostaly tej samej skali:
+// - Gracze (blisko kamery, przed bankomatem): pelne x2.2 - zmierzone w
+//   konsoli (rzutowanie NDC), ze reka do 6 kart miesci sie wygodnie w kadrze
+//   (x∈[-0.81,0.81] z [-1,1]) i NIE zachodzi na bankomat (bankomat: Box3
+//   x∈[-0.25,0.25], y∈[0,0.75], z∈[-0.225,0.225]; reka graczy zostaje
+//   PRZED nim, blizej kamery, i pod nim na ekranie - zmierzony odstep w NDC).
+// - Boss (nad glowa, daleko od kamery): x2.2 fizycznie NIE MIESCI SIE w
+//   pionie miedzy czubkiem glowy bossa (zmierzony Box3 head-mesh przy
+//   FINAL_POS: szczyt ~y=1.447) a stalym panelem HUD .boss-bj-panel
+//   (position:fixed, top:14px, ~79px wysokosci - w NDC to ok. 0.74 przy
+//   typowym oknie 1280x720, PONIZEJ tego cala reka musi sie zmiescic).
+//   Zmierzone empirycznie (rzutowanie NDC dla siatki skala x originY): przy
+//   pelnym x2.2 gorna krawedz reki wchodzi POD panel HUD. Maksymalna skala,
+//   ktora bezpiecznie miesci reke MIEDZY czubkiem glowy a panelem (z
+//   zapasem), to ok. x1.4 - stad ROZMIAR/ODSTEP bossa sa mniejsze niz
+//   graczy (patrz zadanie: twarz bossa i panel HUD maja pierwszenstwo nad
+//   "2-2.5x" gdy sie wykluczaja). To dalej wyrazna poprawa wzgledem
+//   pierwotnego rozmiaru (x1.4 zamiast x1), przy zachowanym braku
+//   zaslaniania twarzy/panelu.
+const ODSTEP_KART = 0.704; // gracze (x2.2)
+const ODSTEP_KART_BOSS = 0.448; // boss (x1.4)
+const BOSS_KARTY_ORIGIN = new THREE.Vector3(-2.5 * ODSTEP_KART_BOSS, 1.6, -2.0);
+const GRACZE_KARTY_ORIGIN = new THREE.Vector3(-2.5 * ODSTEP_KART, 0.55, 1.35);
+const ROZMIAR_KARTY = [0.572, 0.814]; // gracze (x2.2)
+const ROZMIAR_KARTY_BOSS = [0.364, 0.518]; // boss (x1.4)
 
 // Znaczniki polfok DOBIERZ/PASUJ na siatce areny (y=0.06 - patrz zadanie,
 // poziomy 0.025/0.035/0.042/0.048/0.052/0.056 sa juz zajete przez inne fx).
@@ -91,15 +119,24 @@ function kluczTalii(seedGry, idWalki, numerRozdania) {
 const cacheTeksturKart = new Map();
 const SZER_KARTY_PX = 220;
 const WYS_KARTY_PX = 310;
+// Karty 3D wyszly x2.2 wieksze (patrz ROZMIAR_KARTY) - bez podniesienia
+// rozdzielczosci canvasu tekst na nich bylby rozmyty (patrz zadanie:
+// "Teksturę kart podnieś, jeśli po powiększeniu jest rozmyta"). Zamiast
+// przeliczac wszystkie liczby w rysowaniu nizej (fonty, promien rogow,
+// grubosci linii...), canvas jest fizycznie PX_SKALA razy wiekszy i cala
+// zawartosc rysowana jest przez ctx.scale(PX_SKALA, PX_SKALA) w tych samych,
+// niezmienionych jednostkach logicznych (SZER_KARTY_PX x WYS_KARTY_PX).
+const PX_SKALA = 2.2;
 
 /** Rysuje jedna karte (albo rewers dla kod==='BACK') na canvasie i cache'uje. */
 function zaladujTeksturaKarty(kod, renderer) {
   if (cacheTeksturKart.has(kod)) return cacheTeksturKart.get(kod);
 
   const canvas = document.createElement('canvas');
-  canvas.width = SZER_KARTY_PX;
-  canvas.height = WYS_KARTY_PX;
+  canvas.width = SZER_KARTY_PX * PX_SKALA;
+  canvas.height = WYS_KARTY_PX * PX_SKALA;
   const ctx = canvas.getContext('2d');
+  ctx.scale(PX_SKALA, PX_SKALA);
   const r = 22;
 
   function zaokraglonyProstokat(x, y, w, h, rad) {
@@ -274,6 +311,24 @@ function wypelnijSpojnyObszar(data, visited, w, h, sx, sy, nowyKolor) {
 }
 
 /**
+ * Zbiera punkty UV WSZYSTKICH wierzcholkow head-mesh. W odroznieniu od
+ * body-mesh (gdzie trzeba oddzielic tors od nog), head-mesh probkuje atlas
+ * WYLACZNIE w dwoch kategoriach kolorow - skora i oczy (zmierzone empirycznie
+ * w konsoli: histogram kolorow calego head-mesh to tylko odcienie SKIN_KOLORY
+ * plus garstka chlodnych (niebieskoszarych) odcieni oka) - wiec nie trzeba tu
+ * zadnego filtra pozycyjnego jak PROG_Y_NOGI przy torsie.
+ */
+function zbierzUvPunktyGlowy(headMesh) {
+  const geo = headMesh.geometry;
+  const uvAttr = geo.attributes.uv;
+  const punkty = [];
+  for (let i = 0; i < uvAttr.count; i++) {
+    punkty.push({ u: uvAttr.getX(i), v: uvAttr.getY(i) });
+  }
+  return punkty;
+}
+
+/**
  * Zbiera punkty UV wierzcholkow body-mesh nalezacych do TORSU/RAK, z
  * pominieciem NOG. Geometria SkinnedMesh trzyma pozycje w POZIE BIND (T-pose),
  * gdzie nogi i tors+ramiona wychodza jako dwa wyraznie oddzielone zakresy Y
@@ -341,7 +396,70 @@ function zaladujPodmienionaTeksturaBluzy(uvPunkty, renderer) {
       texture.needsUpdate = true;
       resolve(texture);
     };
-    img.onerror = () => reject(new Error('Nie udalo sie zaladowac colormap.png dla Kristofera'));
+    img.onerror = () => reject(new Error('Nie udalo sie zaladowac colormap.png dla Dzordzo'));
+    img.src = 'assets/arcade/Textures/colormap.png';
+  });
+}
+
+/**
+ * Jak zaladujPodmienionaTeksturaBluzy, ale dla head-mesh: przemalowuje NA
+ * KOLOR SKORY (SKIN_KOLORY[0]) dokladnie te swatche atlasu, ktore faktycznie
+ * probkuja OCZY tego modelu (parametr `uvPunkty` - patrz zbierzUvPunktyGlowy),
+ * zeby oryginalne, ciemne, klinowate oczy modelu NIE byly juz w ogole widoczne
+ * pod nakladkami "7" (patrz zadanie: "Oryginalnych oczu ma NIE być widać
+ * wcale"). Swatche skory sa pomijane (`jestKoloremSkory`), wiec reszta twarzy
+ * zostaje nietknieta.
+ *
+ * WAZNE - roznica wzgledem tekstury body-mesh: zmierzone empirycznie w
+ * konsoli (bezposrednio na dzialajacym obiekcie sceny), ze
+ * `headMesh.material.map.flipY` jest tu FALSE (podczas gdy dla body-mesh jest
+ * TRUE), mimo ze obie siatki dziela ten sam plik colormap.png - GLTFLoader
+ * najwyrazniej tworzy dla kazdego mesha OSOBNY obiekt THREE.Texture z wlasnym
+ * ustawieniem flipY. Dlatego V NIE jest tu odwracane (y = v*h, nie (1-v)*h
+ * jak w wersji dla body-mesh) - odwrocenie dawaloby probki z zupelnie innego
+ * miejsca atlasu (zmierzone: bez tej poprawki cala probkowana okolica
+ * wychodzila czarna). Nowa tekstura ma jawnie ustawione texture.flipY = false,
+ * zeby zgadzalo sie z oryginalnym materialem tego mesha (bez tego twarz
+ * wyswietlalaby sie odwrocona w pionie).
+ */
+function zaladujPodmienionaTeksturaOczuGlowy(uvPunkty, renderer) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+
+      const w = canvas.width;
+      const h = canvas.height;
+      const imgData = ctx.getImageData(0, 0, w, h);
+      const data = imgData.data;
+      const visited = new Uint8Array(w * h);
+
+      for (const { u, v } of uvPunkty) {
+        const x = Math.min(w - 1, Math.max(0, Math.round(u * w)));
+        const y = Math.min(h - 1, Math.max(0, Math.round(v * h)));
+        const p = y * w + x;
+        if (visited[p]) continue;
+        const idx = p * 4;
+        if (jestKoloremSkory(data[idx], data[idx + 1], data[idx + 2])) continue;
+        wypelnijSpojnyObszar(data, visited, w, h, x, y, SKIN_KOLORY[0]);
+      }
+      ctx.putImageData(imgData, 0, 0);
+
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.flipY = false;
+      texture.magFilter = THREE.NearestFilter;
+      if (renderer && renderer.capabilities && typeof renderer.capabilities.getMaxAnisotropy === 'function') {
+        texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+      }
+      texture.needsUpdate = true;
+      resolve(texture);
+    };
+    img.onerror = () => reject(new Error('Nie udalo sie zaladowac colormap.png dla oczu Dzordzo'));
     img.src = 'assets/arcade/Textures/colormap.png';
   });
 }
@@ -422,7 +540,7 @@ export class BossBlackjack {
 
   // ================= BUDOWA MODELU =================
 
-  /** Buduje postac Kristofera (character-male-b) w skali 2x pracownika. */
+  /** Buduje postac Dzordzo (character-male-b) w skali 2x pracownika. */
   build() {
     const boss = this.boss;
     const char = SkeletonUtils.clone(boss.blackjackTemplate);
@@ -446,7 +564,7 @@ export class BossBlackjack {
     this.mixer = new THREE.AnimationMixer(char);
     this.currentAction = null;
 
-    this._ubierzKristofera(char);
+    this._ubierzDzordzo(char);
 
     boss.scene.add(char);
     this._budujGlowZnaczniki();
@@ -454,7 +572,7 @@ export class BossBlackjack {
   }
 
   /** Wszystkie dodatki z prymitywow + podmiana koloru bluzy - patrz zadanie. */
-  _ubierzKristofera(char) {
+  _ubierzDzordzo(char) {
     const bodyMesh = char.getObjectByName('body-mesh');
     const headMesh = char.getObjectByName('head-mesh');
     const head = char.getObjectByName('head');
@@ -483,6 +601,24 @@ export class BossBlackjack {
         mat.needsUpdate = true;
       }).catch((err) => {
         console.warn('[boss-blackjack] Nie udalo sie podmienic koloru bluzy:', err);
+      });
+    }
+
+    // Zamaskowanie oryginalnych oczu modelu (przed dolozeniem plaszczyzn "7"
+    // nizej) - klon materialu TYLKO na head-mesh, zeby wspoldzielony material
+    // pracownikow zostal nietkniety (ten sam wzorzec co bluza na body-mesh
+    // powyzej). Bez tego pod kazdym "7" byly widoczne oryginalne, ciemne,
+    // klinowate oczy modelu (patrz zadanie).
+    if (headMesh && headMesh.material) {
+      const matOryg = headMesh.material;
+      const mat = matOryg.clone();
+      headMesh.material = mat;
+      const uvPunktowGlowy = zbierzUvPunktyGlowy(headMesh);
+      zaladujPodmienionaTeksturaOczuGlowy(uvPunktowGlowy, null).then((tex) => {
+        mat.map = tex;
+        mat.needsUpdate = true;
+      }).catch((err) => {
+        console.warn('[boss-blackjack] Nie udalo sie zamaskowac oczu:', err);
       });
     }
 
@@ -558,11 +694,14 @@ export class BossBlackjack {
       zarost.castShadow = false;
       head.add(zarost);
 
-      // Oczy - dwie male plaszczyzny z tekstura "7" (male tlo w kolorze
-      // skory zamiast duzego bialego dysku - patrz zaladujTeksturaOka),
-      // wielkosc zblizona do oryginalnych oczu modelu (nie "pol twarzy").
+      // Oczy - dwie plaszczyzny z tekstura "7", NIECO wieksze niz oryginalne
+      // oczy modelu (patrz zadanie: "ewentualnie trochę większe") - teraz, gdy
+      // oryginalne oczy sa juz zamaskowane kolorem skory (patrz wyzej), "7"
+      // jest jedynym ksztaltem oka widocznym na twarzy. polygonOffset odsuwa
+      // plaszczyzne przed geometrie twarzy, zeby nie z-fightowala przy
+      // obrocie glowy w idle (twarz nie jest idealnie plaska pod plaszczyzna).
       const teksturaOka = zaladujTeksturaOka();
-      const geoOko = new THREE.PlaneGeometry(0.05, 0.05);
+      const geoOko = new THREE.PlaneGeometry(0.07, 0.07);
       const pozycjeOczu = [
         [HEAD_C.x - HEAD_R * 0.32, HEAD_C.y + HEAD_R * 0.2, HEAD_C.z + HEAD_R * 0.97],
         [HEAD_C.x + HEAD_R * 0.32, HEAD_C.y + HEAD_R * 0.2, HEAD_C.z + HEAD_R * 0.97],
@@ -570,7 +709,14 @@ export class BossBlackjack {
       for (const [x, y, z] of pozycjeOczu) {
         const oko = new THREE.Mesh(
           geoOko,
-          new THREE.MeshBasicMaterial({ map: teksturaOka, transparent: true, depthWrite: false }),
+          new THREE.MeshBasicMaterial({
+            map: teksturaOka,
+            transparent: true,
+            depthWrite: false,
+            polygonOffset: true,
+            polygonOffsetFactor: -4,
+            polygonOffsetUnits: -4,
+          }),
         );
         oko.position.set(x, y, z);
         oko.castShadow = false;
@@ -674,6 +820,12 @@ export class BossBlackjack {
     this._glowPasuj = czarna;
   }
 
+  /**
+   * `hard: true` = przerwij POPRZEDNIA akcje natychmiast (stop()) i zagraj
+   * nowa solo, bez zadnego mieszania (uzywane dla idle/die - musza byc
+   * JEDYNA dzialajaca akcja, patrz zadanie: dwie akcje z waga 1 naraz dawaly
+   * dziwna, pochylona poze). Brak `hard` = crossfade jak dotychczas.
+   */
   playAction(name, opts = {}) {
     const clip = THREE.AnimationClip.findByName(this.animations, name);
     if (!clip || !this.mixer) return null;
@@ -686,8 +838,9 @@ export class BossBlackjack {
       if (opts.forceRestart) next.reset().play();
       return next;
     }
-    if (this.currentAction && !opts.hard) {
-      this.currentAction.crossFadeTo(next, 0.2, false);
+    if (this.currentAction) {
+      if (opts.hard) this.currentAction.stop();
+      else this.currentAction.crossFadeTo(next, 0.2, false);
     }
     next.reset().play();
     this.currentAction = next;
@@ -696,7 +849,14 @@ export class BossBlackjack {
 
   // ================= WEJSCIE NA ARENE =================
 
-  /** Boss idzie z tylu sceny (SPAWN_POS) do neutralnej kolumny x=0 (FINAL_POS). */
+  /**
+   * Boss pojawia sie JUZ STOJACY na FINAL_POS i od razu gra idle (bez marszu
+   * z tylu sceny - wlasciciel: "boss ma STAC z animacja idle"). Timing
+   * CZAS_WEJSCIA jest zachowany 1:1 (patrz _updateEntrance) tylko po to, zeby
+   * nie zmienic dlugosci karty tytulowej/letterboxu w boss.js
+   * (_updateCutscene konczy faze CUTSCENE dopiero gdy fazaWejscia===false) -
+   * w tym czasie nic sie juz nie rusza, to czysty "beat" cutscenki.
+   */
   beginEntrance() {
     // Kara zamrozona RAZ na starcie walki - 10% POCZATKOWEJ puli (patrz
     // zadanie: "ta sama kwota przy kazdej przegranej, nie przeliczana").
@@ -704,26 +864,20 @@ export class BossBlackjack {
     this.kara = Math.max(1, Math.round(KARA_UDZIAL * pula));
 
     if (this.model) {
-      this.model.position.copy(SPAWN_POS);
+      this.model.position.copy(FINAL_POS);
       this.model.lookAt(this.model.position.x, this.model.position.y, this.model.position.z + 10);
     }
     this.fazaWejscia = true;
     this._wejscieT = 0;
     audio.play('boss-wejscie');
-    this.playAction('walk', { hard: true }) || this.playAction('idle', { hard: true });
-    this.boss._log('spawn', 'Kristofer wchodzi na arene od tylu sceny');
+    this.playAction('idle', { hard: true });
+    this.boss._log('spawn', 'Dzordzo pojawia sie na arenie, stojac, w animacji idle');
   }
 
   _updateEntrance(delta) {
     this._wejscieT += delta;
-    const u = Math.min(1, this._wejscieT / CZAS_WEJSCIA);
-    if (this.model) {
-      this.model.position.lerpVectors(SPAWN_POS, FINAL_POS, u);
-      this.model.lookAt(this.model.position.x, this.model.position.y, this.model.position.z + 10);
-    }
-    if (u >= 1) {
+    if (this._wejscieT >= CZAS_WEJSCIA) {
       this.fazaWejscia = false;
-      this.playAction('idle', { hard: true });
       this._rozpocznijRozdanie();
     }
   }
@@ -787,7 +941,7 @@ export class BossBlackjack {
     this._deckCache = null;
     this._bossDrawTimer = 0;
     audio.play('bj-rozdanie');
-    this.boss._log('info', `Kristofer rozdaje karty - rozdanie #${this.round}`);
+    this.boss._log('info', `Dzordzo rozdaje karty - rozdanie #${this.round}`);
   }
 
   // ================= GLOWNA PETLA HOSTA =================
@@ -868,7 +1022,7 @@ export class BossBlackjack {
     this.decyzjaT = CZAS_WYBORU;
     showBossNotification(
       'boss',
-      '🃏 KRISTOFER CZEKA NA DECYZJĘ!',
+      '🃏 DŻORDŻO CZEKA NA DECYZJĘ!',
       'Białe pole (lewo, x<0) = <strong>DOBIERZ</strong>, czarne pole (prawo, x>0) = <strong>PASUJ</strong>. Większość decyduje!',
     );
     this.boss._log('info', `Rozdanie #${this.round} - faza WYBOR (${CZAS_WYBORU}s)`);
@@ -921,7 +1075,7 @@ export class BossBlackjack {
     this.faza = 'TURA_BOSSA';
     this.fazaT = 0;
     this._bossDrawTimer = ODSTEP_DOBIERANIA_BOSSA;
-    this.boss._log('info', 'Tura Kristofera - odkrywa zakryta karte i dobiera do >=17');
+    this.boss._log('info', 'Tura Dzordza - odkrywa zakryta karte i dobiera do >=17');
   }
 
   _rozpocznijRozstrzygniecie() {
@@ -944,14 +1098,14 @@ export class BossBlackjack {
     else wynik = 'PUSH';
 
     this.resultText = wynik;
-    this.boss._log('info', `Rozstrzygniecie rozdania #${this.round}: gracze ${sumaGraczy} vs Kristofer ${sumaBossa} -> ${wynik}`);
+    this.boss._log('info', `Rozstrzygniecie rozdania #${this.round}: gracze ${sumaGraczy} vs Dzordzo ${sumaBossa} -> ${wynik}`);
 
     if (wynik === 'WYGRANA') {
       audio.play('bj-wygrana');
       showBossNotification(
         'hit',
         '🃏 WYGRANA!',
-        `Gracze ${sumaGraczy} vs Kristofer ${sumaBossa} - <strong>Kristofer traci ${DMG_ZA_WYGRANA} HP!</strong>`,
+        `Gracze ${sumaGraczy} vs Dżordżo ${sumaBossa} - <strong>Dżordżo traci ${DMG_ZA_WYGRANA} HP!</strong>`,
       );
       this.boss.damage(DMG_ZA_WYGRANA);
     } else if (wynik === 'PRZEGRANA') {
@@ -968,7 +1122,7 @@ export class BossBlackjack {
       showBossNotification(
         'kill',
         '💸 PRZEGRANA!',
-        `Gracze ${sumaGraczy} vs Kristofer ${sumaBossa} - tracicie <strong>${this.kara} zł</strong> z puli!`,
+        `Gracze ${sumaGraczy} vs Dżordżo ${sumaBossa} - tracicie <strong>${this.kara} zł</strong> z puli!`,
       );
       if (economy && economy.state.money <= 0) {
         this.faza = 'KONIEC_GRY';
@@ -1004,12 +1158,14 @@ export class BossBlackjack {
     this._spritePlayer = [];
   }
 
-  _stworzSprite(kod, origin, index) {
+  /** `rozmiar`/`odstep` parametryzowane, bo reka bossa i graczy maja rozna
+   * skale (patrz komentarz przy ROZMIAR_KARTY_BOSS/ODSTEP_KART_BOSS). */
+  _stworzSprite(kod, origin, index, rozmiar, odstep) {
     const tex = zaladujTeksturaKarty(kod, null);
     const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: true });
     const sprite = new THREE.Sprite(mat);
-    sprite.scale.set(ROZMIAR_KARTY[0], ROZMIAR_KARTY[1], 1);
-    sprite.position.set(origin.x + index * ODSTEP_KART, origin.y, origin.z);
+    sprite.scale.set(rozmiar[0], rozmiar[1], 1);
+    sprite.position.set(origin.x + index * odstep, origin.y, origin.z);
     this.boss.scene.add(sprite);
     return sprite;
   }
@@ -1030,7 +1186,7 @@ export class BossBlackjack {
     // Boss - dopisz nowe karty
     while (this._spriteBoss.length < kartyBossa.length) {
       const i = this._spriteBoss.length;
-      this._spriteBoss.push(this._stworzSprite(kartyBossa[i], BOSS_KARTY_ORIGIN, i));
+      this._spriteBoss.push(this._stworzSprite(kartyBossa[i], BOSS_KARTY_ORIGIN, i, ROZMIAR_KARTY_BOSS, ODSTEP_KART_BOSS));
       if (i > this._renderBossCount - 1) audio.play('bj-karta');
     }
     // Odkrycie zakrytej karty - podmiana tekstury drugiego sprite'a bossa.
@@ -1043,7 +1199,7 @@ export class BossBlackjack {
     // Gracze - dopisz nowe karty
     while (this._spritePlayer.length < kartyGraczy.length) {
       const i = this._spritePlayer.length;
-      this._spritePlayer.push(this._stworzSprite(kartyGraczy[i], GRACZE_KARTY_ORIGIN, i));
+      this._spritePlayer.push(this._stworzSprite(kartyGraczy[i], GRACZE_KARTY_ORIGIN, i, ROZMIAR_KARTY, ODSTEP_KART));
       if (i > this._renderPlayerCount - 1) audio.play('bj-karta');
     }
 
@@ -1070,7 +1226,7 @@ export class BossBlackjack {
     let fazaTekst = '';
     if (this.faza === 'ROZDANIE') fazaTekst = 'ROZDANIE KART...';
     else if (this.faza === 'WYBOR') fazaTekst = 'GŁOSUJCIE: DOBIERZ czy PASUJ?';
-    else if (this.faza === 'TURA_BOSSA') fazaTekst = 'TURA KRISTOFERA...';
+    else if (this.faza === 'TURA_BOSSA') fazaTekst = 'TURA DŻORDŻA...';
     else if (this.faza === 'ROZSTRZYGNIECIE') fazaTekst = this.resultText === 'WYGRANA' ? '🏆 WYGRANA GRACZY!' : this.resultText === 'PRZEGRANA' ? '💸 PRZEGRANA...' : '➖ PUSH';
     else if (this.faza === 'KONIEC_GRY') fazaTekst = 'KONIEC GRY';
     if (boss.bjFazaEl) boss.bjFazaEl.textContent = fazaTekst;
