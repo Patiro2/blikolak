@@ -90,6 +90,10 @@ export function parseMovementDirection(text) {
     return 'right';
   }
 
+  // Skos do przodu w lewo / w prawo (względem aktualnego zwrotu postaci)
+  if (norm === 'q') return 'diag-left';
+  if (norm === 'e') return 'diag-right';
+
   return null;
 }
 
@@ -111,9 +115,9 @@ export function parseMovementCombo(text) {
     .trim();
   const t = clean.toLowerCase().replace(/^[!/]+/, '').replace(/[!.,?*~]+$/, '').trim();
 
-  if (!/^[wasd]{2,5}$/.test(t)) return null;
+  if (!/^[wasdqe]{2,5}$/.test(t)) return null;
 
-  const map = { w: 'up', s: 'down', a: 'left', d: 'right' };
+  const map = { w: 'up', s: 'down', a: 'left', d: 'right', q: 'diag-left', e: 'diag-right' };
   return t.split('').map((c) => map[c]);
 }
 
@@ -503,21 +507,39 @@ export class WorkerManager {
       entry.playingInteract = false;
     }
 
+    // Ruch po skosie (q/e) NIE zmienia zwrotu postaci - w przeciwienstwie do
+    // zwyklych kierunkow ponizej, targetRotY/facingAngle zostaja rowne
+    // aktualnemu kierunkowi patrzenia, a przesuniecie to suma wektora "przod"
+    // i wektora "lewo"/"prawo" liczonych z tego samego facingAngle (jak w/a/s/d).
+    const isDiagonal = direction === 'diag-left' || direction === 'diag-right';
+
     let targetHeading;
-    if (direction === 'up' || direction === 'forward') {
+    let dx, dz;
+    if (isDiagonal) {
+      const forward = snapToCardinal(entry.facingAngle);
+      const lateral = snapToCardinal(entry.facingAngle + (direction === 'diag-left' ? Math.PI / 2 : -Math.PI / 2));
+      dx = Math.round(Math.sin(forward)) + Math.round(Math.sin(lateral));
+      dz = Math.round(Math.cos(forward)) + Math.round(Math.cos(lateral));
+      targetHeading = snapToCardinal(entry.facingAngle); // bez zmiany zwrotu
+    } else if (direction === 'up' || direction === 'forward') {
       targetHeading = snapToCardinal(entry.facingAngle); // Krok w przód (w stronę, w którą gracz patrzy)
+      dx = Math.round(Math.sin(targetHeading));
+      dz = Math.round(Math.cos(targetHeading));
     } else if (direction === 'down' || direction === 'back') {
       targetHeading = snapToCardinal(entry.facingAngle + Math.PI); // Krok w tył (odwrócenie o 180° i krok)
+      dx = Math.round(Math.sin(targetHeading));
+      dz = Math.round(Math.cos(targetHeading));
     } else if (direction === 'left') {
       targetHeading = snapToCardinal(entry.facingAngle + Math.PI / 2); // Krok w lewo względem gracza (skręt o 90° w lewo i krok)
+      dx = Math.round(Math.sin(targetHeading));
+      dz = Math.round(Math.cos(targetHeading));
     } else if (direction === 'right') {
       targetHeading = snapToCardinal(entry.facingAngle - Math.PI / 2); // Krok w prawo względem gracza (skręt o 90° w prawo i krok)
+      dx = Math.round(Math.sin(targetHeading));
+      dz = Math.round(Math.cos(targetHeading));
     } else {
       return false;
     }
-
-    const dx = Math.round(Math.sin(targetHeading));
-    const dz = Math.round(Math.cos(targetHeading));
 
     const nextX = entry.gridX + dx;
     const nextZ = entry.gridZ + dz;
@@ -552,14 +574,15 @@ export class WorkerManager {
     // nim stoja, wiec jedna rakieta moze zabic kilka osob naraz.
 
     entry.startRotY = entry.obj.rotation.y;
-    entry.targetRotY = targetHeading;
-    entry.facingAngle = targetHeading;
+    entry.targetRotY = isDiagonal ? entry.startRotY : targetHeading; // skos nie zmienia zwrotu
+    entry.facingAngle = isDiagonal ? entry.facingAngle : targetHeading;
 
     if (!inBounds || isATM || isLockedByFlagBattle || isLockedByTlumaczenia) {
-      // Gracz nie może wyjść poza obszar gry lub wejść w bankomat, ale obraca się w wybraną stronę
+      // Gracz nie może wyjść poza obszar gry lub wejść w bankomat - przy zwyklym
+      // kroku obraca się w wybraną stronę, przy skosie zostaje w miejscu bez obrotu
       entry.isMoving = true;
       entry.moveProgress = 0;
-      entry.moveDuration = 0.16; // krótki obrót w miejscu
+      entry.moveDuration = 0.16; // krótki obrót w miejscu (lub "drgnięcie" bez obrotu dla skosu)
       entry.startPos.copy(entry.obj.position);
       entry.targetPos.copy(entry.obj.position);
       entry.targetGridX = entry.gridX;
@@ -570,7 +593,7 @@ export class WorkerManager {
     // Prawidłowy krok na sąsiednie pole siatki
     entry.isMoving = true;
     entry.moveProgress = 0;
-    entry.moveDuration = 0.32;
+    entry.moveDuration = isDiagonal ? 0.32 * Math.SQRT2 : 0.32; // dłuższa droga po przekątnej, ta sama prędkość
     entry.startPos.copy(entry.obj.position);
     entry.targetPos.set(nextX, 0, nextZ);
     entry.targetGridX = nextX;
