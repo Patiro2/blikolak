@@ -5,6 +5,14 @@ import { loadForest } from './assets.js';
 import { strumien, losujInt, pozycjaBezPowtorek } from './rng.js';
 import { Bojka } from './bojka.js';
 
+
+// Minimalny odstep miedzy polami minigier areny (odleglosc "krolem": max z |dx|,|dz|).
+// 3 = miedzy dwoma polami minigier zostaja co najmniej 2 wolne pola, takze po skosie.
+const MIN_ODSTEP_MINIGIER = 3;
+function zaBliskoMinigry(x, z, tile) {
+  return !!tile && Math.max(Math.abs(x - tile.x), Math.abs(z - tile.z)) < MIN_ODSTEP_MINIGIER;
+}
+
 // Minigra "Panstwa-Miasta" - CZWARTA minigra na siatce areny, obok bitwy o
 // flagi i bitwy tlumaczen. Mechanika jest CELOWO skopiowana z
 // src/tlumaczenia.js/src/flagbattle.js (stany IDLE -> WAITING -> BATTLE ->
@@ -471,9 +479,9 @@ export class PanstwaMiastaManager {
       const kx = losujInt(rng, -3, 3);
       const kz = losujInt(rng, -3, 3);
       if (kx === 0 && kz === 0) continue; // bankomat
-      if (zajeteFlag && kx === zajeteFlag.x && kz === zajeteFlag.z) continue; // pole flag
-      if (zajeteTlumaczenia && kx === zajeteTlumaczenia.x && kz === zajeteTlumaczenia.z) continue; // pole tlumaczen
-      if (zajeteMarki && kx === zajeteMarki.x && kz === zajeteMarki.z) continue; // pole marek
+      if (zaBliskoMinigry(kx, kz, zajeteFlag)) continue; // pole flag
+      if (zaBliskoMinigry(kx, kz, zajeteTlumaczenia)) continue; // pole tlumaczen
+      if (zaBliskoMinigry(kx, kz, zajeteMarki)) continue; // pole marek
       rx = kx;
       rz = kz;
       break;
@@ -484,9 +492,9 @@ export class PanstwaMiastaManager {
       szukanie: for (let x = -3; x <= 3; x++) {
         for (let z = -3; z <= 3; z++) {
           if (x === 0 && z === 0) continue;
-          if (zajeteFlag && x === zajeteFlag.x && z === zajeteFlag.z) continue;
-          if (zajeteTlumaczenia && x === zajeteTlumaczenia.x && z === zajeteTlumaczenia.z) continue;
-          if (zajeteMarki && x === zajeteMarki.x && z === zajeteMarki.z) continue;
+          if (zaBliskoMinigry(x, z, zajeteFlag)) continue;
+          if (zaBliskoMinigry(x, z, zajeteTlumaczenia)) continue;
+          if (zaBliskoMinigry(x, z, zajeteMarki)) continue;
           rx = x;
           rz = z;
           break szukanie;
@@ -634,6 +642,11 @@ export class PanstwaMiastaManager {
     this.letterMaterial.map = this._winnerTexture;
     this.letterMaterial.needsUpdate = true;
     this.letterSprite.visible = true;
+    // Kartka zwyciezcy tylko przez 2 s (nagroda 30 s trwa dalej bez niej).
+    const idBitwy = this.battleId;
+    setTimeout(() => {
+      if (this.battleId === idBitwy && this.state === 'REWARD') this.letterSprite.visible = false;
+    }, 2000);
   }
 
   onChatMessage(username, content) {

@@ -12,6 +12,14 @@ import { loadForest } from './assets.js';
 import { strumien, losujInt, pozycjaBezPowtorek } from './rng.js';
 import { Bojka } from './bojka.js';
 
+
+// Minimalny odstep miedzy polami minigier areny (odleglosc "krolem": max z |dx|,|dz|).
+// 3 = miedzy dwoma polami minigier zostaja co najmniej 2 wolne pola, takze po skosie.
+const MIN_ODSTEP_MINIGIER = 3;
+function zaBliskoMinigry(x, z, tile) {
+  return !!tile && Math.max(Math.abs(x - tile.x), Math.abs(z - tile.z)) < MIN_ODSTEP_MINIGIER;
+}
+
 // Minigra "Zgadnij marke" - PIATA minigra na siatce areny, obok bitwy o flagi,
 // bitwy tlumaczen i panstw-miast. Mechanika jest CELOWO skopiowana z
 // src/flagbattle.js (stany IDLE -> WAITING -> BATTLE -> REWARD, wejscie dwoch
@@ -561,9 +569,9 @@ export class BitwaMarekManager {
     const zajetePanstwaMiasta = this.panstwaMiastaRef && this.panstwaMiastaRef.tile ? this.panstwaMiastaRef.tile : null;
 
     const zajete = (kx, kz) =>
-      (zajeteFlag && kx === zajeteFlag.x && kz === zajeteFlag.z) ||
-      (zajeteTlumaczenia && kx === zajeteTlumaczenia.x && kz === zajeteTlumaczenia.z) ||
-      (zajetePanstwaMiasta && kx === zajetePanstwaMiasta.x && kz === zajetePanstwaMiasta.z);
+      (zaBliskoMinigry(kx, kz, zajeteFlag)) ||
+      (zaBliskoMinigry(kx, kz, zajeteTlumaczenia)) ||
+      (zaBliskoMinigry(kx, kz, zajetePanstwaMiasta));
 
     let rx = null;
     let rz = null;
@@ -742,6 +750,11 @@ export class BitwaMarekManager {
     this.brandMaterial.map = this._winnerTexture;
     this.brandMaterial.needsUpdate = true;
     this.brandSprite.visible = true;
+    // Kartka zwyciezcy tylko przez 2 s (nagroda 30 s trwa dalej bez niej).
+    const idBitwy = this.battleId;
+    setTimeout(() => {
+      if (this.battleId === idBitwy && this.state === 'REWARD') this.brandSprite.visible = false;
+    }, 2000);
     this._ukryjOdslonietaMarke();
   }
 
@@ -859,7 +872,7 @@ export class BitwaMarekManager {
       showTopAnnouncement(
         `🎉 ${winnerPlayer.username} WYGRYWA!`,
         'Zgadnij markę! Przez 30 sekund dostaje <strong>2 zł/s</strong> pasywnie!',
-        3000,
+        2000,
       );
     } catch (err) {
       console.warn('[marki] Blad w showTopAnnouncement:', err);
