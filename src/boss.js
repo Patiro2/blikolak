@@ -56,6 +56,64 @@ export const BOSS_DEFS = [
   },
 ];
 
+// Rejestr mechanik DELEGOWANYCH do osobnych klas (BossKowal/BossBlackjack/
+// BossSkorpion/BossWilkolak). Kazdy wpis pokrywa to, czym te cztery mechaniki
+// naprawde sie roznia - reszta (budowa modelu, cutscenka wejscia, walka,
+// synchronizacja) jest dla nich identyczna i zyje w BossManager nizej, sterowana
+// tym rejestrem zamiast osobnym lancuchem `if (mechanika === '...')` w kazdym
+// miejscu. Mechanika 'rownania' (tier 1) NIE ma tu wpisu - to logika wprost w
+// BossManager, zostaje jak byla.
+const MECHANIKI = {
+  kowal: {
+    Klasa: BossKowal,
+    template: 'orcTemplate',
+    modelName: 'Kowala_88',
+    showOverload: true, // jedyna mechanika z paskiem przeciazenia w plakietce
+    forwardChat: true, // kazda wiadomosc na czacie podbija przeciazenie (BossKowal.onChatMessage)
+    endCutsceneLog: 'Kowal_88 wyladowal na arenie - start walki',
+    dieAction: 'die',
+    victoryTitle: '🏆 KOWAL_88 POKONANY!',
+    victoryBody: 'Czat okrążył i powalił Kowala! Bankomat wraca na nowym tierze.',
+  },
+  blackjack: {
+    Klasa: BossBlackjack,
+    template: 'blackjackTemplate',
+    modelName: 'Dzordzo',
+    showOverload: false,
+    forwardChat: false, // decyzje ida przez pozycje na siatce (BossBlackjack._countBySide), nie przez czat
+    endCutsceneLog: 'Dzordzo dotarl na arene - start walki blackjacka',
+    dieAction: 'die',
+    victoryTitle: '🏆 DŻORDŻO POKONANY!',
+    victoryBody: 'Czat wygrał 3 rozdania blackjacka! Bankomat wraca na nowym tierze.',
+    onDefeatedExtra: (self) => { if (self.bjPanelEl) self.bjPanelEl.classList.remove('show'); },
+  },
+  skorpion: {
+    Klasa: BossSkorpion,
+    template: 'crabTemplate',
+    modelName: 'Skorpiona',
+    showOverload: false,
+    forwardChat: false, // decyzje ida przez pozycje na siatce/ekwipunki (BossSkorpion), ruch obslugiwany osobno w main.js
+    endCutsceneLog: 'Skorpion wszedl na arene - start walki',
+    // cube-pets nie maja klipu "die" (slownik zwierzat: static/idle/walk/run/
+    // eat/dance/gesture-positive/gesture-negative) - to najblizszy odpowiednik.
+    dieAction: 'gesture-negative',
+    victoryTitle: '🏆 SKORPION POKONANY!',
+    victoryBody: 'Czat otruł Skorpiona! Bankomat wraca na nowym tierze.',
+    onDefeatedExtra: (self) => { if (self.stealRowEl) self.stealRowEl.style.display = 'none'; },
+  },
+  wilkolak: {
+    Klasa: BossWilkolak,
+    template: 'wilkolakTemplate',
+    modelName: 'Wilkolaka',
+    showOverload: false,
+    forwardChat: true, // frazy sterujace ida przez BossWilkolak.onChatMessage (tam tez bramka bana)
+    endCutsceneLog: 'Wilkolak wszedl na arene - start walki',
+    dieAction: 'die',
+    victoryTitle: '🏆 WILKOŁAK POKONANY!',
+    victoryBody: 'Myślibórz uratowany! Bankomat wraca na nowym tierze.',
+  },
+};
+
 const HP_PER_HIT = 5;
 // Nagroda za zadanie obrazen bossowi (poprawna odpowiedz na dzialanie) - trafia
 // do widza, ktory odpowiedzial, TYLKO do rankingu (recordEarned z countsAsClick
@@ -247,18 +305,20 @@ export class BossManager {
     this.animations = [];
     this.orcTemplate = null; // character-orc.glb (kenney_mini-dungeon) - cialo Kowala_88
     this.orcAnimations = [];
-    this.kowal = null; // instancja BossKowal - tylko gdy def.mechanika === 'kowal' (patrz src/boss-kowal.js)
     this.blackjackTemplate = null; // character-male-b.glb (kenney_mini-arcade) - cialo Dzordzo
     this.blackjackAnimations = [];
-    this.blackjack = null; // instancja BossBlackjack - tylko gdy def.mechanika === 'blackjack' (patrz src/boss-blackjack.js)
     this.crabTemplate = null; // animal-crab.glb (kenney_cube-pets) - cialo Skorpiona
     this.crabAnimations = [];
     this.bottleTemplate = null; // bottle.glb (kenney_pirate-kit) - przedmiot "butelka" Skorpiona
     this.potionTemplate = null; // potion.glb (kenney_mini-dungeon) - przedmiot "srodek" Skorpiona
-    this.skorpion = null; // instancja BossSkorpion - tylko gdy def.mechanika === 'skorpion' (patrz src/boss-skorpion.js)
     this.wilkolakTemplate = null; // character-male-a.glb (kenney_mini-arcade) - cialo Wilkolaka
     this.wilkolakAnimations = [];
-    this.wilkolak = null; // instancja BossWilkolak - tylko gdy def.mechanika === 'wilkolak' (patrz src/boss-wilkolak.js)
+    // Instancja klasy mechaniki delegowanej (BossKowal/BossBlackjack/BossSkorpion/
+    // BossWilkolak) - tylko gdy this.def.mechanika ma wpis w MECHANIKI powyzej,
+    // inaczej null. Wczesniej to byly cztery rowne pola (this.kowal/blackjack/
+    // skorpion/wilkolak), z ktorych zawsze najwyzej jedno bylo niepuste - patrz
+    // gettery zgodnosci kowal/blackjack/skorpion/wilkolak nizej w klasie.
+    this.podboss = null;
 
     this.model = null; // THREE.Group (wozek + postac)
     this.charObj = null; // dziecko-postac, na nim dziala mixer/animacje
@@ -327,6 +387,15 @@ export class BossManager {
     this.container = document.getElementById('worker-overlays') || document.body;
     this._createDOMOverlays();
   }
+
+  // --- Warstwa zgodnosci dla src/main.js (NIE wolno tam edytowac) ---
+  // main.js czyta boss.skorpion.getItemForUsername(...) (main.js:916), a
+  // isBanned/hasPiwo ponizej siegaja do this.wilkolak - obie sciezki musza
+  // dzialac tak samo jak przed wprowadzeniem pojedynczego this.podboss.
+  get kowal() { return this.def && this.def.mechanika === 'kowal' ? this.podboss : null; }
+  get blackjack() { return this.def && this.def.mechanika === 'blackjack' ? this.podboss : null; }
+  get skorpion() { return this.def && this.def.mechanika === 'skorpion' ? this.podboss : null; }
+  get wilkolak() { return this.def && this.def.mechanika === 'wilkolak' ? this.podboss : null; }
 
   // --- Log zdarzen, wzorowane na VanessaManager ---
   _log(kind, message, data = null) {
@@ -722,24 +791,10 @@ export class BossManager {
       this._teardown();
     }
 
-    if (def.mechanika === 'kowal') {
-      if (!this.orcTemplate) {
-        this._log('bad', 'Nie moge wystartowac - model Kowala_88 jeszcze sie nie zaladowal');
-        return false;
-      }
-    } else if (def.mechanika === 'blackjack') {
-      if (!this.blackjackTemplate) {
-        this._log('bad', 'Nie moge wystartowac - model Dzordzo jeszcze sie nie zaladowal');
-        return false;
-      }
-    } else if (def.mechanika === 'skorpion') {
-      if (!this.crabTemplate) {
-        this._log('bad', 'Nie moge wystartowac - model Skorpiona jeszcze sie nie zaladowal');
-        return false;
-      }
-    } else if (def.mechanika === 'wilkolak') {
-      if (!this.wilkolakTemplate) {
-        this._log('bad', 'Nie moge wystartowac - model Wilkolaka jeszcze sie nie zaladowal');
+    const mDef = MECHANIKI[def.mechanika];
+    if (mDef) {
+      if (!this[mDef.template]) {
+        this._log('bad', `Nie moge wystartowac - model ${mDef.modelName} jeszcze sie nie zaladowal`);
         return false;
       }
     } else if (!this.chairTemplate || !this.charTemplate) {
@@ -764,38 +819,15 @@ export class BossManager {
 
     this._log('spawn', `Startuje walka z bossem "${def.name}" (awans na tier ${tier})`, { tier, hp: this.hp });
 
-    if (def.mechanika === 'kowal') {
-      // Kowal gra wlasny dzwiek wejscia w chwili zjazdu na linie (patrz
-      // BossKowal.beginEntrance) - nie ma tu cutscenki z podjazdem jak boss 1.
-      this.kowal = new BossKowal(this);
-      this.blackjack = null;
-      this.model = this.kowal.build();
+    if (mDef) {
+      // Mechaniki delegowane graja wlasny dzwiek/cutscenke wejscia w
+      // beginEntrance() (patrz np. BossKowal - zjazd na linie zamiast
+      // cutscenki z podjazdem jak boss 1 "rownania" ponizej).
+      this.podboss = new mDef.Klasa(this);
+      this.model = this.podboss.build();
       this.mixer = null;
-      this._beginCutsceneKowal();
-    } else if (def.mechanika === 'blackjack') {
-      this.kowal = null;
-      this.blackjack = new BossBlackjack(this);
-      this.model = this.blackjack.build();
-      this.mixer = null;
-      this._beginCutsceneBlackjack();
-    } else if (def.mechanika === 'skorpion') {
-      this.kowal = null;
-      this.blackjack = null;
-      this.skorpion = new BossSkorpion(this);
-      this.model = this.skorpion.build();
-      this.mixer = null;
-      this._beginCutsceneSkorpion();
-    } else if (def.mechanika === 'wilkolak') {
-      this.kowal = null;
-      this.blackjack = null;
-      this.skorpion = null;
-      this.wilkolak = new BossWilkolak(this);
-      this.model = this.wilkolak.build();
-      this.mixer = null;
-      this._beginCutsceneWilkolak();
+      this._beginCutsceneMechanika(def.mechanika);
     } else {
-      this.kowal = null;
-      this.blackjack = null;
       audio.play('boss-wejscie');
       this._buildModel();
       this._beginCutscene();
@@ -887,12 +919,14 @@ export class BossManager {
   }
 
   /**
-   * Wejscie Kowala_88 - zamiast cutscenki z podjazdem (boss 1), pokazujemy
-   * te sama karte tytulowa/letterbox, ale bez blokady kamery (wlasciciel
-   * zaakceptowal pominiecie kamery kinowej dla tego bossa - wyglada lepiej,
-   * bo widac cala zjazd na linie). Faktyczny zjazd prowadzi BossKowal.update().
+   * Wejscie mechaniki delegowanej (Kowal/Dzordzo/Skorpion/Wilkolak, tiery 2-5) -
+   * ta sama karta tytulowa/letterbox co boss 1 "rownania", ale BEZ blokady
+   * kamery (wlasciciel zaakceptowal pominiecie kamery kinowej dla tych bossow -
+   * kazdy z nich prowadzi wlasne wejscie w podklasie, patrz Klasa.beginEntrance
+   * w MECHANIKI). Jedyna wizualna roznica miedzy nimi to pasek przeciazenia
+   * (wylacznie Kowal, patrz MECHANIKI[mech].showOverload).
    */
-  _beginCutsceneKowal() {
+  _beginCutsceneMechanika(mech) {
     this.state = 'CUTSCENE';
     this.cutsceneT = 0;
 
@@ -909,136 +943,23 @@ export class BossManager {
 
     this.nameplateEl.style.display = 'flex';
     if (this.overloadWrapEl) {
-      this.overloadWrapEl.style.display = 'block';
-      this.overloadFillEl.style.width = '0%';
+      const showOverload = MECHANIKI[mech].showOverload;
+      this.overloadWrapEl.style.display = showOverload ? 'block' : 'none';
+      if (showOverload) this.overloadFillEl.style.width = '0%';
     }
     this.hpFillEl.style.width = '100%';
     this.hpTextEl.textContent = `${this.hp} / ${this.maxHp}`;
 
-    this.kowal.beginEntrance();
+    this.podboss.beginEntrance();
   }
 
-  _endCutsceneKowal() {
+  _endCutsceneMechanika(mech) {
     this.letterboxTop.classList.remove('show');
     this.letterboxBottom.classList.remove('show');
     this.titleCardEl.classList.remove('show');
 
     this.state = 'FIGHT';
-    this._log('info', 'Kowal_88 wyladowal na arenie - start walki');
-  }
-
-  /**
-   * Wejscie Dzordzo (tier 3, blackjack) - ta sama karta tytulowa/letterbox
-   * co Kowal, BEZ blokady kamery (patrz zadanie wlasciciela: "Pokaż tę samą
-   * kartę tytułową/letterbox co przy Kowalu, bez blokady kamery"). Faktyczny
-   * marsz z tylu sceny prowadzi BossBlackjack.update() (patrz beginEntrance).
-   */
-  _beginCutsceneBlackjack() {
-    this.state = 'CUTSCENE';
-    this.cutsceneT = 0;
-
-    this.titleNameEl.textContent = `👹 ${this.def.name.toUpperCase()}`;
-    this.titleSubEl.textContent = this.def.subtitle || '';
-    if (this.nameRowEl) this.nameRowEl.textContent = `👹 ${this.def.name}`;
-
-    void this.letterboxTop.offsetWidth;
-    this.letterboxTop.classList.add('show');
-    this.letterboxBottom.classList.add('show');
-    this.titleCardEl.classList.remove('show');
-    void this.titleCardEl.offsetWidth;
-    this.titleCardEl.classList.add('show');
-
-    this.nameplateEl.style.display = 'flex';
-    if (this.overloadWrapEl) this.overloadWrapEl.style.display = 'none';
-    this.hpFillEl.style.width = '100%';
-    this.hpTextEl.textContent = `${this.hp} / ${this.maxHp}`;
-
-    this.blackjack.beginEntrance();
-  }
-
-  _endCutsceneBlackjack() {
-    this.letterboxTop.classList.remove('show');
-    this.letterboxBottom.classList.remove('show');
-    this.titleCardEl.classList.remove('show');
-
-    this.state = 'FIGHT';
-    this._log('info', 'Dzordzo dotarl na arene - start walki blackjacka');
-  }
-
-  /**
-   * Wejscie Skorpiona (tier 4) - ta sama karta tytulowa/letterbox co Kowal/
-   * Dzordzo, BEZ blokady kamery. Skorpion pojawia sie juz stojacy na polu
-   * startowym (patrz BossSkorpion.beginEntrance), CZAS_WEJSCIA tam jest tylko
-   * timingiem karty tytulowej/letterboxu.
-   */
-  _beginCutsceneSkorpion() {
-    this.state = 'CUTSCENE';
-    this.cutsceneT = 0;
-
-    this.titleNameEl.textContent = `👹 ${this.def.name.toUpperCase()}`;
-    this.titleSubEl.textContent = this.def.subtitle || '';
-    if (this.nameRowEl) this.nameRowEl.textContent = `👹 ${this.def.name}`;
-
-    void this.letterboxTop.offsetWidth;
-    this.letterboxTop.classList.add('show');
-    this.letterboxBottom.classList.add('show');
-    this.titleCardEl.classList.remove('show');
-    void this.titleCardEl.offsetWidth;
-    this.titleCardEl.classList.add('show');
-
-    this.nameplateEl.style.display = 'flex';
-    if (this.overloadWrapEl) this.overloadWrapEl.style.display = 'none';
-    this.hpFillEl.style.width = '100%';
-    this.hpTextEl.textContent = `${this.hp} / ${this.maxHp}`;
-
-    this.skorpion.beginEntrance();
-  }
-
-  _endCutsceneSkorpion() {
-    this.letterboxTop.classList.remove('show');
-    this.letterboxBottom.classList.remove('show');
-    this.titleCardEl.classList.remove('show');
-
-    this.state = 'FIGHT';
-    this._log('info', 'Skorpion wszedl na arene - start walki');
-  }
-
-  /**
-   * Wejscie Wilkolaka (tier 5) - ta sama karta tytulowa/letterbox co reszta
-   * bossow 2-4, BEZ blokady kamery. Wilkolak pojawia sie juz stojacy na polu
-   * startowym (patrz BossWilkolak.beginEntrance), CZAS_WEJSCIA tam jest tylko
-   * timingiem karty tytulowej/letterboxu.
-   */
-  _beginCutsceneWilkolak() {
-    this.state = 'CUTSCENE';
-    this.cutsceneT = 0;
-
-    this.titleNameEl.textContent = `👹 ${this.def.name.toUpperCase()}`;
-    this.titleSubEl.textContent = this.def.subtitle || '';
-    if (this.nameRowEl) this.nameRowEl.textContent = `👹 ${this.def.name}`;
-
-    void this.letterboxTop.offsetWidth;
-    this.letterboxTop.classList.add('show');
-    this.letterboxBottom.classList.add('show');
-    this.titleCardEl.classList.remove('show');
-    void this.titleCardEl.offsetWidth;
-    this.titleCardEl.classList.add('show');
-
-    this.nameplateEl.style.display = 'flex';
-    if (this.overloadWrapEl) this.overloadWrapEl.style.display = 'none';
-    this.hpFillEl.style.width = '100%';
-    this.hpTextEl.textContent = `${this.hp} / ${this.maxHp}`;
-
-    this.wilkolak.beginEntrance();
-  }
-
-  _endCutsceneWilkolak() {
-    this.letterboxTop.classList.remove('show');
-    this.letterboxBottom.classList.remove('show');
-    this.titleCardEl.classList.remove('show');
-
-    this.state = 'FIGHT';
-    this._log('info', 'Wilkolak wszedl na arene - start walki');
+    this._log('info', MECHANIKI[mech].endCutsceneLog);
   }
 
   /** Czy boss aktualnie ma pelna kontrole nad kamera (main.js pomija wtedy controls.update()). */
@@ -1069,24 +990,9 @@ export class BossManager {
   }
 
   _updateCutscene(delta) {
-    if (this.def && this.def.mechanika === 'kowal') {
-      this.kowal.update(delta);
-      if (!this.kowal.fazaWejscia) this._endCutsceneKowal();
-      return;
-    }
-    if (this.def && this.def.mechanika === 'blackjack') {
-      this.blackjack.update(delta);
-      if (!this.blackjack.fazaWejscia) this._endCutsceneBlackjack();
-      return;
-    }
-    if (this.def && this.def.mechanika === 'skorpion') {
-      this.skorpion.update(delta);
-      if (!this.skorpion.fazaWejscia) this._endCutsceneSkorpion();
-      return;
-    }
-    if (this.def && this.def.mechanika === 'wilkolak') {
-      this.wilkolak.update(delta);
-      if (!this.wilkolak.fazaWejscia) this._endCutsceneWilkolak();
+    if (this.def && MECHANIKI[this.def.mechanika]) {
+      this.podboss.update(delta);
+      if (!this.podboss.fazaWejscia) this._endCutsceneMechanika(this.def.mechanika);
       return;
     }
 
@@ -1192,21 +1098,12 @@ export class BossManager {
   // ================= WALKA =================
 
   _updateFight(delta) {
-    if (this.def && this.def.mechanika === 'kowal') {
-      this.kowal.update(delta);
-      if (this.overloadFillEl) this.overloadFillEl.style.width = `${this.kowal.przeciazenie}%`;
-      return;
-    }
-    if (this.def && this.def.mechanika === 'blackjack') {
-      this.blackjack.update(delta);
-      return;
-    }
-    if (this.def && this.def.mechanika === 'skorpion') {
-      this.skorpion.update(delta);
-      return;
-    }
-    if (this.def && this.def.mechanika === 'wilkolak') {
-      this.wilkolak.update(delta);
+    if (this.def && MECHANIKI[this.def.mechanika]) {
+      this.podboss.update(delta);
+      // Wylacznie Kowal ma pasek przeciazenia w plakietce (patrz showOverload).
+      if (MECHANIKI[this.def.mechanika].showOverload && this.overloadFillEl) {
+        this.overloadFillEl.style.width = `${this.podboss.przeciazenie}%`;
+      }
       return;
     }
 
@@ -1304,33 +1201,15 @@ export class BossManager {
     content = usunTagiEmotek(content);
     if (!content) return;
 
-    // Kowal_88 (tier 2): KAZDA wiadomosc na czacie (od dowolnego widza, takze
-    // spoza rankingu) podbija pasek przeciazenia - brak tu rownan/ratunku
-    // bossa 1, wiec dalsza czesc tej metody go nie dotyczy.
-    if (this.def && this.def.mechanika === 'kowal') {
-      if (this.kowal) this.kowal.onChatMessage(username, content);
-      return;
-    }
-
-    // Dzordzo (tier 3, blackjack): decyzje graczy ida przez POZYCJE
-    // awatarow na siatce (patrz BossBlackjack._countBySide), nie przez czat -
-    // czat nie ma tu zadnej roli, wiec po prostu nic nie robimy.
-    if (this.def && this.def.mechanika === 'blackjack') {
-      return;
-    }
-
-    // Skorpion (tier 4): decyzje ida przez pozycje na siatce i ekwipunki
-    // (patrz BossSkorpion), nie przez czat - ruch gracza jest juz obslugiwany
-    // osobno w main.js (parseMovementDirection), wiec tu nic nie robimy.
-    if (this.def && this.def.mechanika === 'skorpion') {
-      return;
-    }
-
-    // Wilkolak (tier 5): frazy sterujace ("lo tego"/"rzut") ida przez
-    // BossWilkolak.onChatMessage (patrz src/boss-wilkolak.js) - tam tez jest
-    // bramka bana (Szal banowy ignoruje wszystkie jego komendy poza ruchem).
-    if (this.def && this.def.mechanika === 'wilkolak') {
-      if (this.wilkolak) this.wilkolak.onChatMessage(username, content);
+    // Mechaniki delegowane: czy i jak reaguja na czat rozni sie NAPRAWDE
+    // miedzy nimi (patrz forwardChat w MECHANIKI) - Kowal (kazda wiadomosc
+    // podbija przeciazenie) i Wilkolak (frazy sterujace, tam tez bramka bana)
+    // przekazuja wiadomosc dalej do podklasy; Dzordzo/Skorpion decyduja przez
+    // pozycje na siatce, wiec czat ich nie dotyczy - po prostu nic nie robimy.
+    if (this.def && MECHANIKI[this.def.mechanika]) {
+      if (MECHANIKI[this.def.mechanika].forwardChat && this.podboss) {
+        this.podboss.onChatMessage(username, content);
+      }
       return;
     }
 
@@ -1925,60 +1804,18 @@ export class BossManager {
     if (this.overloadWrapEl) this.overloadWrapEl.style.display = 'none';
     if (this.dymekEl) this.dymekEl.style.display = 'none';
 
-    if (this.def && this.def.mechanika === 'kowal') {
-      // Kowal stoi (nie siedzi w wozku) - standardowy klip "die" z rigu
-      // Kenneya pasuje tu wprost, bez recznej pozy na kosciach.
-      if (this.kowal) this.kowal.playAction('die', { hard: true, once: true });
+    // Mechaniki delegowane: wszystkie stoja (nie siedza w wozku jak boss 1
+    // "rownania"), wiec standardowy klip jednorazowy z rigu wystarcza bez
+    // recznej pozy na kosciach - patrz dieAction w MECHANIKI (Skorpion to
+    // cube-pets bez klipu "die", stad "gesture-negative" jako najblizszy
+    // odpowiednik). Pelnoekranowy ekran zwyciestwa Wilkolaka (main.js
+    // onDefeated, tier===5) dokladany jest PO tej sciezce.
+    if (this.def && MECHANIKI[this.def.mechanika]) {
+      const m = MECHANIKI[this.def.mechanika];
+      if (this.podboss) this.podboss.playAction(m.dieAction, { hard: true, once: true });
       this._victoryT = 0;
-      showBossNotification(
-        'boss',
-        '🏆 KOWAL_88 POKONANY!',
-        'Czat okrążył i powalił Kowala! Bankomat wraca na nowym tierze.',
-      );
-      return;
-    }
-
-    if (this.def && this.def.mechanika === 'blackjack') {
-      // Dzordzo stoi (nie siedzi w wozku) - standardowy klip "die" pasuje
-      // tu wprost, tak samo jak u Kowala.
-      if (this.blackjack) this.blackjack.playAction('die', { hard: true, once: true });
-      this._victoryT = 0;
-      if (this.bjPanelEl) this.bjPanelEl.classList.remove('show');
-      showBossNotification(
-        'boss',
-        '🏆 DŻORDŻO POKONANY!',
-        'Czat wygrał 3 rozdania blackjacka! Bankomat wraca na nowym tierze.',
-      );
-      return;
-    }
-
-    if (this.def && this.def.mechanika === 'skorpion') {
-      // Cube-pets nie maja klipu "die" (slownik zwierzat: static/idle/walk/
-      // run/eat/dance/gesture-positive/gesture-negative) - "gesture-negative"
-      // jest najblizszym odpowiednikiem reakcji porazki.
-      if (this.skorpion) this.skorpion.playAction('gesture-negative', { hard: true, once: true });
-      this._victoryT = 0;
-      if (this.stealRowEl) this.stealRowEl.style.display = 'none';
-      showBossNotification(
-        'boss',
-        '🏆 SKORPION POKONANY!',
-        'Czat otruł Skorpiona! Bankomat wraca na nowym tierze.',
-      );
-      return;
-    }
-
-    if (this.def && this.def.mechanika === 'wilkolak') {
-      // Wilkolak stoi (postac skinowana, nie siedzi w wozku) - standardowy
-      // klip "die" pasuje tu wprost, tak samo jak Kowal/Dzordzo. Pelnoekranowy
-      // ekran zwyciestwa z Top10 (main.js onDefeated, tier === 5) dokladany
-      // jest PO tej sciezce (patrz spec-wilkolak.md "ZWYCIESTWO").
-      if (this.wilkolak) this.wilkolak.playAction('die', { hard: true, once: true });
-      this._victoryT = 0;
-      showBossNotification(
-        'boss',
-        '🏆 WILKOŁAK POKONANY!',
-        'Myślibórz uratowany! Bankomat wraca na nowym tierze.',
-      );
+      if (m.onDefeatedExtra) m.onDefeatedExtra(this);
+      showBossNotification('boss', m.victoryTitle, m.victoryBody);
       return;
     }
 
@@ -2001,17 +1838,8 @@ export class BossManager {
     // Kowal_88 trzyma wlasny mixer w BossKowal (this.mixer tutaj zostaje null,
     // patrz start()) - bez tego klip "die" odegralby sie tylko na pierwszej
     // klatce i zamarl, bo nic wiecej nie wolaloby mixer.update() w tym stanie.
-    if (this.def && this.def.mechanika === 'kowal' && this.kowal && this.kowal.mixer) {
-      this.kowal.mixer.update(delta);
-    }
-    if (this.def && this.def.mechanika === 'blackjack' && this.blackjack && this.blackjack.mixer) {
-      this.blackjack.mixer.update(delta);
-    }
-    if (this.def && this.def.mechanika === 'skorpion' && this.skorpion && this.skorpion.mixer) {
-      this.skorpion.mixer.update(delta);
-    }
-    if (this.def && this.def.mechanika === 'wilkolak' && this.wilkolak && this.wilkolak.mixer) {
-      this.wilkolak.mixer.update(delta);
+    if (this.def && MECHANIKI[this.def.mechanika] && this.podboss && this.podboss.mixer) {
+      this.podboss.mixer.update(delta);
     }
     this._victoryT = (this._victoryT || 0) + delta;
     if (this.model) {
@@ -2052,21 +1880,9 @@ export class BossManager {
     this._timeryAtakow = [];
     this._zdejmijBron();
     this.fx.clear();
-    if (this.kowal) {
-      this.kowal.teardown();
-      this.kowal = null;
-    }
-    if (this.blackjack) {
-      this.blackjack.teardown();
-      this.blackjack = null;
-    }
-    if (this.skorpion) {
-      this.skorpion.teardown();
-      this.skorpion = null;
-    }
-    if (this.wilkolak) {
-      this.wilkolak.teardown();
-      this.wilkolak = null;
+    if (this.podboss) {
+      this.podboss.teardown();
+      this.podboss = null;
     }
     if (this.bjPanelEl) this.bjPanelEl.classList.remove('show');
     if (this.stealRowEl) this.stealRowEl.style.display = 'none';
@@ -2158,9 +1974,9 @@ export class BossManager {
     // rzutowanie 3D->2D drugiego punktu swiata).
     if (this.dymekEl) {
       const pokazDymek = this.def && this.def.mechanika === 'kowal'
-        && this.state === 'FIGHT' && this.kowal && this.kowal.dymekTekst;
+        && this.state === 'FIGHT' && this.podboss && this.podboss.dymekTekst;
       if (pokazDymek) {
-        this.dymekEl.textContent = this.kowal.dymekTekst;
+        this.dymekEl.textContent = this.podboss.dymekTekst;
         this.dymekEl.style.left = `${sx}px`;
         this.dymekEl.style.top = `${sy - 92}px`;
         this.dymekEl.style.display = 'block';
@@ -2188,17 +2004,11 @@ export class BossManager {
       licznikAtakow: this.licznikAtakow,
       startWalki: this.startWalki,
     };
-    if (this.def && this.def.mechanika === 'kowal' && this.kowal) {
-      stan.kowal = this.kowal.getSyncState();
-    }
-    if (this.def && this.def.mechanika === 'blackjack' && this.blackjack) {
-      stan.blackjack = this.blackjack.getSyncState();
-    }
-    if (this.def && this.def.mechanika === 'skorpion' && this.skorpion) {
-      stan.skorpion = this.skorpion.getSyncState();
-    }
-    if (this.def && this.def.mechanika === 'wilkolak' && this.wilkolak) {
-      stan.wilkolak = this.wilkolak.getSyncState();
+    // Klucz w `stan` to wprost this.def.mechanika ('kowal'/'blackjack'/...) -
+    // to jest protokol sieciowy (patrz applySync nizej), ksztalt zostaje
+    // identyczny jak wczesniej, tylko bez czterech osobnych `if`.
+    if (this.def && MECHANIKI[this.def.mechanika] && this.podboss) {
+      stan[this.def.mechanika] = this.podboss.getSyncState();
     }
     return stan;
   }
@@ -2226,20 +2036,9 @@ export class BossManager {
         if (this.hpFillEl) this.hpFillEl.style.width = `${(this.hp / this.maxHp) * 100}%`;
         if (this.hpTextEl) this.hpTextEl.textContent = `${this.hp} / ${this.maxHp}`;
       }
-      if (this.def && this.def.mechanika === 'kowal') {
-        if (this.kowal && bossState.kowal) this.kowal.applySync(bossState.kowal);
-        return;
-      }
-      if (this.def && this.def.mechanika === 'blackjack') {
-        if (this.blackjack && bossState.blackjack) this.blackjack.applySync(bossState.blackjack);
-        return;
-      }
-      if (this.def && this.def.mechanika === 'skorpion') {
-        if (this.skorpion && bossState.skorpion) this.skorpion.applySync(bossState.skorpion);
-        return;
-      }
-      if (this.def && this.def.mechanika === 'wilkolak') {
-        if (this.wilkolak && bossState.wilkolak) this.wilkolak.applySync(bossState.wilkolak);
+      if (this.def && MECHANIKI[this.def.mechanika]) {
+        const stanMech = bossState[this.def.mechanika];
+        if (this.podboss && stanMech) this.podboss.applySync(stanMech);
         return;
       }
 
@@ -2268,24 +2067,10 @@ export class BossManager {
     if (!def) return false;
     if (this.state !== 'IDLE') this._teardown();
 
-    if (def.mechanika === 'kowal') {
-      if (!this.orcTemplate) {
-        this._log('bad', 'Nie moge dolaczyc do walki (sync) - model Kowala_88 jeszcze sie nie zaladowal');
-        return false;
-      }
-    } else if (def.mechanika === 'blackjack') {
-      if (!this.blackjackTemplate) {
-        this._log('bad', 'Nie moge dolaczyc do walki (sync) - model Dzordzo jeszcze sie nie zaladowal');
-        return false;
-      }
-    } else if (def.mechanika === 'skorpion') {
-      if (!this.crabTemplate) {
-        this._log('bad', 'Nie moge dolaczyc do walki (sync) - model Skorpiona jeszcze sie nie zaladowal');
-        return false;
-      }
-    } else if (def.mechanika === 'wilkolak') {
-      if (!this.wilkolakTemplate) {
-        this._log('bad', 'Nie moge dolaczyc do walki (sync) - model Wilkolaka jeszcze sie nie zaladowal');
+    const mDef = MECHANIKI[def.mechanika];
+    if (mDef) {
+      if (!this[mDef.template]) {
+        this._log('bad', `Nie moge dolaczyc do walki (sync) - model ${mDef.modelName} jeszcze sie nie zaladowal`);
         return false;
       }
     } else if (!this.chairTemplate || !this.charTemplate) {
@@ -2309,74 +2094,23 @@ export class BossManager {
 
     if (this.nameRowEl) this.nameRowEl.textContent = `👹 ${def.name}`;
 
-    if (def.mechanika === 'kowal') {
-      this.kowal = new BossKowal(this);
-      this.blackjack = null;
-      this.model = this.kowal.build();
+    if (mDef) {
+      this.podboss = new mDef.Klasa(this);
+      this.model = this.podboss.build();
       this.mixer = null;
-      this.kowal.startFromSync(bossState.kowal);
+      this.podboss.startFromSync(bossState[def.mechanika]);
 
       this.state = 'FIGHT';
       if (this.nameplateEl) this.nameplateEl.style.display = 'flex';
       if (this.overloadWrapEl) {
-        this.overloadWrapEl.style.display = 'block';
-        this.overloadFillEl.style.width = `${this.kowal.przeciazenie}%`;
+        this.overloadWrapEl.style.display = mDef.showOverload ? 'block' : 'none';
+        if (mDef.showOverload) this.overloadFillEl.style.width = `${this.podboss.przeciazenie}%`;
       }
       if (this.hpFillEl) this.hpFillEl.style.width = `${(this.hp / this.maxHp) * 100}%`;
       if (this.hpTextEl) this.hpTextEl.textContent = `${this.hp} / ${this.maxHp}`;
       return true;
     }
 
-    if (def.mechanika === 'blackjack') {
-      this.kowal = null;
-      this.blackjack = new BossBlackjack(this);
-      this.model = this.blackjack.build();
-      this.mixer = null;
-      this.blackjack.startFromSync(bossState.blackjack);
-
-      this.state = 'FIGHT';
-      if (this.nameplateEl) this.nameplateEl.style.display = 'flex';
-      if (this.overloadWrapEl) this.overloadWrapEl.style.display = 'none';
-      if (this.hpFillEl) this.hpFillEl.style.width = `${(this.hp / this.maxHp) * 100}%`;
-      if (this.hpTextEl) this.hpTextEl.textContent = `${this.hp} / ${this.maxHp}`;
-      return true;
-    }
-
-    if (def.mechanika === 'skorpion') {
-      this.kowal = null;
-      this.blackjack = null;
-      this.skorpion = new BossSkorpion(this);
-      this.model = this.skorpion.build();
-      this.mixer = null;
-      this.skorpion.startFromSync(bossState.skorpion);
-
-      this.state = 'FIGHT';
-      if (this.nameplateEl) this.nameplateEl.style.display = 'flex';
-      if (this.overloadWrapEl) this.overloadWrapEl.style.display = 'none';
-      if (this.hpFillEl) this.hpFillEl.style.width = `${(this.hp / this.maxHp) * 100}%`;
-      if (this.hpTextEl) this.hpTextEl.textContent = `${this.hp} / ${this.maxHp}`;
-      return true;
-    }
-
-    if (def.mechanika === 'wilkolak') {
-      this.kowal = null;
-      this.blackjack = null;
-      this.skorpion = null;
-      this.wilkolak = new BossWilkolak(this);
-      this.model = this.wilkolak.build();
-      this.mixer = null;
-      this.wilkolak.startFromSync(bossState.wilkolak);
-
-      this.state = 'FIGHT';
-      if (this.nameplateEl) this.nameplateEl.style.display = 'flex';
-      if (this.overloadWrapEl) this.overloadWrapEl.style.display = 'none';
-      if (this.hpFillEl) this.hpFillEl.style.width = `${(this.hp / this.maxHp) * 100}%`;
-      if (this.hpTextEl) this.hpTextEl.textContent = `${this.hp} / ${this.maxHp}`;
-      return true;
-    }
-
-    this.kowal = null;
-    this.blackjack = null;
     this._buildModel();
     if (this.machine.model) {
       this.machine.model.rotation.z = 0.35;
