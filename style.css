@@ -341,6 +341,7 @@ html, body {
 #leaderboard-list .gwiazdki-wygranych { font-size: 0.83em; }
 #leaderboard-list .przedmiot-skorpiona { font-size: 1em; }
 #leaderboard-list .wilkolak-ban-ikona { font-size: 1em; }
+#leaderboard-list .wilkolak-piwo-ikona { font-size: 1em; }
 #leaderboard-list .worker-tag { font-size: 0.83em; }
 
 .leaderboard-empty {
@@ -444,6 +445,14 @@ html, body {
 
 /* Ikona bana Wilkolaka (tier 5, Szal banowy, patrz src/boss-wilkolak.js) - ranking i plakietka nad postacia */
 .wilkolak-ban-ikona {
+  font-size: 12px;
+  margin-left: 2px;
+}
+
+/* Ikona piwa Wilkolaka (Faza 2, tier 5, patrz src/boss-wilkolak.js) - gracz
+   niosacy podniete piwo, do odrzucenia komenda "rzut". Ten sam wzorzec co
+   ikona bana wyzej. */
+.wilkolak-piwo-ikona {
   font-size: 12px;
   margin-left: 2px;
 }
@@ -2066,6 +2075,100 @@ body.tryb-widza #widz-plakietka {
   .boss-bj-timer-bar { width: 160px; }
   #game-over-tekst { font-size: 34px; letter-spacing: 2px; }
 }
+
+/* ============================================================
+   ZWYCIESTWO WILKOLAKA (src/wilkolak-zwyciestwo.js) - pelnoekranowy ekran po
+   pokonaniu ostatniego bossa (tier 5). W odroznieniu od #game-over-overlay
+   NIE znika sam - zamyka go wylacznie przycisk "Zamknij".
+   ============================================================ */
+#wilkolak-zwyciestwo-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 20000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(5, 8, 6, 0.88);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.4s ease;
+}
+
+#wilkolak-zwyciestwo-overlay.show {
+  opacity: 1;
+  pointer-events: all;
+}
+
+.wilkolak-zwyciestwo-karta {
+  width: min(420px, calc(100vw - 40px));
+  max-height: calc(100vh - 60px);
+  overflow-y: auto;
+  background: rgba(16, 24, 18, 0.96);
+  border: 1px solid rgba(83, 252, 24, 0.4);
+  border-radius: 14px;
+  padding: 26px 28px;
+  box-shadow: 0 0 60px rgba(83, 252, 24, 0.25), 0 12px 32px rgba(0, 0, 0, 0.6);
+  text-align: center;
+}
+
+.wilkolak-zwyciestwo-tytul {
+  font-size: 26px;
+  font-weight: 900;
+  color: #53fc18;
+  text-shadow: 0 0 24px rgba(83, 252, 24, 0.6);
+  margin-bottom: 8px;
+  letter-spacing: 1px;
+}
+
+.wilkolak-zwyciestwo-podtytul {
+  font-size: 13px;
+  color: #cfe8c8;
+  margin-bottom: 18px;
+}
+
+.wilkolak-zwyciestwo-tabela {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 22px;
+  text-align: left;
+}
+
+.wilkolak-zwyciestwo-wiersz {
+  display: grid;
+  grid-template-columns: 34px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 8px;
+  font-size: 14px;
+  color: #e8ffe0;
+}
+
+.wilkolak-zwyciestwo-wiersz .miejsce { font-size: 15px; text-align: center; }
+.wilkolak-zwyciestwo-wiersz .nick { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wilkolak-zwyciestwo-wiersz .kwota { color: #53fc18; font-weight: 700; }
+
+.wilkolak-zwyciestwo-pusto {
+  color: #9ab89a;
+  font-size: 13px;
+  padding: 10px 0;
+}
+
+.wilkolak-zwyciestwo-zamknij {
+  background: #53fc18;
+  color: #0b1a08;
+  border: none;
+  border-radius: 8px;
+  padding: 10px 26px;
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+  letter-spacing: 0.5px;
+}
+
+.wilkolak-zwyciestwo-zamknij:hover { filter: brightness(1.1); }
 
 /* ============================================================
    PANEL LEGENDY (komendy czatu + lista skinow, prawy gorny rog)

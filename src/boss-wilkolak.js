@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
-import { strumien, losujInt, losujZ } from './rng.js';
+import { strumien, losujInt, losujZ, tasuj } from './rng.js';
 import { showBossNotification } from './ui.js';
 import { normalizeNick } from './kick.js';
 import { normalizePolish } from './vanessa.js';
@@ -62,6 +62,22 @@ const BAN_CZAS = 10.0; // sekund bana (ignorowane komendy poza ruchem)
 const KOLOR_SIERSC = 0x5a4636; // brazowo-szara siersc (uszy/pysk/ogon)
 const KOLOR_NOS = 0x1c1c1c;
 
+// --- PRZEJSCIE (HP <= 50, jednorazowo) ---
+const PRZEJSCIE_CZAS = 15.0; // sekund na przejscie sciezek
+const PRZEJSCIE_NAGRODA = 20; // zl za zaliczenie calej sciezki (3 pola po kolei)
+const PRZEJSCIE_DMG = 2.5; // obrazenia bossa za kazda zaliczona sciezke
+// Paleta 10 kolorow (CSS hex) - jeden unikalny kolor na gracza, tyle ilu
+// maksymalnie moze byc "graczy w grze" (Top 10, patrz _zywiGracze).
+const KOLOR_SCIEZKI = ['#ff6b6b', '#4dd0e1', '#ffd54f', '#81c784', '#ba68c8', '#f06292', '#7986cb', '#a1887f', '#4fc3f7', '#dce775'];
+
+// --- FAZA 2 (50 -> 0 HP) - Rzut piwem ---
+const KOLOR_PIWO = 0xd9a441; // bursztynowy - pocisk piwa (patrz bossattack.js wystrzelPocisk)
+const PIWO_LOT_CZAS = 2.0; // sekund lotu/ostrzezenia, zanim piwo uderzy w pole
+const PIWO_DMG = 12.5; // obrazenia bossa, gdy gracz odrzuci piwo pisac "rzut"
+const PIWO_NAGRODA = 50; // zl dla gracza za trafienie wilkolaka piwem
+const PIWO_NA_ZIEMI_CZAS = 5.0; // sekund, zanim niepodniete piwo zniknie z ziemi
+const PIWO_GAME_OVER_LICZBA = 4; // trafien bossa piwem w graczy w calej Fazie 2 -> game over
+
 export class BossWilkolak {
   constructor(boss) {
     // Referencja do BossManager - scena, workerManager, kickChat, economy,
@@ -112,6 +128,18 @@ export class BossWilkolak {
     // --- Wizualizacja placzu (nakladka DOM + krople) ---
     this._placzOverlay = null;
     this._placzKrople = [];
+
+    // --- Przejscie (HP<=50, jednorazowo) - sciezki 1-2-3 (patrz _generujSciezki) ---
+    this._sciezkiSprite = []; // etykiety liczbowe (Sprite) do posprzatania - patrz _pokazZnacznikiSciezek
+
+    // --- Faza 2 - Rzut piwem: stan trwaly MIEDZY atakami (przetrwa cala Faze 2, nie tylko jeden atak) ---
+    this._piwoTrafien = 0; // ile razy piwo RZUCONE PRZEZ BOSSA trafilo gracza - game over przy PIWO_GAME_OVER_LICZBA
+    this._gameOverWywolany = false;
+    this._piwaNaZiemi = []; // {x,z,zostalo} - niepodniete piwo lezace na ziemi (host - zrodlo prawdy, patrz sync)
+    this._piwoNoszone = new Set(); // normalizeNick - kto aktualnie niesie piwo (max 1 naraz)
+    this._piwoWizualizacje = new Map(); // "x,z" -> {mesh} - modele lezacego piwa na scenie (patrz _renderujPiwaNaZiemi)
+    this._piwoWizT = 0;
+    this._lastPiwoKeys = new Set(); // patrz _renderPiwoIkony (ten sam wzorzec co _lastBanKeys)
 
     this._ogonT = 0;
     this._ogonBaza = null;
@@ -255,6 +283,17 @@ export class BossWilkolak {
     this._licznikAtakow = 0;
     this.bany.clear();
     this._faza2Wywolana = false;
+    this.pulaAtakow = ['alkohol', 'nur', 'placz'];
+
+    // Reset stanu Fazy 2/Przejscia - istotne dla przycisku testowy "Zresp
+    // wilkolaka" (boss.start(5,{force:true})), ktory moze odpalic walke od
+    // nowa, gdy poprzednia dotarla do Fazy 2 (patrz spec-wilkolak.md).
+    this._usunWizualizacjeSciezek();
+    this._piwoTrafien = 0;
+    this._gameOverWywolany = false;
+    this._piwaNaZiemi = [];
+    this._piwoNoszone.clear();
+    this._renderujPiwaNaZiemi(0); // usuwa ewentualne modele piwa z poprzedniej walki
 
     if (this.model) {
       this.model.position.set(this.x, 0, this.z);
@@ -336,6 +375,19 @@ export class BossWilkolak {
     this._znaczniki = [];
   }
 
+  /**
+   * Sprzatanie WSZYSTKICH wizualnych skutkow biezacego ataku (znaczniki pol,
+   * trasa Nura, nakladka Placzu) - uzywane zarowno przez teardown() (koniec
+   * walki), jak i _wejdzWFaze2() (Przejscie przerywa atak w toku, patrz
+   * spec-wilkolak.md "PRZEJSCIE").
+   */
+  _wyczyscEfektyAtaku() {
+    this._wyczyscZnaczniki();
+    for (const wpis of this._nurZnacznikiPol.values()) this.boss.fx.usunZnacznik(wpis);
+    this._nurZnacznikiPol.clear();
+    this._ukryjPlaczOverlay();
+  }
+
   // ================= WYBOR KOLEJNEGO ATAKU =================
 
   _ustawNastepnyAtak() {
@@ -358,7 +410,8 @@ export class BossWilkolak {
     if (typ === 'alkohol') this._rozpocznijAlkoholBieg();
     else if (typ === 'nur') this._rozpocznijNur();
     else if (typ === 'placz') this._rozpocznijPlacz();
-    else this._ustawNastepnyAtak(); // pula podmieniona na nieznany typ (ETAP 2) - bezpieczny fallback
+    else if (typ === 'piwo') this._rozpocznijPiwo();
+    else this._ustawNastepnyAtak(); // pula podmieniona na nieznany typ - bezpieczny fallback
   }
 
   // ================= SZAL ALKOHOLOWY =================
@@ -904,18 +957,379 @@ export class BossWilkolak {
     this._lastBanKeys = aktualne;
   }
 
-  // ================= FAZA 2 - PUNKT ZACZEPIENIA DLA ETAPU 2 =================
+  // ================= PRZEJSCIE (HP <= 50, jednorazowo) =================
 
   /**
-   * TODO(ETAP 2): tu ma wejsc mechanika "Przejscie" ze spec-wilkolak.md
-   * (przerwanie ataku, wycie, teleport graczy na krawedzie, sciezki 1-2-3,
-   * 15s), a po niej odpalenie FAZY 2 (rzut piwem zamiast pull atakow FAZY 1 -
-   * podmienic this.pulaAtakow). NA RAZIE: nic nie robimy, walka toczy sie
-   * dalej w FAZIE 1 (ta sama pula atakow) - zadanie wlasciciela wprost tego
-   * wymaga na tym etapie.
+   * Wywolywane RAZ (patrz _faza2Wywolana w update()) na KAZDEJ karcie gry -
+   * bezpiecznie ungated, bo caly telegraf (przerwanie ataku, wycie, sciezki)
+   * jest deterministyczny (patrz _generujSciezki - ten sam _rng na kazdej
+   * karcie daje TE SAME sciezki). Jedyna faktyczna decyzja tutaj - teleport
+   * graczy - jest bramkowana hostem w _teleportujGraczy nizej.
    */
   _wejdzWFaze2() {
-    this.boss._log('info', '[TODO ETAP 2] HP Wilkolaka <= 50 - tu wejdzie Przejscie + FAZA 2', { hp: this.boss.hp });
+    this._wyczyscEfektyAtaku();
+    this.faza = 'PRZEJSCIE';
+    this.fazaT = 0;
+    const zywi = this._zywiGracze();
+    const sciezki = this._generujSciezki(zywi);
+    this._dane = { sciezki };
+    this._teleportujGraczy(sciezki);
+    this._pokazZnacznikiSciezek(sciezki);
+    this.playAction('emote-yes', { hard: true, once: true }) || this.playAction('idle', { hard: true });
+    audio.wilkolakWycie();
+    showBossNotification(
+      'boss',
+      '🐺 WILKOŁAK WYJE Z WŚCIEKŁOŚCI!',
+      `Traci połowę sił! Wskoczcie na swoje kolorowe ścieżki 1-2-3 i przejdźcie je po kolei w ${PRZEJSCIE_CZAS}s!`,
+    );
+    this.boss._log('bad', 'Wilkolak wchodzi w Faze 2 (Przejscie) - HP <= 50', { hp: this.boss.hp });
+  }
+
+  /**
+   * Kandydaci na sciezki - 4 kierunki (kazdy z krawedzi areny do srodka),
+   * kazdy z odsuniecim (offsetem) prostopadlym od -half+1 do half-1. Kazda
+   * sciezka to 4 pola: pole startowe (na krawedzi) + 3 pola w glab areny.
+   * Losowa kolejnosc (tasuj, deterministyczna) + zachlanny wybor pierwszego
+   * kandydata, ktorego WSZYSTKIE 4 pola sa jeszcze wolne i w arenie -
+   * gwarantuje sciezki, ktore nigdy sie nie przecinaja i nigdy nie wchodza
+   * na bankomat (0,0), bez zadnej analitycznej geometrii do udowodnienia.
+   */
+  _generujSciezki(zywi) {
+    const half = arenaHalf(this.boss.economy);
+    const kierunki = [
+      { dx: -1, dz: 0, start: (o) => ({ x: half, z: o }) }, // od wschodu
+      { dx: 1, dz: 0, start: (o) => ({ x: -half, z: o }) }, // od zachodu
+      { dx: 0, dz: -1, start: (o) => ({ x: o, z: half }) }, // od polnocy
+      { dx: 0, dz: 1, start: (o) => ({ x: o, z: -half }) }, // od poludnia
+    ];
+    const kandydaci = [];
+    for (const k of kierunki) {
+      for (let o = -half + 1; o <= half - 1; o++) {
+        const start = k.start(o);
+        const tiles = [start];
+        for (let i = 1; i <= 3; i++) tiles.push({ x: start.x + k.dx * i, z: start.z + k.dz * i });
+        kandydaci.push(tiles);
+      }
+    }
+    const rng = strumien(`${this.boss.economy.state.seedGry}:wilkolak-sciezki:${this.boss.pendingTier}`);
+    const potasowani = tasuj(rng, kandydaci);
+
+    const uzyte = new Set();
+    const sciezki = [];
+    let kolorIdx = 0;
+    for (const g of zywi) {
+      const wolna = potasowani.find((tiles) =>
+        tiles.every((t) => this._wSiatce(t.x, t.z) && !(t.x === 0 && t.z === 0) && !uzyte.has(`${t.x},${t.z}`)),
+      );
+      if (!wolna) continue; // arena zapchana sciezkami - gracz zostaje bez wlasnej (bardzo skrajny przypadek, >10 graczy)
+      for (const t of wolna) uzyte.add(`${t.x},${t.z}`);
+      sciezki.push({
+        username: g.username,
+        kolor: KOLOR_SCIEZKI[kolorIdx % KOLOR_SCIEZKI.length],
+        tiles: wolna,
+        idx: 0, // ile poczatkowych pol "w glab" (tiles[1..3]) juz zaliczone, po kolei
+        zaliczony: false,
+      });
+      kolorIdx++;
+    }
+    return sciezki;
+  }
+
+  /** Teleport graczy na pole startowe ich sciezki - decyzja hosta (patrz _trafNura, ten sam wzorzec pozycjonowania). */
+  _teleportujGraczy(sciezki) {
+    if (!this._jestemHostem() || !this.boss.kickChat || !this.boss.workerManager) return;
+    for (const sc of sciezki) {
+      const slot = this.boss.kickChat.getWorkerForUser(sc.username);
+      if (slot === null) continue;
+      const entry = this.boss.workerManager.getWorkerType(slot);
+      if (!entry) continue;
+      const start = sc.tiles[0];
+      entry.gridX = start.x; entry.gridZ = start.z;
+      entry.targetGridX = start.x; entry.targetGridZ = start.z;
+      entry.isMoving = false;
+      if (entry.moveQueue) entry.moveQueue.length = 0;
+      if (entry.obj) entry.obj.position.set(start.x, 0, start.z);
+    }
+  }
+
+  /** Znaczniki kolorowych pol + etykiety liczbowe 1-2-3 na polach "w glab" kazdej sciezki. */
+  _pokazZnacznikiSciezek(sciezki) {
+    this._usunWizualizacjeSciezek();
+    for (const sc of sciezki) {
+      const kolorHex = new THREE.Color(sc.kolor).getHex();
+      for (let i = 0; i < sc.tiles.length; i++) {
+        const t = sc.tiles[i];
+        this._znaczniki.push(this.boss.fx.oznaczPole(t.x, t.z, kolorHex, PRZEJSCIE_CZAS));
+        if (i > 0) this._sciezkiSprite.push(this._stworzEtykieteSciezki(t.x, t.z, i, sc.kolor));
+      }
+    }
+  }
+
+  /** Maly Sprite z cyfra (1/2/3) w kolorze sciezki - canvas 2D, ten sam wzorzec co kartki bossow minigier. */
+  _stworzEtykieteSciezki(x, z, numer, kolorCss) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 64; canvas.height = 64;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = kolorCss;
+    ctx.beginPath();
+    ctx.arc(32, 32, 27, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#161616';
+    ctx.font = 'bold 34px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(String(numer), 32, 35);
+    const texture = new THREE.CanvasTexture(canvas);
+    const material = new THREE.SpriteMaterial({ map: texture, depthWrite: false, transparent: true });
+    const sprite = new THREE.Sprite(material);
+    sprite.scale.set(0.36, 0.36, 1);
+    sprite.position.set(x, 0.4, z);
+    this.boss.scene.add(sprite);
+    return sprite;
+  }
+
+  _usunWizualizacjeSciezek() {
+    for (const s of this._sciezkiSprite) {
+      this.boss.scene.remove(s);
+      if (s.material) {
+        if (s.material.map) s.material.map.dispose();
+        s.material.dispose();
+      }
+    }
+    this._sciezkiSprite = [];
+  }
+
+  /**
+   * Zaliczanie pol PO KOLEI (idx rosnie tylko na tiles[idx+1]) i wyplata
+   * nagrody/obrazen przy zaliczeniu calej sciezki - bramkowane hostem
+   * (decyzja ekonomiczna, patrz naglowek pliku). Widz dostaje postep przez
+   * zwykly sync `_dane` (dokladnie tak samo jak reszta atakow w tym pliku).
+   */
+  _updatePrzejscie(delta) {
+    this.fazaT += delta;
+    if (this._jestemHostem()) {
+      const sciezki = this._dane.sciezki || [];
+      for (const sc of sciezki) {
+        if (sc.zaliczony) continue;
+        const nastepne = sc.tiles[sc.idx + 1];
+        if (!nastepne) continue;
+        const naPolu = this._workersOnTile(nastepne.x, nastepne.z).some(
+          (e) => normalizeNick(this._userForWorker(e) || '') === normalizeNick(sc.username),
+        );
+        if (!naPolu) continue;
+        sc.idx += 1;
+        if (sc.idx >= 3) {
+          sc.zaliczony = true;
+          if (this.boss.kickChat) this.boss.kickChat.recordEarned(sc.username, PRZEJSCIE_NAGRODA, undefined, false);
+          if (this.boss.economy) this.boss.economy.addMoney(PRZEJSCIE_NAGRODA);
+          this.boss.damage(PRZEJSCIE_DMG);
+          audio.wilkolakUderzenie();
+          showBossNotification(
+            'hit',
+            `✅ @${sc.username} PRZESZEDŁ ŚCIEŻKĘ!`,
+            `+${PRZEJSCIE_NAGRODA} zł, wilkołak traci ${PRZEJSCIE_DMG} HP.`,
+          );
+          this.boss._log('good', `@${sc.username} zaliczyl sciezke Przejscia`, { gracz: sc.username });
+        }
+      }
+    }
+    if (this.fazaT >= PRZEJSCIE_CZAS) this._zakonczPrzejscie();
+  }
+
+  _zakonczPrzejscie() {
+    this._wyczyscZnaczniki();
+    this._usunWizualizacjeSciezek();
+    this.pulaAtakow = ['piwo'];
+    this._ustawNastepnyAtak();
+  }
+
+  // ================= FAZA 2 - RZUT PIWEM =================
+
+  /**
+   * 2 piwa jednoczesnie w 2 roznych zywych graczy (1 przy jednym graczu).
+   * Deterministyczne na kazdej karcie (jak Alkohol/Nur) - tylko SKUTEK
+   * uderzenia (_uderzeniePiwem) jest bramkowany hostem.
+   */
+  _rozpocznijPiwo() {
+    const zywi = this._zywiGracze();
+    if (zywi.length === 0) { this._ustawNastepnyAtak(); return; }
+    const iloscCeli = zywi.length >= 2 ? 2 : 1;
+    const potasowani = tasuj(this._rng('piwo-cele'), zywi);
+    const cele = potasowani.slice(0, iloscCeli).map((c) => ({ x: c.x, z: c.z, username: c.username }));
+
+    this.faza = 'PIWO';
+    this.fazaT = 0;
+    this._dane = { cele };
+    this._wyczyscZnaczniki();
+    for (const c of cele) this._znaczniki.push(this.boss.fx.oznaczPole(c.x, c.z, KOLOR_ZAMACH, PIWO_LOT_CZAS));
+
+    const startPoz = new THREE.Vector3(this.x, 1.4 * WILK_SCALE, this.z);
+    for (const cel of cele) {
+      this.boss.fx.wystrzelPocisk(startPoz, cel.x, cel.z, PIWO_LOT_CZAS, () => {
+        if (this._jestemHostem()) this._uderzeniePiwem(cel.x, cel.z);
+      }, KOLOR_PIWO);
+    }
+    audio.wilkolakSwist();
+    this.playAction('attack-melee-left', { once: true }) || this.playAction('idle');
+    showBossNotification(
+      'boss',
+      '🍺 RZUT PIWEM!',
+      'Wilkołak rzuca butelkami! Uciekaj z czerwonych pól - a jeśli piwo spadnie obok, podnieś je i odrzuć pisząc "rzut"!',
+    );
+    this.boss._log('bad', 'Wilkolak rzuca piwem (Faza 2)', { cele: cele.map((c) => c.username) });
+  }
+
+  _updatePiwo(delta) {
+    this.fazaT += delta;
+    if (this.fazaT >= PIWO_LOT_CZAS + 0.15) {
+      this._wyczyscZnaczniki();
+      this._ustawNastepnyAtak();
+    }
+  }
+
+  /** Skutek uderzenia piwa RZUCONEGO PRZEZ BOSSA - wolane WYLACZNIE przez hosta (patrz _rozpocznijPiwo). */
+  _uderzeniePiwem(x, z) {
+    const obecni = this._workersOnTile(x, z);
+    if (obecni.length > 0) {
+      for (const entry of obecni) {
+        const nick = this._userForWorker(entry);
+        if (!nick) continue;
+        this.boss._killUser(nick, { source: 'wilkolak-piwo' });
+        this._piwoTrafien += 1; // licza sie trafione OSOBY, nie pola
+      }
+      audio.wilkolakUderzenie();
+      if (this._piwoTrafien >= PIWO_GAME_OVER_LICZBA && !this._gameOverWywolany) {
+        this._gameOverWywolany = true;
+        this.boss._log('bad', `Wilkolak trafil piwem ${this._piwoTrafien} razy w Fazie 2 - GAME OVER`);
+        if (this.boss.onGameOver) {
+          try {
+            const wynik = this.boss.onGameOver('GAME OVER, WRACASZ DO MYŚLIBORZA');
+            if (wynik && typeof wynik.catch === 'function') {
+              wynik.catch((err) => console.error('[boss-wilkolak] Blad w onGameOver:', err));
+            }
+          } catch (err) {
+            console.error('[boss-wilkolak] Blad w onGameOver:', err);
+          }
+        }
+      }
+    } else {
+      this._piwaNaZiemi.push({ x, z, zostalo: PIWO_NA_ZIEMI_CZAS });
+      showBossNotification('kill', '🍺 PIWO SPADŁO NA ZIEMIĘ!', 'Podnieś je i odrzuć w wilkołaka - napisz "rzut" po podniesieniu!');
+    }
+  }
+
+  /**
+   * Lezace, niepodniete piwo - wygasanie po czasie i podnoszenie przez
+   * gracza, ktory wejdzie na jego pole (max 1 piwo na gracza naraz).
+   * Mutacje listy bramkowane hostem (patrz naglowek pliku); widz dostaje
+   * wynik przez getSyncState/applySync (piwaNaZiemi/piwoNoszone).
+   */
+  _updatePiwaNaZiemi(delta) {
+    if (this._jestemHostem()) {
+      // Martwy gracz traci niesione piwo.
+      for (const key of [...this._piwoNoszone]) {
+        if (this.boss.kickChat && this.boss.kickChat.isEliminated(key)) this._piwoNoszone.delete(key);
+      }
+      for (let i = this._piwaNaZiemi.length - 1; i >= 0; i--) {
+        const b = this._piwaNaZiemi[i];
+        b.zostalo -= delta;
+        let zebrane = false;
+        for (const entry of this._workersOnTile(b.x, b.z)) {
+          const nick = this._userForWorker(entry);
+          if (!nick) continue;
+          const key = normalizeNick(nick);
+          if (this._piwoNoszone.has(key)) continue;
+          this._piwoNoszone.add(key);
+          zebrane = true;
+          showBossNotification('hit', `🍺 @${nick} PODNIÓSŁ PIWO!`, 'Napisz "rzut", żeby odrzucić je w wilkołaka!');
+          this.boss._log('good', `@${nick} podnosi piwo z ziemi (Faza 2)`, { gracz: nick });
+          break;
+        }
+        if (zebrane || b.zostalo <= 0) this._piwaNaZiemi.splice(i, 1);
+      }
+    }
+    this._renderujPiwaNaZiemi(delta);
+  }
+
+  /** Model butelki (bottle.glb, pirate-kit - juz zaladowany przez boss.js) unoszacy sie nad kazdym lezacym piwem. */
+  _renderujPiwaNaZiemi(delta) {
+    this._piwoWizT += delta;
+    const aktywne = new Set(this._piwaNaZiemi.map((b) => `${b.x},${b.z}`));
+    for (const [key, wiz] of [...this._piwoWizualizacje]) {
+      if (aktywne.has(key)) continue;
+      this.boss.scene.remove(wiz.mesh);
+      this._piwoWizualizacje.delete(key);
+    }
+    if (!this.boss.bottleTemplate) return;
+    for (const b of this._piwaNaZiemi) {
+      const key = `${b.x},${b.z}`;
+      let wiz = this._piwoWizualizacje.get(key);
+      if (!wiz) {
+        const mesh = this.boss.bottleTemplate.clone(true);
+        mesh.traverse((n) => { if (n.isMesh) n.castShadow = true; });
+        mesh.scale.setScalar(0.7);
+        this.boss.scene.add(mesh);
+        wiz = { mesh };
+        this._piwoWizualizacje.set(key, wiz);
+      }
+      wiz.mesh.position.set(b.x, 0.32 + Math.sin(this._piwoWizT * 3) * 0.05, b.z);
+      wiz.mesh.rotation.y += delta * 1.6;
+    }
+  }
+
+  /** Czy dany widz aktualnie niesie piwo - patrz boss.hasPiwo (main.js/ui.js ikona 🍺). */
+  maPiwo(username) {
+    if (!username) return false;
+    return this._piwoNoszone.has(normalizeNick(username));
+  }
+
+  /**
+   * Zapisuje ikone 🍺 WPROST na wpisie rankingu - dokladnie ten sam wzorzec
+   * co _renderBanIkony nizej/wyzej.
+   */
+  _renderPiwoIkony() {
+    const kickChat = this.boss.kickChat;
+    if (!kickChat) return;
+    const aktualne = this._piwoNoszone;
+    for (const key of this._lastPiwoKeys || []) {
+      if (aktualne.has(key)) continue;
+      const wpis = kickChat.leaderboard[key];
+      if (wpis) wpis.wilkolakPiwo = false;
+    }
+    for (const key of aktualne) {
+      const wpis = kickChat.leaderboard[key];
+      if (wpis) wpis.wilkolakPiwo = true;
+    }
+    this._lastPiwoKeys = new Set(aktualne);
+  }
+
+  /**
+   * Gracz z podnietym piwem odrzuca je w wilkolaka pisac "rzut" - flaga
+   * "niesie piwo" znika NA KAZDEJ karcie (ungated, kosmetyka/stan lokalny
+   * odtwarzany tez z sync), ale obrazenia/nagroda sa decyzja hosta.
+   */
+  _sprobujRzutPiwem(username) {
+    const key = normalizeNick(username);
+    if (!this._piwoNoszone.has(key)) return;
+    this._piwoNoszone.delete(key);
+    if (!this._jestemHostem()) return;
+    this.boss.damage(PIWO_DMG);
+    if (this.boss.kickChat) this.boss.kickChat.recordEarned(username, PIWO_NAGRODA, undefined, false);
+    if (this.boss.economy) this.boss.economy.addMoney(PIWO_NAGRODA);
+    audio.wilkolakUderzenie();
+    if (this.boss.projectAndFloat && this.model) {
+      this.boss.projectAndFloat(
+        this.model.position.clone().add(new THREE.Vector3(0, 2.4 * WILK_SCALE, 0)),
+        `🍺 -${PIWO_DMG} HP`,
+        { crit: true },
+      );
+    }
+    showBossNotification(
+      'hit',
+      `🍺 @${username} TRAFIŁ WILKOŁAKA PIWEM!`,
+      `+${PIWO_NAGRODA} zł, wilkołak traci ${PIWO_DMG} HP.`,
+    );
+    this.boss._log('good', `@${username} trafil wilkolaka odrzuconym piwem (Faza 2)`, { gracz: username });
   }
 
   // ================= CZAT =================
@@ -932,7 +1346,11 @@ export class BossWilkolak {
     if (this.faza === 'ALKOHOL_ZAMACH' && /\blo tego\b/.test(norm)) {
       this._sprobujKontre(username);
     }
-    // "rzut" - piwo FAZY 2 (ETAP 2 podepnie efekt, tu tylko rozpoznajemy frazę zgodnie z zadaniem).
+    // "rzut" - odrzucenie podnietego piwa FAZY 2 (patrz _sprobujRzutPiwem;
+    // bez efektu, jesli gracz akurat nie niesie piwa).
+    if (/\brzut\b/.test(norm)) {
+      this._sprobujRzutPiwem(username);
+    }
   }
 
   // ================= UPDATE GLOWNY =================
@@ -949,10 +1367,18 @@ export class BossWilkolak {
 
     this._updateBanExpiry();
     this._renderBanIkony();
+    // Lezace piwo (podnoszenie/wygasanie) dziala NIEZALEZNIE od biezacej fazy
+    // ataku - moze lezec na ziemi w trakcie kolejnego Rzutu piwem albo Szalu
+    // banowego (patrz spec-wilkolak.md "Faza 2"). MUSI isc PRZED
+    // _renderPiwoIkony - inaczej ikona 🍺 spoznialaby sie o jedna klatke za
+    // podniesieniem piwa (odswiezalaby stan sprzed tego update()).
+    this._updatePiwaNaZiemi(delta);
+    this._renderPiwoIkony();
 
-    // Punkt zaczepienia ETAPU 2 - wolane co klatke, jednorazowo (patrz pole
-    // _faza2Wywolana). Nie ma skutku ekonomicznego, wiec bezpiecznie na
-    // KAZDEJ karcie gry (host i widz), bez bramki hosta.
+    // Przejscie (HP<=50, jednorazowo) - wolane co klatke, jednorazowo (patrz
+    // pole _faza2Wywolana). Nie ma bezposredniego skutku ekonomicznego, wiec
+    // bezpiecznie na KAZDEJ karcie gry (host i widz), bez bramki hosta -
+    // patrz komentarz przy _wejdzWFaze2.
     if (!this._faza2Wywolana && this.boss.hp <= 50) {
       this._faza2Wywolana = true;
       this._wejdzWFaze2();
@@ -965,6 +1391,8 @@ export class BossWilkolak {
     else if (this.faza === 'NUR') this._updateNur(delta);
     else if (this.faza === 'PLACZ') this._updatePlacz(delta);
     else if (this.faza === 'BANOWY') this._updateBanowy(delta);
+    else if (this.faza === 'PRZEJSCIE') this._updatePrzejscie(delta);
+    else if (this.faza === 'PIWO') this._updatePiwo(delta);
 
     if (this.faza === 'CZEKANIE' && this.model) {
       this.model.position.set(this.x, 0, this.z);
@@ -975,23 +1403,29 @@ export class BossWilkolak {
   // ================= SPRZATANIE =================
 
   teardown() {
-    this._wyczyscZnaczniki();
-    for (const wpis of this._nurZnacznikiPol.values()) this.boss.fx.usunZnacznik(wpis);
-    this._nurZnacznikiPol.clear();
-    this._ukryjPlaczOverlay();
+    this._wyczyscEfektyAtaku();
     if (this._placzOverlay) {
       this._placzOverlay.remove();
       this._placzOverlay = null;
     }
+    this._usunWizualizacjeSciezek();
+    this._piwaNaZiemi = [];
+    this._renderujPiwaNaZiemi(0);
+    this._piwoNoszone.clear();
     const kickChat = this.boss.kickChat;
     if (kickChat) {
       for (const key of this._lastBanKeys || []) {
         const wpis = kickChat.leaderboard[key];
         if (wpis) wpis.wilkolakBan = false;
       }
+      for (const key of this._lastPiwoKeys || []) {
+        const wpis = kickChat.leaderboard[key];
+        if (wpis) wpis.wilkolakPiwo = false;
+      }
     }
     this.bany.clear();
     this._lastBanKeys = new Set();
+    this._lastPiwoKeys = new Set();
     this.mixer = null;
     this.currentAction = null;
   }
@@ -1016,6 +1450,12 @@ export class BossWilkolak {
       fazaT: this.fazaT,
       dane: this._dane,
       bany: Array.from(this.bany.entries()).map(([key, v]) => ({ key, username: v.username, doFightSec: v.doFightSec })),
+      // Faza 2 - stan lezacego/noszonego piwa, TRWALY miedzy atakami (nie
+      // czesc _dane, bo nie jest przypisany do jednej fazy - patrz
+      // spec-wilkolak.md "Rzut piwem").
+      piwaNaZiemi: this._piwaNaZiemi.map((b) => ({ x: b.x, z: b.z, zostalo: b.zostalo })),
+      piwoNoszone: Array.from(this._piwoNoszone),
+      piwoTrafien: this._piwoTrafien,
     };
   }
 
@@ -1028,6 +1468,11 @@ export class BossWilkolak {
     if (Array.isArray(state.bany)) {
       this.bany = new Map(state.bany.map((b) => [b.key, { username: b.username, doFightSec: b.doFightSec }]));
     }
+    if (Array.isArray(state.piwaNaZiemi)) {
+      this._piwaNaZiemi = state.piwaNaZiemi.map((b) => ({ x: b.x, z: b.z, zostalo: b.zostalo }));
+    }
+    if (Array.isArray(state.piwoNoszone)) this._piwoNoszone = new Set(state.piwoNoszone);
+    if (typeof state.piwoTrafien === 'number') this._piwoTrafien = state.piwoTrafien;
     if (typeof state.faza === 'string' && state.faza !== this.faza) {
       this.faza = state.faza;
       this.fazaT = typeof state.fazaT === 'number' ? state.fazaT : 0;
@@ -1046,8 +1491,15 @@ export class BossWilkolak {
     for (const wpis of this._nurZnacznikiPol.values()) this.boss.fx.usunZnacznik(wpis);
     this._nurZnacznikiPol.clear();
     this._ukryjPlaczOverlay();
+    this._usunWizualizacjeSciezek();
 
-    if (this.faza === 'ALKOHOL_ZAMACH' && this._dane.front) {
+    if (this.faza === 'PRZEJSCIE' && this._dane.sciezki) {
+      this._pokazZnacznikiSciezek(this._dane.sciezki);
+    } else if (this.faza === 'PIWO' && this._dane.cele) {
+      for (const c of this._dane.cele) {
+        this._znaczniki.push(this.boss.fx.oznaczPole(c.x, c.z, KOLOR_ZAMACH, Math.max(0.1, PIWO_LOT_CZAS - this.fazaT)));
+      }
+    } else if (this.faza === 'ALKOHOL_ZAMACH' && this._dane.front) {
       for (const t of this._dane.front) this._znaczniki.push(this.boss.fx.oznaczPole(t.x, t.z, KOLOR_ZAMACH, Math.max(0.1, ALKOHOL_ZAMACH_CZAS - this.fazaT)));
     } else if (this.faza === 'ALKOHOL_STUN' && this._dane.back) {
       for (const t of this._dane.back) {

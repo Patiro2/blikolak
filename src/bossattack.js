@@ -127,12 +127,18 @@ export class BossAttackFx {
     usunObiekt(this.scene, wpis.obj);
   }
 
-  /** Pocisk lecacy po luku z punktu A na srodek pola (x, z). */
-  wystrzelPocisk(start, x, z, czas, onImpact) {
+  /**
+   * Pocisk lecacy po luku z punktu A na srodek pola (x, z). `kolor` opcjonalny
+   * (np. bursztynowy rzut piwem Wilkolaka, tier 5) - bez niego wyglada
+   * DOKLADNIE jak dotychczasowy pocisk wymiotny bossa 1 (zielony).
+   */
+  wystrzelPocisk(start, x, z, czas, onImpact, kolor) {
+    const barwa = kolor || 0x86c232;
+    const emisja = kolor ? new THREE.Color(kolor).multiplyScalar(0.35).getHex() : 0x2f5d10;
     const geo = new THREE.SphereGeometry(0.17, 14, 12);
     const mat = new THREE.MeshStandardMaterial({
-      color: 0x86c232,
-      emissive: 0x2f5d10,
+      color: barwa,
+      emissive: emisja,
       emissiveIntensity: 0.8,
       roughness: 0.4,
     });

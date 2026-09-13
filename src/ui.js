@@ -571,6 +571,15 @@ export class LeaderboardUI {
         left.appendChild(banSpan);
       }
 
+      // Ikona piwa Wilkolaka (Faza 2, tier 5, patrz src/boss-wilkolak.js Rzut
+      // piwem) - ten sam wzorzec co ikona bana wyzej.
+      if (user.wilkolakPiwo) {
+        const piwoSpan = document.createElement('span');
+        piwoSpan.className = 'wilkolak-piwo-ikona';
+        piwoSpan.textContent = '🍺';
+        left.appendChild(piwoSpan);
+      }
+
       const right = document.createElement('div');
       right.className = 'right';
 
@@ -651,6 +660,14 @@ export class WorkerOverlayManager {
     wilkolakBanSpan.style.display = 'none';
     nameplateEl.appendChild(wilkolakBanSpan);
 
+    // Ikona piwa Wilkolaka (Faza 2, tier 5) - utworzona raz tutaj, tak samo
+    // jak ikona bana wyzej.
+    const wilkolakPiwoSpan = document.createElement('span');
+    wilkolakPiwoSpan.className = 'wilkolak-piwo-ikona';
+    wilkolakPiwoSpan.textContent = '🍺';
+    wilkolakPiwoSpan.style.display = 'none';
+    nameplateEl.appendChild(wilkolakPiwoSpan);
+
     const bubbleEl = document.createElement('div');
     bubbleEl.className = 'worker-bubble';
     bubbleEl.style.display = 'none';
@@ -671,6 +688,7 @@ export class WorkerOverlayManager {
       starySpan,
       przedmiotSpan,
       wilkolakBanSpan,
+      wilkolakPiwoSpan,
       bubbleEl,
       connectorEl,
       timer: null,
@@ -702,6 +720,7 @@ export class WorkerOverlayManager {
       item.lastUsername = null;
       item.przedmiotSpan.style.display = 'none';
       item.wilkolakBanSpan.style.display = 'none';
+      item.wilkolakPiwoSpan.style.display = 'none';
       return;
     }
     // Nowy widz zajal ten slot (inny nick niz poprzednio) - stary znacznik
@@ -725,6 +744,7 @@ export class WorkerOverlayManager {
     item.przedmiotSpan.textContent = userData.przedmiotSkorpion || '';
     item.przedmiotSpan.style.display = userData.przedmiotSkorpion ? '' : 'none';
     item.wilkolakBanSpan.style.display = userData.wilkolakBan ? '' : 'none';
+    item.wilkolakPiwoSpan.style.display = userData.wilkolakPiwo ? '' : 'none';
     item.nameplateEl.className = `worker-nameplate ${rank === 1 ? 'rank-1' : ''}`;
     // Kazdy sync rankingu (np. po zwyklym "kliku" z czatu) nadpisuje className
     // i tresc rankSpan - bez tego znacznik omdlenia (boss.js) gasnie po ulamku

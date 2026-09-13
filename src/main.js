@@ -23,6 +23,7 @@ import { fmtShort } from './format.js';
 import { CityBackground } from './city.js';
 import { audio } from './audio.js';
 import { pokazGameOver } from './gameover.js';
+import { pokazZwyciestwoWilkolaka } from './wilkolak-zwyciestwo.js';
 import * as arena from './arena.js';
 
 async function main() {
@@ -913,6 +914,9 @@ async function main() {
               // Ikona bana Wilkolaka (tier 5, patrz src/boss-wilkolak.js) na
               // plakietce nad postacia - ten sam wzorzec co ikona Skorpiona wyzej.
               if (user) user.wilkolakBan = boss.isBanned(user.username);
+              // Ikona piwa Wilkolaka (Faza 2, tier 5, patrz src/boss-wilkolak.js
+              // Rzut piwem) na plakietce nad postacia - ten sam wzorzec co ikona bana wyzej.
+              if (user) user.wilkolakPiwo = boss.hasPiwo(user.username);
               workerOverlays.updateWorkerUser(slot, user);
               if (user) {
                 await ensureWorkerType(slot, user.skin);
@@ -1090,6 +1094,12 @@ async function main() {
       // blokada kamery bossa.
       if (tier === arena.SKORPION_TIER) {
         await arena.growWithCutscene(economy);
+      }
+      // Ostatni boss (Wilkolak, tier 5) - pelnoekranowy ekran zwyciestwa z
+      // Top10 zamiast (a scislej: OBOK) zwyklego banera powyzej. Bez resetu
+      // gry - patrz spec-wilkolak.md "ZWYCIESTWO" i src/wilkolak-zwyciestwo.js.
+      if (tier === 5) {
+        pokazZwyciestwoWilkolaka(kickChat.getTopEarners(10), fmtShort);
       }
       save();
     },

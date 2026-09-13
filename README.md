@@ -108,7 +108,8 @@ Stan zapisuje się sam do `localStorage` co 5 s i przy zamykaniu karty.
 | `src/boss-kowal.js` | mechanika bossa tieru 2 "Kowal_88" - osobny plik, patrz sekcja "Boss" niżej |
 | `src/boss-blackjack.js` | mechanika bossa tieru 3 "Dżordżo" (blackjack) - osobny plik, patrz sekcja "Boss" niżej |
 | `src/boss-skorpion.js` | mechanika bossa tieru 4 "Skorpion" (ucieczka po siatce, zapadanie pól, przedmioty, trucizna, kradzież puli) - osobny plik, patrz sekcja "Boss" niżej |
-| `src/boss-wilkolak.js` | mechanika bossa tieru 5 "Wilkołak" (Szał alkoholowy z kontrą/stunem, Nur, Płacz, Szał banowy - FAZA 1; Przejście i FAZA 2 to ETAP 2) - osobny plik, patrz sekcja "Boss" niżej |
+| `src/boss-wilkolak.js` | mechanika bossa tieru 5 "Wilkołak" - FAZA 1 (Szał alkoholowy z kontrą/stunem, Nur, Płacz, Szał banowy), Przejście (sciezki 1-2-3) i FAZA 2 (Rzut piwem) - osobny plik, patrz sekcja "Boss" niżej |
+| `src/wilkolak-zwyciestwo.js` | pełnoekranowy ekran zwycięstwa po pokonaniu Wilkołaka (tier 5, ostatni boss) - tabela Top 10, bez automatycznego resetu gry |
 | `src/flagbattle.js` | minigra "Bitwa o flagi" - losowanie kraju, dopasowanie odpowiedzi z czatu, korzysta z `countries.js` i `bojka.js`; każda flaga ma limit 60 s (`LIMIT_CZASU_FLAGI_S`) - po jego upływie host odsłania nazwę kraju bez przyznania punktu i po ~3 s losuje kolejną |
 | `src/countries.js` | słownictwo minigry "Bitwa o flagi" - lista krajów, kody ISO, akceptowane warianty nazw |
 | `src/bojka.js` | wspólna, czysto kosmetyczna animacja "bijatyki" (ciosy, kurz) używana przez obie minigry siatki (`flagbattle.js`, `tlumaczenia.js`) |
@@ -163,9 +164,13 @@ Każdy boss ma własną mechanikę w osobnym pliku:
   co sekundę okrada wspólną pulę - czat musi zbierać butelkę i środek
   przeczyszczający, łączyć je w truciznę i zadawać nią obrażenia z bliska.
 - **Tier 5 - Wilkołak, "OSTATNI BOSS MYŚLIBORZA"** (`src/boss-wilkolak.js`,
-  mechanika `'wilkolak'`) - opisany szczegółowo niżej (FAZA 1, 100→50 HP):
+  mechanika `'wilkolak'`) - opisany szczegółowo niżej. FAZA 1 (100→50 HP):
   losowo Szał alkoholowy (zamach z kontrą "ło tego" i stunem), Nur (wężyk po
-  arenie) albo Płacz (zbiórka na kwadracie 3×3), rzadko Szał banowy.
+  arenie) albo Płacz (zbiórka na kwadracie 3×3), rzadko Szał banowy. Przy
+  50 HP jednorazowe Przejście (ścieżki 1-2-3 do przebiegnięcia w 15 s), potem
+  FAZA 2 (0→50 HP): Rzut piwem (uciekaj albo odrzuć podniesione piwo pisząc
+  "rzut"), rzadko znowu Szał banowy. Po pokonaniu - pełnoekranowy ekran
+  zwycięstwa z Top 10 (`src/wilkolak-zwyciestwo.js`), bez resetu gry.
 
 Boss tieru 1 to `wheelchair-deluxe` (Kenney mini-characters) +
 `character-male-f`, złożone w jedną grupę i wyskalowane ×3 względem zwykłych
@@ -208,13 +213,7 @@ postaci.
   kradzież puli są decyzjami hosta (`boss.czyNaliczanieDozwolone()`, ten sam
   wzorzec co w `src/boss-blackjack.js`) - widz je wyłącznie odtwarza z sync.
 
-### Szczegóły bossa tieru 5 (Wilkołak) - ETAP 1 (FAZA 1, 100→50 HP)
-
-> Zaimplementowana jest na razie WYŁĄCZNIE FAZA 1 (100→50 HP). Gdy HP spadnie
-> do ≤50, `BossWilkolak._wejdzWFaze2()` loguje TODO i walka toczy się dalej w
-> FAZIE 1 (ten sam zestaw ataków) - Przejście, FAZA 2 (rzut piwem) i ekran
-> zwycięstwa to ETAP 2. Pokonanie przy 0 HP idzie na razie zwykłą ścieżką
-> `_onDefeatedBoss` (jak Skorpion) - bez pełnoekranowego ekranu zwycięstwa.
+### Szczegóły bossa tieru 5 (Wilkołak)
 
 - **Model**: `character-male-a.glb` (Kenney `mini-arcade`, `assets/arcade/` -
   ten sam rig/klipy co reszta postaci w grze) przyciemniony (kolor materiału
@@ -267,11 +266,74 @@ postaci.
 - **Sterowanie z czatu**: frazy normalizowane istniejącymi `normalizePolish`/
   `normalizeNick`/`usunTagiEmotek`. `ło tego`/`lo tego` kontruje Szał
   alkoholowy (tylko w oknie zamachu, tylko gracz na tylnych polach). `rzut`
-  jest już rozpoznawany, ale bez efektu - to komenda FAZY 2 (rzut piwem),
-  którą podepnie ETAP 2.
+  odrzuca podniesione piwo Fazy 2 (bez efektu, jeśli akurat go nie niesiesz).
+
+#### Przejście (HP ≤ 50, jednorazowo)
+
+Wywoływane raz przez `BossWilkolak._wejdzWFaze2()` (strażnik `_faza2Wywolana`,
+sprawdzany co klatkę w `update()`). Przerywa bieżący atak Fazy 1 (znaczniki,
+trasa Nura, nakładka Płaczu - `_wyczyscEfektyAtaku()`), wilkołak wyje
+(`emote-yes` + `audio.wilkolakWycie()` + baner), po czym:
+
+- **Ścieżki**: każdy żywy gracz dostaje unikalną ścieżkę - pole startowe na
+  krawędzi areny + 3 pola prosto w głąb, wszystkie w jednym z 10 kolorów
+  (`KOLOR_SCIEZKI`), pola 1-3 podpisane cyframi (małe `THREE.Sprite` z
+  canvasem). Dobór ścieżek (`_generujSciezki`) jest deterministyczny (`tasuj`
+  z `src/rng.js` nad wszystkimi kandydatami - 4 krawędzie × przesunięcia) i
+  zachłanny: pierwszy kandydat, którego WSZYSTKIE 4 pola są jeszcze wolne i w
+  arenie, więc ścieżki nigdy się nie przecinają i nigdy nie wchodzą na
+  bankomat, bez żadnego dowodu geometrycznego - tylko test kolizji na
+  zbiorze zajętych pól. Liczone identycznie na KAŻDEJ karcie (jak
+  Alkohol/Nur), więc znaczniki są widoczne bez czekania na sync.
+- **Teleport**: gracze przenoszeni na pole startowe swojej ścieżki (ten sam
+  wzorzec pozycjonowania co `_trafNura`) - decyzja hosta; widz dostaje nowe
+  pozycje generycznym sync `workerManager.getSyncState/applySync`.
+- **Zaliczanie**: pole liczy się TYLKO po zaliczeniu poprzedniego (`sc.idx`
+  rośnie krok po kroku) - bramkowane hostem w `_updatePrzejscie`, widz
+  dostaje postęp zwykłym sync `_dane` (jak reszta atakow w tym pliku). Kto
+  zaliczy wszystkie 3 pola: +20 zł i wilkołak -2,5 HP, jednorazowo na całą
+  walkę. Po 15 s (`PRZEJSCIE_CZAS`) ścieżki gasną i `this.pulaAtakow` zmienia
+  się na `['piwo']` - start Fazy 2.
+
+#### FAZA 2 (50→0 HP) - Rzut piwem
+
+Pętla co 8-12 s (ta sama pula czasowa co Faza 1): rzut piwem, ~10% szans na
+Szał banowy zamiast (ten sam mechanizm banów co w Fazie 1).
+
+- **Rzut piwem**: 2 piwa (1 przy jednym żywym graczu) lecą po łuku
+  (`boss.fx.wystrzelPocisk`, bursztynowy kolor - `wystrzelPocisk` w
+  `bossattack.js` przyjął teraz opcjonalny parametr koloru, domyślnie
+  identyczny jak dotąd dla pocisku wymiotnego bossa 1) w 2 różnych żywych
+  graczy - pole celu świeci czerwono 2 s, kto na nim stoi w chwili
+  uderzenia, ginie (skutek jak rakieta bossa 1) i liczy się do licznika
+  trafień CAŁEJ Fazy 2 - przy 4 trafieniach `boss.onGameOver('GAME OVER,
+  WRACASZ DO MYŚLIBORZA')` i pełny reset (ten sam mechanizm co u Skorpiona).
+  Niepodniete piwo, które nie trafiło, leży na ziemi 5 s (model `bottle.glb`
+  z `kenney_pirate-kit`, już załadowany przez `boss.js` dla Skorpiona) -
+  gracz, który wejdzie na jego pole, podnosi je (ikona 🍺 przy nicku, max 1
+  naraz, ten sam wzorzec co ikona bana 🚫 - `wilkolakPiwo` na wpisie
+  rankingu, `boss.hasPiwo(nick)`). Pisząc `rzut`, gracz odrzuca piwo w
+  wilkołaka - zawsze trafia: -12,5 HP, +50 zł.
+- **Sync**: lezące piwo i lista noszących (`piwaNaZiemi`/`piwoNoszone`) idą w
+  `getSyncState`/`applySync` jako stan TRWAŁY między atakami (nie część
+  `_dane`, bo nie należy do jednej fazy) - widz odtwarza to samo bez
+  czekania na własną symulację podnoszenia/wygasania.
+
+### Zwycięstwo (0 HP)
+
+Po pokonaniu Wilkołaka (`_onDefeatedBoss` w `boss.js`, jak Kowal/Dżordżo -
+klip `die`) i standardowym awansie tieru (`onDefeated` w `main.js`), dla
+`tier === 5` pokazuje się DODATKOWO pełnoekranowy ekran zwycięstwa
+(`pokazZwyciestwoWilkolaka` w `src/wilkolak-zwyciestwo.js`) - "MYŚLIBÓRZ
+URATOWANY!" + tabela Top 10 (`kickChat.getTopEarners(10)`, kwoty przez
+`fmtShort`, ten sam wzorzec co ranking na boku). W odróżnieniu od
+`pokazGameOver()` NIE ma automatycznego resetu gry - ekran zamyka wyłącznie
+przycisk "Zamknij", a przycisk "Reset gry" w HUD deweloperskim działa dalej
+bez zmian.
+
 - **Testy**: przycisk **🐺 Zresp wilkołaka** (`boss.start(5, { force: true })`)
   i **🩸 Faza 2 (test)** (ustawia HP wilkołaka na 50, żeby łatwo sprawdzić
-  próg `_wejdzWFaze2` bez przechodzenia całej FAZY 1) obok reszty przycisków
+  próg Przejścia bez przechodzenia całej Fazy 1) obok reszty przycisków
   testowych w HUD.
 
 ### Szczegóły bossa tieru 1 (Kamil Kovalenko)

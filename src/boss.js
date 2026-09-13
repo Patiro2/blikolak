@@ -433,6 +433,12 @@ export class BossManager {
     return this.wilkolak.isBanned(username);
   }
 
+  /** Czy dany widz aktualnie niesie piwo Wilkolaka (Faza 2, tier 5) - patrz main.js ikona 🍺. */
+  hasPiwo(username) {
+    if (!username || !this.wilkolak) return false;
+    return this.wilkolak.maPiwo(username);
+  }
+
   // --- DOM overlaye: plakietka z HP, dymek z dzialaniem, letterbox, karta tytulowa ---
   _createDOMOverlays() {
     const np = document.createElement('div');
@@ -1549,6 +1555,16 @@ export class BossManager {
         ofiara: username,
         utraconeZl: lostAmount,
       });
+    } else if (source === 'wilkolak-piwo') {
+      showBossNotification(
+        'kill',
+        `🍺 PIWO ROZTRZASKAŁO SIĘ NA @${username}!`,
+        `Stał na polu rzutu w Fazie 2. Stracił cały dorobek (<strong>${fmtShort(lostAmount)} zł</strong>) i wypadł z rankingu.`,
+      );
+      this._log('bad', `Wilkolak "zabil" @${username} - Rzut piwem (Faza 2) - stracil ${lostAmount} zl i wypadl z rankingu`, {
+        ofiara: username,
+        utraconeZl: lostAmount,
+      });
     } else {
       showBossNotification(
         'kill',
@@ -1953,9 +1969,9 @@ export class BossManager {
 
     if (this.def && this.def.mechanika === 'wilkolak') {
       // Wilkolak stoi (postac skinowana, nie siedzi w wozku) - standardowy
-      // klip "die" pasuje tu wprost, tak samo jak Kowal/Dzordzo. Pokonanie
-      // przy 0 HP jest na razie zwykla sciezka _onDefeatedBoss (ETAP 2 doda
-      // pelnoekranowy ekran zwyciestwa z Top10, patrz spec-wilkolak.md).
+      // klip "die" pasuje tu wprost, tak samo jak Kowal/Dzordzo. Pelnoekranowy
+      // ekran zwyciestwa z Top10 (main.js onDefeated, tier === 5) dokladany
+      // jest PO tej sciezce (patrz spec-wilkolak.md "ZWYCIESTWO").
       if (this.wilkolak) this.wilkolak.playAction('die', { hard: true, once: true });
       this._victoryT = 0;
       showBossNotification(
