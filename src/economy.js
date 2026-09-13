@@ -77,6 +77,12 @@ function defaultState() {
     // sam klucz zdarzenia (patrz src/rng.js), wszystkie karty licza DOKLADNIE
     // to samo - rownania bossa, pola atakow, krytyki, Vanesse, zlota moneta.
     seedGry: losujSeedGry(),
+    // Trwale liczniki "ile pozycji tej puli juz wydano w tej rozgrywce" -
+    // patrz pozycjaBezPowtorek w rng.js. Zapisywane w stanie (jak seedGry),
+    // wiec bitwy o flagi/tlumaczen nie powtarzaja zestawow miedzy
+    // przeladowaniami strony ani miedzy kolejnymi bitwami tej samej rozgrywki.
+    licznikFlag: 0,
+    licznikSlowek: 0,
     // Znacznik czasu (ms) ustawiany razem z seedGry - kotwica dla zdarzen
     // czasowych (harmonogram Vanessy, zlotej monety), patrz src/vanessa.js
     // i src/goldcoin.js: numer cyklu = floor((Date.now()-epokaStartu)/dlugoscCyklu).
@@ -123,6 +129,12 @@ export class Economy {
         }
         if (typeof merged.epokaStartu !== 'number' || !isFinite(merged.epokaStartu) || merged.epokaStartu <= 0) {
           merged.epokaStartu = Date.now();
+        }
+        if (typeof merged.licznikFlag !== 'number' || !isFinite(merged.licznikFlag) || merged.licznikFlag < 0) {
+          merged.licznikFlag = 0;
+        }
+        if (typeof merged.licznikSlowek !== 'number' || !isFinite(merged.licznikSlowek) || merged.licznikSlowek < 0) {
+          merged.licznikSlowek = 0;
         }
         return merged;
       }

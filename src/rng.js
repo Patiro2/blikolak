@@ -92,3 +92,26 @@ export function tasuj(rng, tablica) {
   }
   return wynik;
 }
+
+// Cache ostatniej permutacji per (nazwaPuli:cykl) - zeby pozycjaBezPowtorek
+// nie tasowal calej puli (np. 1000 slowek) przy kazdej pojedynczej rundzie.
+const _cacheCykli = new Map();
+
+/**
+ * Zwraca kolejna pozycje z puli BEZ POWTOREK w obrebie calej rozgrywki: jedna
+ * permutacja calej puli na "cykl" (floor(licznik/pula.length)), dopiero po
+ * wyczerpaniu wszystkich pozycji zaczyna sie nowy cykl z nowa permutacja.
+ * `licznik` to trwaly, zapisywany licznik (np. economy.state.licznikFlag) -
+ * rosnie monotonicznie przez cala rozgrywke, wiec dziala tez po przeladowaniu
+ * strony.
+ */
+export function pozycjaBezPowtorek(seedGry, nazwaPuli, pula, licznik) {
+  const cykl = Math.floor(licznik / pula.length);
+  const kluczCache = `${seedGry}:${nazwaPuli}:${cykl}`;
+  let perm = _cacheCykli.get(kluczCache);
+  if (!perm) {
+    perm = tasuj(strumien(`${seedGry}:${nazwaPuli}:cykl:${cykl}`), pula);
+    _cacheCykli.set(kluczCache, perm);
+  }
+  return perm[licznik % pula.length];
+}

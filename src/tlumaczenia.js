@@ -8,7 +8,7 @@ import {
 } from './slowka.js';
 import { usunTagiEmotek } from './kick.js';
 import { loadForest } from './assets.js';
-import { strumien, losujInt, tasuj } from './rng.js';
+import { strumien, losujInt, pozycjaBezPowtorek } from './rng.js';
 import { Bojka } from './bojka.js';
 
 // Minigra "Tlumaczenia" - DRUGA (a chronologicznie trzecia w projekcie) minigra
@@ -178,10 +178,6 @@ export class TlumaczeniaManager {
     // (getSyncState/applySync), NIE lokalny licznik karty - inkrementowany
     // WYLACZNIE przez hosta, tak samo jak w flagbattle.js.
     this.battleId = 0;
-    // Permutacja calej puli ENGLISH_WORDS na biezaca bitwe (patrz
-    // spawnBattleSquare/nextRound) - budowana leniwie przy pierwszej rundzie,
-    // null oznacza "jeszcze nie zbudowana dla biezacego battleId".
-    this._kolejnoscSlow = null;
 
     this.rewardTimer = 0;
     this.winner = null;
@@ -384,8 +380,8 @@ export class TlumaczeniaManager {
    * dzialac rownolegle, ale nigdy nie moga stanac na tym samym kafelku (patrz
    * komentarz przy flagBattleRef w setContext). Losowanie jest
    * DETERMINISTYCZNE - z tego samego wspolnego strumienia co reszta gry
-   * (src/rng.js), kluczem `${seedGry}:tlumaczenia-pole:${battleId}`, wiec
-   * host i kazdy widz (ktory kiedys moze zostac hostem, patrz komentarz przy
+   * (src/rng.js), kluczem `${seedGry}:tlumaczenia-pole:${licznikSlowek}:${battleId}`,
+   * wiec host i kazdy widz (ktory kiedys moze zostac hostem, patrz komentarz przy
    * setHost) wyliczaja DOKLADNIE to samo pole z tych samych danych - zero
    * Math.random() w logice rozgrywki (patrz rng.js po uzasadnienie).
    *
@@ -398,13 +394,13 @@ export class TlumaczeniaManager {
 
   spawnBattleSquare() {
     this.battleId += 1;
-    // Nowa bitwa = nowa permutacja puli slowek; null tutaj wystarczy, bo
-    // faktyczne tasowanie (potrzebuje juz przyrostowego this.battleId w
-    // kluczu) wykonuje sie leniwie w nextRound() przy pierwszej rundzie.
-    this._kolejnoscSlow = null;
 
+    // Klucz zawiera licznikSlowek (trwaly, rosnie z kazda runda slowek -
+    // patrz nextRound) ORAZ battleId, zeby kolejna bitwa dostala inne pole
+    // rowniez po przeladowaniu strony (patrz analogiczny komentarz przy
+    // kluczu flaga-pole w flagbattle.js).
     const zajeteFlag = this.flagBattleRef && this.flagBattleRef.tile ? this.flagBattleRef.tile : null;
-    const klucz = `${this.economy.state.seedGry}:tlumaczenia-pole:${this.battleId}`;
+    const klucz = `${this.economy.state.seedGry}:tlumaczenia-pole:${this.economy.state.licznikSlowek}:${this.battleId}`;
     const rng = strumien(klucz);
 
     let rx = null;
@@ -480,10 +476,6 @@ export class TlumaczeniaManager {
 
       this.state = 'BATTLE';
       this.wordsGuessed = 0;
-      // battleId sie tu NIE zmienia (ustawia go wylacznie spawnBattleSquare),
-      // wiec permutacja zbudowana ewentualnie wczesniej (nie powinno sie
-      // zdarzyc przy normalnym przebiegu WAITING->BATTLE, ale dla porzadku)
-      // zostaje - nie czyscimy jej ponownie tutaj.
 
       const angleP1 = Math.atan2(p2.obj.position.x - p1.obj.position.x, p2.obj.position.z - p1.obj.position.z);
       p1.targetRotY = angleP1;
@@ -520,32 +512,18 @@ export class TlumaczeniaManager {
   nextRound() {
     if (this.state !== 'BATTLE') return;
 
-    // Losowanie slowa BEZ POWTOREK w obrebie bitwy: zamiast losowac
-    // pojedyncze slowo w petli "probuj az trafisz nieuzyte" (dawny
-    // MAX_PROB_LOSOWANIA_SLOWA + _uzyteSlowa, usuniete - patrz obszerny
-    // komentarz przy tasuj() w rng.js po pelne uzasadnienie wad tamtego
-    // podejscia), TASUJEMY RAZ CALA PULE ENGLISH_WORDS na poczatku bitwy i
-    // kazda runda bierze kolejna pozycje z gotowej permutacji. Klucz
-    // `${seedGry}:tlumaczenia-kolejnosc:${battleId}` - oparty o
-    // SYNCHRONIZOWANY battleId (nie o lokalny licznik karty), wiec host i
-    // kazdy widz licza DOKLADNIE ta sama permutacje z tych samych danych
-    // (identyczne uzasadnienie determinizmu co przy kluczu
-    // tlumaczenia-pole w spawnBattleSquare powyzej) - synchronizacja
-    // (getSyncState/applySync) nie jest tu w ogole zaangazowana, bo widz
-    // nigdy sam nie wywoluje nextRound() (patrz applySync: currentWord
-    // przychodzi gotowe w stanie hosta), a permutacje liczy TYLKO host.
-    if (!this._kolejnoscSlow) {
-      const kluczKolejnosci = `${this.economy.state.seedGry}:tlumaczenia-kolejnosc:${this.battleId}`;
-      this._kolejnoscSlow = tasuj(strumien(kluczKolejnosci), ENGLISH_WORDS);
-    }
-
-    const numerRundy = this.wordsGuessed + 1;
-    // Modulo dlugosci puli - czysto obronne (bitwa "best of 9" zuzywa
-    // najwyzej 9 slow z puli 1000, wiec w praktyce nigdy nie zawinie), ale
-    // gwarantuje, ze indeks NIGDY nie da undefined nawet gdyby PUNKTY_DO_WYGRANEJ
-    // kiedys urosl ponad dlugosc ENGLISH_WORDS.
-    const indeks = (numerRundy - 1) % this._kolejnoscSlow.length;
-    this.currentWord = this._kolejnoscSlow[indeks];
+    // Bez powtorek, dopoki nie zostanie wylosowana CALA pula slowek w tej
+    // ROZGRYWCE (nie tylko w tej bitwie) - patrz pozycjaBezPowtorek w rng.js
+    // i licznikSlowek w economy.js (trwaly, zapisywany licznik). Wolane
+    // WYLACZNIE przez hosta (nextRound woluja tylko checkPlayersEntry i
+    // onChatMessage, oba za straza isHost), wiec tylko host inkrementuje.
+    this.currentWord = pozycjaBezPowtorek(
+      this.economy.state.seedGry,
+      'slowka',
+      ENGLISH_WORDS,
+      this.economy.state.licznikSlowek,
+    );
+    this.economy.state.licznikSlowek += 1;
     this._stosujTeksturaSlowa(this.currentWord);
   }
 
@@ -730,7 +708,6 @@ export class TlumaczeniaManager {
     this.winner = null;
     this.rewardTimer = 0;
     this._lastRewardTime = 0;
-    this._kolejnoscSlow = null;
     this.highlightMesh.visible = false;
     this.wordSprite.visible = false;
     this.markerPierscien.material.opacity = 0.95;
