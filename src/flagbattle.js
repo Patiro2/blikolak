@@ -632,7 +632,7 @@ export class FlagBattleManager {
       this.bojka.start(this.tile, this.players, `${this.economy.state.seedGry}:flaga-bojka:${this.battleId}`);
 
       this.nextRound();
-      this.announce(`Bitwa o flagi! ${p1User} vs ${p2User}! Wpisuj nazwę państwa na czacie! Kto pierwszy zdobędzie 3 pkt wygrywa!`);
+      this.announce(`Bitwa o flagi! ${p1User} vs ${p2User}! Wpisuj nazwę państwa na czacie! Kto pierwszy zdobędzie 5 pkt wygrywa!`);
     }
   }
   
@@ -753,7 +753,7 @@ export class FlagBattleManager {
 
       this.announce(`${username} zgaduje poprawnie: ${properName}!${dopisekBliznika} (Punkty: ${player.score})`);
 
-      if (player.score >= 3) {
+      if (player.score >= 5) { // bo9 - pierwszy do 5 flag
         this.endBattle(player);
       } else {
         setTimeout(() => this.nextRound(), 1000);
