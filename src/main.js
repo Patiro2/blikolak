@@ -13,7 +13,7 @@ import { Economy, WORKER_TYPE_DEFS, MACHINE_TIERS, SAVE_KEY } from './economy.js
 import { remote, czyLokalnie } from './remote.js';
 import { Realtime, URL_RELAYA } from './realtime.js';
 import { LEADERBOARD_KEY, ASSIGNMENTS_KEY } from './kick.js';
-import { UI, KickUI, KickEmbedUI, LeaderboardUI, WorkerOverlayManager } from './ui.js';
+import { UI, KickUI, KickEmbedUI, LeaderboardUI, WorkerOverlayManager, LegendUI } from './ui.js';
 import { KickChatClient } from './kick.js';
 import { VanessaManager, showTopAnnouncement } from './vanessa.js';
 import { BossManager, BOSS_DEFS } from './boss.js';
@@ -141,10 +141,10 @@ async function main() {
 
   // Kazdy z 10 slotow rankingu Top 10 ma stala "role" (patrz WORKER_TYPE_DEFS).
   // Awatar pojawia sie w scenie dokladnie raz, gdy ktos zajmie dany slot.
-  async function ensureWorkerType(slotIndex) {
+  async function ensureWorkerType(slotIndex, skinName) {
     const def = WORKER_TYPE_DEFS[slotIndex];
     if (!def) return;
-    await workerManager.addWorkerType(slotIndex, def.modelKey);
+    await workerManager.addWorkerType(slotIndex, def.modelKey, skinName);
   }
 
   const coinPool = new CoinPool(scene);
@@ -790,6 +790,7 @@ async function main() {
 
   const kickUI = new KickUI();
   new KickEmbedUI();
+  new LegendUI();
   const leaderboardUI = new LeaderboardUI();
   const workerOverlays = new WorkerOverlayManager();
   let ui;
@@ -825,7 +826,7 @@ async function main() {
               if (user && boss.skorpion) user.przedmiotSkorpion = boss.skorpion.getItemForUsername(user.username);
               workerOverlays.updateWorkerUser(slot, user);
               if (user) {
-                await ensureWorkerType(slot);
+                await ensureWorkerType(slot, user.skin);
               }
             } catch (slotErr) {
               // Blad pojedynczego slotu (np. zerwane polaczenie przy ladowaniu

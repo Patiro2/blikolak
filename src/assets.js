@@ -35,6 +35,11 @@ const BLASTER_PATH = 'assets/blaster/';
 // kenney_cube-pets ma WLASNY Textures/colormap.png - osobny katalog assets/cubepets/.
 // Uzywane wylacznie do dekoracyjnego "placu zabaw" na przedpolu (patrz city.js).
 const CUBEPETS_PATH = 'assets/cubepets/';
+// kenney_blocky-characters ma WLASNY zestaw 18 tekstur (texture-a..r.png, patrz
+// CLAUDE.md) - osobny katalog assets/blocky/. Uzywane wylacznie jako skiny
+// (patrz src/skiny.js) - postacie sa ~4x wieksze niz reszta rigu, dlatego
+// skiny.js dobiera im wspolczynnik skali dopasowany do character-male-a.
+const BLOCKY_PATH = 'assets/blocky/';
 
 function fixMaterials(root) {
   root.traverse((node) => {
@@ -182,6 +187,10 @@ export function loadBlaster(name) {
 
 export function loadCubePets(name) {
   return loadGltf(`${CUBEPETS_PATH}${name}.glb`);
+}
+
+export function loadBlocky(name) {
+  return loadGltf(`${BLOCKY_PATH}${name}.glb`);
 }
 
 /**

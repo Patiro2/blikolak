@@ -6,6 +6,7 @@
  */
 
 import { showTopAnnouncement } from './vanessa.js';
+import { isValidSkin } from './skiny.js';
 
 const PUSHER_APP_KEY = '32cbd69e4b950bf97679';
 const PUSHER_CLUSTER = 'us2';
@@ -347,6 +348,9 @@ export class KickChatClient {
       rank: rankIndex >= 0 ? rankIndex + 1 : null,
       wygraneMinigry: this.leaderboard[cleanUser]?.wygraneMinigry || 0,
       teczowyNick: !!this.leaderboard[cleanUser]?.teczowyNick,
+      // Skin wybrany komenda czatu "!skin <nazwa>" (patrz SKINS w skiny.js i
+      // obsluga ponizej w _processChatMessage) - null = domyslny model roli.
+      skin: this.leaderboard[cleanUser]?.skin || null,
     };
   }
 
@@ -730,6 +734,38 @@ export class KickChatClient {
           } catch (err) {
             console.error('[KickChat] Blad w showTopAnnouncement:', err);
           }
+        }
+      }
+
+      // Komenda "!skin <nazwa>" (dziala tez bez "!") - podmienia model
+      // awatara widza w Top 10 (patrz SKINS w skiny.js, uzycie w
+      // getUserForWorker wyzej i workers.js addWorkerType). Nieznana nazwa
+      // jest cicho ignorowana - bez spamu w czacie. Sama wiadomosc juz
+      // policzyla sie jako klik wyzej (onKlik), to sie nie zmienia.
+      // "!skin" bez argumentu albo "!skin reset" usuwa nadpisanie (wraca
+      // domyslny model roli).
+      const skinMatch = /^[!/]?skin(?:\s+(\S+))?$/i.exec(content.trim());
+      if (skinMatch) {
+        const entry = this.leaderboard[normalizeNick(username)];
+        if (entry) {
+          const arg = (skinMatch[1] || '').trim().toLowerCase();
+          if (!arg || arg === 'reset') {
+            if (entry.skin) {
+              delete entry.skin;
+              this._saveLeaderboard();
+              this._scheduleLeaderboardUpdate();
+            }
+          } else if (isValidSkin(arg)) {
+            entry.skin = arg;
+            this._saveLeaderboard();
+            this._scheduleLeaderboardUpdate();
+            try {
+              showTopAnnouncement('Nowy skin!', `${username} → ${arg}`);
+            } catch (err) {
+              console.error('[KickChat] Blad w showTopAnnouncement (skin):', err);
+            }
+          }
+          // nieznana nazwa skina - nic sie nie dzieje
         }
       }
     }

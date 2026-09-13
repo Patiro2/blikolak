@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { fmt } from './format.js';
 import { wezlyZTrescia } from './kick.js';
+import { getSkinNames } from './skiny.js';
 
 const NARROW_SCREEN_BREAKPOINT = 700;
 
@@ -841,4 +842,112 @@ export function showBossNotification(type, title, bodyText, durationMs = DEFAULT
       }
     }, 320);
   }, durationMs);
+}
+
+// Krotkie streszczenie komend czatu dla widzow - NIE zawiera zadnych sekretnych
+// kodow (patrz KODY w kick.js, np. "aezakmi" - to celowa niespodzianka do
+// odkrycia, ma zostac poza legenda). Tresc jest krotszym powtorzeniem tego,
+// co jest w panelu "Jak grac?" (patrz src/tutorial.js, ktorego nie wolno tu
+// ruszac) - zduplikowana, nie zaimportowana, bo tamten plik nic nie eksportuje.
+const LEGENDA_KOMENDY = [
+  { tytul: 'Klikanie', opis: 'Kazda wiadomosc na czacie to jedno klikniecie w bankomat - nie trzeba pisac "klik".' },
+  {
+    tytul: 'Ruch (tylko Top 10)',
+    opis: 'Jedno pole: <code>w</code>/<code>a</code>/<code>s</code>/<code>d</code>, <code>gora</code>/<code>dol</code>/<code>lewo</code>/<code>prawo</code>, <code>up</code>/<code>down</code>/<code>left</code>/<code>right</code>. Skos bez obrotu: <code>q</code>/<code>e</code>/<code>z</code>/<code>c</code>. Kombinacje do 5 liter, np. <code>wwd</code>.',
+  },
+  {
+    tytul: 'Minigry na arenie',
+    opis: 'Bitwa o flagi, bitwa tlumaczen, panstwa-miasta, bitwa o marki: dwie postacie z Top 10 wchodza na oznaczone pole i wpisuja odpowiedz (panstwo/tlumaczenie/marka) na czacie - kto pierwszy zdobedzie 5 punktow, wygrywa.',
+  },
+  { tytul: 'Vanessa', opis: 'Gdy zlodziejka podkradnie zlotowki, kazdy na czacie moze ja przegonic haslem widocznym nad ekranem.' },
+  { tytul: 'Zmiana skina', opis: 'Komenda <code>!skin nazwa</code> (dziala tez bez "!") zmienia wyglad Twojej postaci w Top 10 - lista nazw ponizej. <code>!skin reset</code> wraca do domyslnego modelu.' },
+];
+
+function zbudujPanelLegendy() {
+  const panel = document.createElement('div');
+  panel.id = 'legenda-panel';
+  panel.hidden = true;
+
+  const header = document.createElement('div');
+  header.id = 'legenda-header';
+  header.innerHTML = '<span>📖 Legenda</span>';
+
+  const closeBtn = document.createElement('button');
+  closeBtn.id = 'legenda-close-btn';
+  closeBtn.type = 'button';
+  closeBtn.title = 'Zamknij (Esc)';
+  closeBtn.textContent = '✕';
+  header.appendChild(closeBtn);
+
+  const body = document.createElement('div');
+  body.id = 'legenda-body';
+
+  for (const { tytul, opis } of LEGENDA_KOMENDY) {
+    const sec = document.createElement('div');
+    sec.className = 'legenda-section';
+    const h3 = document.createElement('h3');
+    h3.textContent = tytul;
+    const p = document.createElement('p');
+    // Tresc stala, wpisana w kodzie wyzej (nie od uzytkownika) - innerHTML
+    // tylko po to, by wyroznic <code>.
+    p.innerHTML = opis;
+    sec.appendChild(h3);
+    sec.appendChild(p);
+    body.appendChild(sec);
+  }
+
+  const skinySec = document.createElement('div');
+  skinySec.className = 'legenda-section';
+  const skinyH3 = document.createElement('h3');
+  skinyH3.textContent = 'Dostepne skiny';
+  const skinyLista = document.createElement('div');
+  skinyLista.id = 'legenda-skiny-lista';
+  // Generowana z tabeli skiny.js, nie przepisana recznie - nowy skin w tabeli
+  // pojawi sie tu automatycznie.
+  for (const nazwa of getSkinNames()) {
+    const chip = document.createElement('code');
+    chip.className = 'legenda-skin-chip';
+    chip.textContent = nazwa;
+    skinyLista.appendChild(chip);
+  }
+  skinySec.appendChild(skinyH3);
+  skinySec.appendChild(skinyLista);
+  body.appendChild(skinySec);
+
+  panel.appendChild(header);
+  panel.appendChild(body);
+  document.body.appendChild(panel);
+
+  return { panel, closeBtn };
+}
+
+/**
+ * Guzik + panel "Legenda" w prawym gornym rogu: komendy czatu dla widzow i
+ * lista nazw skinow (patrz skiny.js). Panel stoi poza #hud (wlasny
+ * position:fixed, jak #tutorial-panel), zeby nie zalezec od pointer-events
+ * HUD-u. Otwierany/zamykany guzikiem #legenda-btn (z index.html, w
+ * #top-right-buttons) albo klawiszem Escape.
+ */
+export class LegendUI {
+  constructor() {
+    const btn = document.getElementById('legenda-btn');
+    if (!btn) return;
+    const { panel, closeBtn } = zbudujPanelLegendy();
+    this.panel = panel;
+
+    const otworz = () => { panel.hidden = false; };
+    const zamknij = () => { panel.hidden = true; };
+    const przelacz = () => { panel.hidden ? otworz() : zamknij(); };
+
+    btn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      przelacz();
+    });
+    closeBtn.addEventListener('click', zamknij);
+    panel.addEventListener('click', (ev) => ev.stopPropagation());
+    document.addEventListener('click', zamknij);
+    document.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Escape' && !panel.hidden) zamknij();
+    });
+  }
 }

@@ -2,6 +2,25 @@ import * as THREE from 'three';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { loadArcade } from './assets.js';
 import { audio } from './audio.js';
+import { getSkinDef } from './skiny.js';
+
+/**
+ * Rozstrzyga, jaki model/loader/skala nalezy uzyc dla danego slotu: skin z
+ * czatu (patrz skiny.js, komenda "!skin"), jesli podany i istnieje w
+ * tabeli, w przeciwnym razie domyslny model roli (WORKER_TYPE_DEFS w
+ * economy.js) z paczki arcade w skali 1. cacheKey rozroznia szablony w
+ * WorkerManager.templates (skin moze miec ta sama nazwe pliku co inny model
+ * z innej paczki, stad prefiks).
+ */
+function resolveSpec(defaultModelKey, skinName) {
+  if (skinName) {
+    const def = getSkinDef(skinName);
+    if (def) {
+      return { model: def.model, loader: def.loader, scale: def.scale || 1, cacheKey: `skin:${skinName}`, skin: skinName };
+    }
+  }
+  return { model: defaultModelKey, loader: loadArcade, scale: 1, cacheKey: `rola:${defaultModelKey}`, skin: null };
+}
 
 /**
  * Zaokrągla kąt obrotu do najbliższego z 4 kardynalnych kierunków świata:
@@ -174,11 +193,95 @@ export class WorkerManager {
     this.bitwaMarekRef = bitwaMarek;
   }
 
-  async _getTemplate(modelKey) {
-    if (this.templates.has(modelKey)) return this.templates.get(modelKey);
-    const gltf = await loadArcade(modelKey);
-    this.templates.set(modelKey, gltf);
+  async _getTemplate(spec) {
+    if (this.templates.has(spec.cacheKey)) return this.templates.get(spec.cacheKey);
+    const gltf = await spec.loader(spec.model);
+    this.templates.set(spec.cacheKey, gltf);
     return gltf;
+  }
+
+  /**
+   * (Zbudowuje na nowo albo podmienia) reprezentacje wizualna wpisu: model
+   * (SkeletonUtils.clone opakowany w entry.obj - Group-wrapper, ktory niesie
+   * pozycje/rotacje/siatke i NIE jest ruszany przy podmianie skina), mixer i
+   * akcje idle/walk/interact-right. Uzywane zarowno przy pierwszym tworzeniu
+   * pracownika, jak i przy zmianie skina komenda "!skin" (patrz addWorkerType) -
+   * DRY, zeby obie sciezki mialy dokladnie te sama logike wiazania animacji.
+   *
+   * Skala idzie na SAM MODEL (dziecko wrappera), nie na entry.obj - dzieki
+   * temu skalowanie (np. blocky-characters, patrz skiny.js) nie wplywa na
+   * pozycje/ruch liczony na entry.obj gdzie indziej w tym pliku.
+   */
+  async _applyVisual(entry, spec) {
+    const gltf = await this._getTemplate(spec);
+
+    const model = SkeletonUtils.clone(gltf.scene);
+    model.scale.setScalar(spec.scale || 1);
+    model.traverse((child) => {
+      if (child.isMesh) {
+        child.castShadow = true;
+        child.receiveShadow = true;
+      }
+    });
+
+    if (entry.model) entry.obj.remove(entry.model);
+    entry.obj.add(model);
+    entry.model = model;
+    entry.cacheKey = spec.cacheKey;
+    entry.skin = spec.skin;
+    entry.gltfAnimations = gltf.animations;
+    entry.attackActions = {};
+    entry._aktywnaAkcjaAtaku = null;
+    entry.playingInteract = false;
+    entry.dieAction = null;
+
+    const mixer = new THREE.AnimationMixer(model);
+    entry.mixer = mixer;
+
+    const idleClip = THREE.AnimationClip.findByName(gltf.animations, 'idle');
+    const walkClip = THREE.AnimationClip.findByName(gltf.animations, 'walk');
+    const interactClip = THREE.AnimationClip.findByName(gltf.animations, 'interact-right');
+
+    entry.idleAction = idleClip ? mixer.clipAction(idleClip) : null;
+    entry.walkAction = walkClip ? mixer.clipAction(walkClip) : null;
+    entry.interactAction = interactClip ? mixer.clipAction(interactClip) : null;
+
+    if (entry.walkAction) entry.walkAction.setLoop(THREE.LoopRepeat);
+    if (entry.interactAction) {
+      entry.interactAction.setLoop(THREE.LoopOnce);
+      entry.interactAction.clampWhenFinished = true;
+    }
+
+    this._wireMixerFinished(entry);
+
+    if (entry.isFainted) {
+      // ponytail: przy zmianie skina w trakcie omdlenia nowy model odgrywa
+      // animacje upadku od nowa (nie da sie "wskoczyc" w polowe cudzego
+      // klipu die) - kosmetyczny szczegol, do poprawy jesli razi na streamie.
+      this.playDeath(entry.typeIndex);
+    } else if (entry.idleAction) {
+      entry.idleAction.play();
+    }
+  }
+
+  /** Podpina wspolny listener 'finished' pod mixer wpisu - patrz _applyVisual. */
+  _wireMixerFinished(entry) {
+    entry.mixer.addEventListener('finished', (e) => {
+      if (entry.interactAction && e.action === entry.interactAction) {
+        entry.playingInteract = false;
+        if (entry.idleAction && !entry.isFainted && !entry.isMoving) {
+          // idle MUSI byc wznowione przed przejsciem - patrz wrocDoIdle.
+          wrocDoIdle(entry, entry.interactAction, 0.3);
+        }
+      } else if (entry._aktywnaAkcjaAtaku && e.action === entry._aktywnaAkcjaAtaku) {
+        const akcja = entry._aktywnaAkcjaAtaku;
+        entry._aktywnaAkcjaAtaku = null;
+        entry.playingInteract = false;
+        if (entry.idleAction && !entry.isFainted && !entry.isMoving) {
+          wrocDoIdle(entry, akcja, 0.25);
+        }
+      }
+    });
   }
 
   _circlePosition(typeIndex) {
@@ -220,20 +323,34 @@ export class WorkerManager {
    * Dodaje reprezentanta danego typu pracownika do sceny (dokładnie raz na typ).
    * Zabezpieczone blokadą asynchroniczną (pending Map) przed wielokrotnym tworzeniem
    * modeli przy równoległych zapytaniach oraz automatycznym usuwaniem duplikatów.
+   *
+   * `skinName` (opcjonalny, z entry.skin rankingu - patrz kick.js komenda
+   * "!skin") nadpisuje domyslny model roli (defaultModelKey z WORKER_TYPE_DEFS)
+   * - patrz resolveSpec. Gdy juz istniejacy awatar ma inny model niz wynika
+   * ze spec (skin sie zmienil), PODMIENIAMY wizualia w miejscu (_applyVisual)
+   * zachowujac entry.obj (pozycja/rotacja/siatka) i wszystkie inne pola stanu
+   * (isFainted/isMoving/isRobbed/moveQueue) - zaden kod poza workers.js nie
+   * musi wiedziec, ze doszlo do podmiany.
    */
-  async addWorkerType(typeIndex, modelKey) {
+  async addWorkerType(typeIndex, defaultModelKey, skinName) {
     typeIndex = Number(typeIndex);
+    const spec = resolveSpec(defaultModelKey, skinName);
+
     // 1. Jeśli model tego typu już istnieje w entries, zwróć go natychmiast
+    // (po ewentualnej podmianie wizualiów, jesli skin sie zmienil).
     const existing = this.getWorkerType(typeIndex);
     if (existing) {
       // Jeśli pracownik jest omdlały (np. powalony przez bossa), sprawdzamy czy boss to potwierdza
       if (existing.isFainted) {
         if (this.bossRef && typeof this.bossRef.isFaintedForSlot === 'function' && this.bossRef.isFaintedForSlot(typeIndex)) {
+          if (existing.cacheKey !== spec.cacheKey) await this._applyVisual(existing, spec);
           return existing;
         }
         existing.isFainted = false;
       }
-      if (existing.dieAction) {
+      if (existing.cacheKey !== spec.cacheKey) {
+        await this._applyVisual(existing, spec);
+      } else if (existing.dieAction) {
         existing.dieAction.stop();
         if (existing.idleAction) {
           existing.idleAction.reset().play();
@@ -252,7 +369,7 @@ export class WorkerManager {
       const check1 = this.getWorkerType(typeIndex);
       if (check1) return check1;
 
-      const gltf = await this._getTemplate(modelKey);
+      await this._getTemplate(spec);
 
       // Sprawdzenie po zakończeniu pobierania szablonu
       const check2 = this.getWorkerType(typeIndex);
@@ -266,7 +383,11 @@ export class WorkerManager {
         }
       }
 
-      const obj = SkeletonUtils.clone(gltf.scene);
+      // Group-wrapper: niesie pozycje/rotacje/siatke, NIE skale (patrz
+      // _applyVisual - skala idzie na model, dziecko wrappera). Dzieki temu
+      // podmiana skina moze przeskalowac/podmienic model bez ruszania tego,
+      // co trzyma stan na siatce areny.
+      const obj = new THREE.Group();
       obj.userData = { isWorker: true, workerTypeIndex: typeIndex };
 
       const pos = this._circlePosition(typeIndex);
@@ -277,25 +398,15 @@ export class WorkerManager {
       obj.position.set(initGridX, 0, initGridZ);
       obj.rotation.y = initFacing;
 
-      obj.traverse((child) => {
-        if (child.isMesh) {
-          child.castShadow = true;
-          child.receiveShadow = true;
-        }
-      });
-
       this.scene.add(obj);
-
-      const mixer = new THREE.AnimationMixer(obj);
-      const idleClip = THREE.AnimationClip.findByName(gltf.animations, 'idle');
-      const walkClip = THREE.AnimationClip.findByName(gltf.animations, 'walk');
-      const interactClip = THREE.AnimationClip.findByName(gltf.animations, 'interact-right');
 
       const entry = {
         typeIndex,
-        modelKey,
+        cacheKey: null,
+        skin: null,
         obj,
-        mixer,
+        model: null,
+        mixer: null,
         idleAction: null,
         walkAction: null,
         interactAction: null,
@@ -304,8 +415,8 @@ export class WorkerManager {
         // nizej) - potrzebna do leniwego wyszukania klipow ataku na zadanie
         // (attack-melee-*/attack-kick-*, patrz triggerAttack nizej). GLTFLoader
         // NIE dopina animacji do obiektu sceny - trzeba ich szukac w gltf.animations
-        // po nazwie (tak samo jak idle/walk/interact/die ponizej).
-        gltfAnimations: gltf.animations,
+        // po nazwie (tak samo jak idle/walk/interact/die, patrz _applyVisual).
+        gltfAnimations: [],
         attackActions: {}, // nazwa klipu -> AnimationAction, budowane na zadanie w triggerAttack
         _aktywnaAkcjaAtaku: null,
         playingInteract: false,
@@ -328,40 +439,7 @@ export class WorkerManager {
         targetGridZ: initGridZ,
       };
 
-      if (idleClip) {
-        entry.idleAction = mixer.clipAction(idleClip);
-        entry.idleAction.play();
-      }
-      if (walkClip) {
-        entry.walkAction = mixer.clipAction(walkClip);
-        entry.walkAction.setLoop(THREE.LoopRepeat);
-      }
-      if (interactClip) {
-        entry.interactAction = mixer.clipAction(interactClip);
-        entry.interactAction.setLoop(THREE.LoopOnce);
-        entry.interactAction.clampWhenFinished = true;
-      }
-
-      mixer.addEventListener('finished', (e) => {
-        if (entry.interactAction && e.action === entry.interactAction) {
-          entry.playingInteract = false;
-          if (entry.idleAction && !entry.isFainted && !entry.isMoving) {
-            // idle MUSI byc wznowione przed przejsciem - patrz _wrocDoIdle.
-            wrocDoIdle(entry, entry.interactAction, 0.3);
-          }
-        } else if (entry._aktywnaAkcjaAtaku && e.action === entry._aktywnaAkcjaAtaku) {
-          // Koniec klipu ataku (attack-melee-*/attack-kick-*, patrz triggerAttack)
-          // - dokladnie ta sama sciezka powrotu co po interactAction: idle MUSI
-          // byc jawnie wznowione PRZED crossFadeTo, inaczej postac zamarza w T-pozie
-          // (crossFadeTo samo NIE uruchamia akcji docelowej - patrz wrocDoIdle).
-          const akcja = entry._aktywnaAkcjaAtaku;
-          entry._aktywnaAkcjaAtaku = null;
-          entry.playingInteract = false;
-          if (entry.idleAction && !entry.isFainted && !entry.isMoving) {
-            wrocDoIdle(entry, akcja, 0.25);
-          }
-        }
-      });
+      await this._applyVisual(entry, spec);
 
       // Zastąpienie lub dodanie wpisu, usuwając stary obiekt 3D jeśli był inny
       const existingIdx = this.entries.findIndex((e) => e.typeIndex === typeIndex);
@@ -695,7 +773,7 @@ export class WorkerManager {
     entry.isFainted = true;
     entry.playingInteract = false;
 
-    const template = this.templates.get(entry.modelKey);
+    const template = this.templates.get(entry.cacheKey);
     const dieClip = THREE.AnimationClip.findByName(template ? template.animations : [], 'die');
     if (!dieClip) return;
 
