@@ -29,8 +29,8 @@ Port można podać jako argument: `python serve.py 8080`.
   tylko łączny dorobek całego czatu. Każdy `klik` widza dokłada do tej puli
   ORAZ do indywidualnego dorobku tego widza w rankingu Top 10.
 - **Automatyczny awans tieru bankomatu** — bankomat sam awansuje na kolejny
-  model, gdy łączna liczba klików przekroczy próg (0 / 100 / 500 / 2000 /
-  6000 / 12000 — patrz `MACHINE_TIER_CLICK_THRESHOLDS` w `src/economy.js`).
+  model, gdy łączna liczba klików przekroczy próg (0 / 500 / 1000 / 2000 /
+  4000 / 8000 — patrz `MACHINE_TIER_CLICK_THRESHOLDS` w `src/economy.js`).
   Awans podmienia model 3D i pokazuje baner na górze ekranu. Do progu liczą się
   kliki z czatu **oraz** kliknięcia streamera myszką w model — obie drogi idą
   przez tę samą funkcję `obsluzAwansTieru()` w `main.js`, więc tak samo odpalają
@@ -40,7 +40,8 @@ Port można podać jako argument: `python serve.py 8080`.
   dochodu pasywnego, nic nie produkuje samoistnie; pula rośnie tylko
   wtedy, gdy ktoś naprawdę kliknie (komenda `klik` na czacie albo kliknięcie
   streamera w model). Jedyny wyjątek to nagroda za wygraną minigrę (bitwa o
-  flagi / bitwa tłumaczeń) — zwycięzca dostaje 2 zł/s przez 30 sekund.
+  flagi / bitwa tłumaczeń / państwa-miasta / zgadnij markę) — zwycięzca
+  dostaje jednorazowo 100 zł.
 - **Pracownicy = awatary Top 10** — każdemu z 10 widzów w rankingu Top 10
   przypisany jest jeden z 10 modeli postaci w scenie. Awatar odgrywa animację
   uderzenia w bankomat dokładnie wtedy, gdy jego widz napisze `klik` — nigdy
@@ -319,14 +320,16 @@ Szał banowy zamiast (ten sam mechanizm banów co w Fazie 1).
   identyczny jak dotąd dla pocisku wymiotnego bossa 1) w 2 różnych żywych
   graczy - pole celu świeci czerwono 2 s, kto na nim stoi w chwili
   uderzenia, ginie (skutek jak rakieta bossa 1) i liczy się do licznika
-  trafień CAŁEJ Fazy 2 - przy 4 trafieniach `boss.onGameOver('GAME OVER,
+  trafień CAŁEJ Fazy 2 - przy 6 trafieniach `boss.onGameOver('GAME OVER,
   WRACASZ DO MYŚLIBORZA')` i pełny reset (ten sam mechanizm co u Skorpiona).
   Niepodniete piwo, które nie trafiło, leży na ziemi 5 s (model `bottle.glb`
-  z `kenney_pirate-kit`, już załadowany przez `boss.js` dla Skorpiona) -
-  gracz, który wejdzie na jego pole, podnosi je (ikona 🍺 przy nicku, max 1
-  naraz, ten sam wzorzec co ikona bana 🚫 - `wilkolakPiwo` na wpisie
-  rankingu, `boss.hasPiwo(nick)`). Pisząc `rzut`, gracz odrzuca piwo w
-  wilkołaka - zawsze trafia: -12,5 HP, +50 zł.
+  z `kenney_pirate-kit`, już załadowany przez `boss.js` dla Skorpiona),
+  podświetlone neonowym obrysem + pierścieniem na podłodze (bursztynowy,
+  ten sam wzorzec `_makeOutline`/`_makeItemRing` co przedmioty bossa
+  Skorpion) - gracz, który wejdzie na jego pole, podnosi je (ikona 🍺 przy
+  nicku, max 1 naraz, ten sam wzorzec co ikona bana 🚫 - `wilkolakPiwo` na
+  wpisie rankingu, `boss.hasPiwo(nick)`). Pisząc `rzut`, `rzuc` lub `rzuć`,
+  gracz odrzuca piwo w wilkołaka - zawsze trafia: -12,5 HP, +50 zł.
 - **Sync**: lezące piwo i lista noszących (`piwaNaZiemi`/`piwoNoszone`) idą w
   `getSyncState`/`applySync` jako stan TRWAŁY między atakami (nie część
   `_dane`, bo nie należy do jednej fazy) - widz odtwarza to samo bez
@@ -454,9 +457,9 @@ niezależny plik, bez wspólnej klasy bazowej.
   przetłumaczy **5 słów** (`PUNKTY_DO_WYGRANEJ` w `src/tlumaczenia.js`) —
   odpowiednik "best of 9": w najgorszym razie (4:4) bitwa rozstrzyga się w
   9. rundzie, więc żadne słowo nie może się powtórzyć w obrębie jednej bitwy.
-- **Nagroda**: zwycięzca dostaje 2 zł/s pasywnie przez 30 sekund, dokładnie
-  jak przy bitwie o flagi. Przerwanie przez bossa wypłaca resztę nagrody od
-  razu.
+- **Nagroda**: zwycięzca dostaje jednorazowo 100 zł (`NAGRODA_WYGRANEJ` w
+  `src/tlumaczenia.js`) w momencie zakończenia bitwy, dokładnie jak przy
+  bitwie o flagi.
 - **Pole i kolor**: znacznik pola jest niebiesko-fioletowy (`KOLOR_BAZOWY` w
   `src/tlumaczenia.js`, wysokość `MARKER_Y = 0.056`) — wyraźnie inny niż
   czerwono-złote pole bitwy o flagi, żeby na pierwszy rzut oka było widać,

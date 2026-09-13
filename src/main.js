@@ -1195,9 +1195,9 @@ async function main() {
       realtime.wyslijZdarzenie('flaga-info', { text });
     }
   };
-  // Dymek "+2 zl" nad zwyciezca minigry, raz na sekunde w trakcie nagrody
-  // (patrz komentarz przy onRewardTick w flagbattle.js). Samo naliczanie
-  // kasy juz dziala (economy.addMoney w tick()) - to WYLACZNIE wizualne
+  // Dymek "+100 zl" nad zwyciezca minigry, RAZ przy wejsciu w REWARD (patrz
+  // komentarz przy onRewardTick w flagbattle.js). Samo naliczanie kasy juz
+  // dziala jednorazowo (economy.addMoney w endBattle) - to WYLACZNIE wizualne
   // potwierdzenie, idzie przez ten sam sprawdzony projectAndFloat co kazdy
   // inny dymek w grze (a wiec przez #floaters, nie przez nieistniejacy
   // #ui-layer, ktory kiedys polozyl produkcje - patrz historia tego pliku).
@@ -1205,7 +1205,7 @@ async function main() {
     const w = workerManager.getWorkerType(winner.typeIndex);
     if (!w || !w.obj) return;
     const origin = w.obj.position.clone().add(new THREE.Vector3(0, 1.8, 0));
-    projectAndFloat(origin, '+2 zł', { crit: false });
+    projectAndFloat(origin, '+100 zł', { crit: false });
   };
   // Ten sam wzorzec co flagBattle.onAnnounce/onRewardTick powyzej, dla
   // minigry tlumaczen.
@@ -1218,7 +1218,7 @@ async function main() {
     const w = workerManager.getWorkerType(winner.typeIndex);
     if (!w || !w.obj) return;
     const origin = w.obj.position.clone().add(new THREE.Vector3(0, 1.8, 0));
-    projectAndFloat(origin, '+2 zł', { crit: false });
+    projectAndFloat(origin, '+100 zł', { crit: false });
   };
   // Ten sam wzorzec co flagBattle.onAnnounce/onRewardTick i
   // tlumaczenia.onAnnounce/onRewardTick powyzej, dla minigry panstw-miast.
@@ -1231,7 +1231,7 @@ async function main() {
     const w = workerManager.getWorkerType(winner.typeIndex);
     if (!w || !w.obj) return;
     const origin = w.obj.position.clone().add(new THREE.Vector3(0, 1.8, 0));
-    projectAndFloat(origin, '+2 zł', { crit: false });
+    projectAndFloat(origin, '+100 zł', { crit: false });
   };
   // Ten sam wzorzec co flagBattle/tlumaczenia/panstwaMiasta onAnnounce/
   // onRewardTick powyzej, dla minigry "Zgadnij marke".
@@ -1244,7 +1244,7 @@ async function main() {
     const w = workerManager.getWorkerType(winner.typeIndex);
     if (!w || !w.obj) return;
     const origin = w.obj.position.clone().add(new THREE.Vector3(0, 1.8, 0));
-    projectAndFloat(origin, '+2 zł', { crit: false });
+    projectAndFloat(origin, '+100 zł', { crit: false });
   };
 
   // Widz otwierajacy karte w trakcie walki z bossem podejmuje ja od razu, bez

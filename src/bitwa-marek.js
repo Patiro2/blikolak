@@ -21,6 +21,10 @@ function zaBliskoMinigry(x, z, tile) {
   return !!tile && Math.max(Math.abs(x - tile.x), Math.abs(z - tile.z)) < MIN_ODSTEP_MINIGIER;
 }
 
+// Nagroda za wygrana minigre: jednorazowa wyplata w momencie zakonczenia
+// bitwy (endBattle), zamiast dawnych 2 zl/s przez 30 s w stanie REWARD.
+const NAGRODA_WYGRANEJ = 100;
+
 // Minigra "Zgadnij marke" - PIATA minigra na siatce areny, obok bitwy o flagi,
 // bitwy tlumaczen i panstw-miast. Mechanika jest CELOWO skopiowana z
 // src/flagbattle.js (stany IDLE -> WAITING -> BATTLE -> REWARD, wejscie dwoch
@@ -485,15 +489,15 @@ export class BitwaMarekManager {
       this.markerPierscien.material.opacity = 0.95 * frac;
       this.markerWypelnienie.material.opacity = 0.18 * frac;
 
-      if (this.winner) {
-        const sekunda = Math.floor(Date.now() / 1000);
-        if (this._ostatniaSekundaDymka !== sekunda) {
-          this._ostatniaSekundaDymka = sekunda;
-          try {
-            this.onRewardTick(this.winner);
-          } catch (err) {
-            console.warn('[marki] Blad w onRewardTick:', err);
-          }
+      // Dymek "+100 zl" TYLKO RAZ przy wejsciu w REWARD - patrz identyczny
+      // komentarz w flagbattle.js (kasa jest juz wyplacona jednorazowo w
+      // endBattle, dymek to jej jedyne, jednorazowe potwierdzenie).
+      if (this.winner && this._ostatniaSekundaDymka === null) {
+        this._ostatniaSekundaDymka = Math.floor(Date.now() / 1000);
+        try {
+          this.onRewardTick(this.winner);
+        } catch (err) {
+          console.warn('[marki] Blad w onRewardTick:', err);
         }
       }
     }
@@ -531,17 +535,9 @@ export class BitwaMarekManager {
       }
       this._sprawdzWyjscieAwaryjne();
     } else if (this.state === 'REWARD') {
+      // Kasa (NAGRODA_WYGRANEJ) jest juz wyplacona jednorazowo w endBattle -
+      // ten blok REWARD trwa nadal 30 s, ale wylacznie dla wizualiow.
       this.rewardTimer += dt;
-
-      if (!this._lastRewardTime) this._lastRewardTime = 0;
-      this._lastRewardTime += dt;
-      if (this._lastRewardTime >= 1.0) {
-        this._lastRewardTime -= 1.0;
-        this.economy.addMoney(2);
-        if (this.winner && this.winner.username) {
-          this.kickChat.recordEarned(this.winner.username, 2);
-        }
-      }
 
       if (this.rewardTimer >= 30) {
         this.reset();
@@ -822,6 +818,15 @@ export class BitwaMarekManager {
     this.winner = winnerPlayer;
     this.odslonietaMarka = null;
     this._loadedOdsloniecie = null;
+
+    // Nagroda: jednorazowa wyplata NAGRODA_WYGRANEJ w momencie zakonczenia
+    // bitwy (host - endBattle jest wolane wylacznie z kodu za straza isHost,
+    // ta sama bramka co dawne naliczanie 2 zl/s pilnuje jednorazowosci u widza).
+    this.economy.addMoney(NAGRODA_WYGRANEJ);
+    if (winnerPlayer.username) {
+      this.kickChat.recordEarned(winnerPlayer.username, NAGRODA_WYGRANEJ);
+    }
+
     // Kartka logo zostaje na scenie, ale z podmieniona tekstura zwyciezcy
     // (patrz _pokazZwyciezce) - zadanie: zwyciezca ma byc widoczny w tym
     // samym miejscu co logo marki w trakcie gry, nie chowany.
@@ -856,7 +861,7 @@ export class BitwaMarekManager {
       }
     }
 
-    this.announce(`🎉 ${winnerPlayer.username} WYGRYWA! Przez 30 sekund dostaje 2 zł/s pasywnie!`);
+    this.announce(`🎉 ${winnerPlayer.username} WYGRYWA! Dostaje ${NAGRODA_WYGRANEJ} zł!`);
     this._pokazBanerZwyciezcy(winnerPlayer);
   }
 
@@ -874,7 +879,7 @@ export class BitwaMarekManager {
     try {
       showTopAnnouncement(
         `🎉 ${winnerPlayer.username} WYGRYWA!`,
-        'Zgadnij markę! Przez 30 sekund dostaje <strong>2 zł/s</strong> pasywnie!',
+        `Zgadnij markę! Dostaje <strong>${NAGRODA_WYGRANEJ} zł</strong>!`,
         2000,
       );
     } catch (err) {
@@ -882,20 +887,14 @@ export class BitwaMarekManager {
     }
   }
 
-  /** Identyczne uzasadnienie co _przerwijPrzezBossa w flagbattle.js/tlumaczenia.js/panstwa-miasta.js. */
+  /**
+   * Identyczne uzasadnienie co _przerwijPrzezBossa w flagbattle.js/tlumaczenia.js/panstwa-miasta.js -
+   * nagroda (NAGRODA_WYGRANEJ) jest juz wyplacona w calosci w endBattle,
+   * przerwanie w trakcie REWARD sprzata tylko wizualia.
+   */
   _przerwijPrzezBossa() {
     if (this.state === 'REWARD' && this.winner) {
-      const pozostaleSekund = Math.max(0, Math.floor(30 - this.rewardTimer));
-      const wyplata = pozostaleSekund * 2;
-      if (wyplata > 0) {
-        this.economy.addMoney(wyplata);
-        if (this.winner.username) {
-          this.kickChat.recordEarned(this.winner.username, wyplata);
-        }
-      }
-      this.announce(
-        `⚔️ Boss atakuje! Bitwa o marki przerwana - ${this.winner.username} dostaje od razu resztę nagrody (+${wyplata} zł).`,
-      );
+      this.announce(`⚔️ Boss atakuje! Bitwa o marki przerwana - koniec swietowania dla ${this.winner.username}.`);
     } else if (this.state === 'BATTLE' || this.state === 'WAITING') {
       this.announce('⚔️ Boss atakuje! Bitwa o marki przerwana - pole zwolnione.');
     }

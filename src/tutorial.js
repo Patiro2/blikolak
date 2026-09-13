@@ -77,7 +77,7 @@ const SEKCJE = [
       'Gdy wejdą na nie dwie postacie z Top 10, zaczyna się bitwa - nad polem pojawia się flaga.',
       'Obaj walczący wpisują na czacie nazwę państwa (po polsku albo po angielsku - dopiski typu "xd" nie przeszkadzają). Liczy się tylko odpowiedź tych dwóch graczy.',
       'Kto pierwszy zdobędzie <b>5 punktów</b>, wygrywa. W trakcie bitwy obaj stoją w miejscu, a nikt inny nie może wejść na pole.',
-      'Zwycięzca dostaje <b>2 zł</b> na sekundę przez 30 sekund, przegrany zostaje wyrzucony na sąsiednie pole.',
+      'Zwycięzca dostaje od razu <b>100 zł</b>, przegrany zostaje wyrzucony na sąsiednie pole.',
     ],
   },
   {

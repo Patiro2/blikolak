@@ -14,6 +14,10 @@ function zaBliskoMinigry(x, z, tile) {
   return !!tile && Math.max(Math.abs(x - tile.x), Math.abs(z - tile.z)) < MIN_ODSTEP_MINIGIER;
 }
 
+// Nagroda za wygrana minigre: jednorazowa wyplata w momencie zakonczenia
+// bitwy (endBattle), zamiast dawnych 2 zl/s przez 30 s w stanie REWARD.
+const NAGRODA_WYGRANEJ = 100;
+
 // Zrodlo flag: assets/flags-vector/<KOD>.svg pochodzi z pakietu flag-icons
 // (github.com/lipis/flag-icons, MIT - patrz assets/flags-vector/LICENSE-flag-icons.txt),
 // proporcja 4:3 (viewBox="0 0 640 480" w kazdym pliku), pelny kolor i
@@ -513,20 +517,17 @@ export class FlagBattleManager {
       this.markerPierscien.material.opacity = 0.95 * frac;
       this.markerWypelnienie.material.opacity = 0.18 * frac;
 
-      // Dymek "+2 zl" nad zwyciezca - raz na sekunde zegara (nie lokalny
-      // niezalezny timer per karta - kazda karta liczy Date.now() tak samo,
-      // a WARUNEK wejscia (state===REWARD, kto jest winner) jest w pelni
-      // zsynchronizowany). Samo naliczanie kasy jest ponizej, niezalezne od
-      // tego callbacku - main.js tylko pokazuje potwierdzenie.
-      if (this.winner) {
-        const sekunda = Math.floor(Date.now() / 1000);
-        if (this._ostatniaSekundaDymka !== sekunda) {
-          this._ostatniaSekundaDymka = sekunda;
-          try {
-            this.onRewardTick(this.winner);
-          } catch (err) {
-            console.warn('[flagi] Blad w onRewardTick:', err);
-          }
+      // Dymek "+100 zl" nad zwyciezca - TYLKO RAZ, przy wejsciu w REWARD (nie
+      // co sekunde jak dawniej przy pasywnym dochodzie 2 zl/s - kasa jest juz
+      // wyplacona jednorazowo w endBattle, wiec dymek jest jej jedynym,
+      // jednorazowym potwierdzeniem). _ostatniaSekundaDymka === null pilnuje
+      // jednorazowosci - ustawiany na cokolwiek innego nizej i zerowany w reset().
+      if (this.winner && this._ostatniaSekundaDymka === null) {
+        this._ostatniaSekundaDymka = Math.floor(Date.now() / 1000);
+        try {
+          this.onRewardTick(this.winner);
+        } catch (err) {
+          console.warn('[flagi] Blad w onRewardTick:', err);
         }
       }
     }
@@ -589,27 +590,11 @@ export class FlagBattleManager {
       this._sprawdzWyjscieAwaryjne();
     }
     else if (this.state === 'REWARD') {
+      // Kasa (NAGRODA_WYGRANEJ) jest juz wyplacona jednorazowo w endBattle -
+      // ten blok REWARD trwa nadal 30 s, ale wylacznie dla wizualiow
+      // (gasnace pole, plotki, kartka zwyciezcy, blokady) - patrz komentarz
+      // przy NAGRODA_WYGRANEJ.
       this.rewardTimer += dt;
-
-      // Pasywny dochód (np. tick co 1 sekundę by dawał +2zł)
-      // Żeby zrealizować 2 zł / sek, możemy sumować czas ułamkowy, albo dawać co 1 sek:
-      if (!this._lastRewardTime) this._lastRewardTime = 0;
-      this._lastRewardTime += dt;
-      if (this._lastRewardTime >= 1.0) {
-        this._lastRewardTime -= 1.0;
-        this.economy.addMoney(2);
-        if (this.winner && this.winner.username) {
-           this.kickChat.recordEarned(this.winner.username, 2);
-           // Uwaga: byl tu kiedys zalazek dymka "+2 zl" doklejanego do
-           // nieistniejacego #ui-layer (patrz historia tego pliku) - to byl
-           // niedokonczony blok, ktory rzucal wyjatkiem co sekunde i kladl
-           // cala gre. Prawdziwy dymek jest TERAZ wyzej w tym samym tick(),
-           // w bloku REWARD kosmetyki (onRewardTick), i idzie przez
-           // sprawdzona sciezke main.js -> projectAndFloat -> ui.spawnFloater
-           // (#floaters, nie #ui-layer) - dokladnie ta sama, ktorej uzywaja
-           // wszystkie inne dymki w grze.
-        }
-      }
 
       if (this.rewardTimer >= 30) {
         this.reset();
@@ -960,6 +945,16 @@ export class FlagBattleManager {
     this.winner = winnerPlayer;
     this.odslonietaFlaga = null;
     this._loadedOdsloniecie = null;
+
+    // Nagroda: jednorazowa wyplata NAGRODA_WYGRANEJ w momencie zakonczenia
+    // bitwy (host - endBattle jest wolane wylacznie z kodu za straza isHost,
+    // patrz checkPlayersEntry/onChatMessage/_sprawdzWyjscieAwaryjne, wiec ta
+    // sama bramka co dawne naliczanie 2 zl/s pilnuje jednorazowosci u widza).
+    this.economy.addMoney(NAGRODA_WYGRANEJ);
+    if (winnerPlayer.username) {
+      this.kickChat.recordEarned(winnerPlayer.username, NAGRODA_WYGRANEJ);
+    }
+
     // Kartka flagi zostaje na scenie, ale z podmieniona tekstura zwyciezcy
     // (patrz _pokazZwyciezce) - zadanie: zwyciezca ma byc widoczny w tym
     // samym miejscu co flaga w trakcie gry, nie chowany.
@@ -1003,7 +998,7 @@ export class FlagBattleManager {
       }
     }
 
-    this.announce(`🎉 ${winnerPlayer.username} WYGRYWA! Przez 30 sekund dostaje 2 zł/s pasywnie!`);
+    this.announce(`🎉 ${winnerPlayer.username} WYGRYWA! Dostaje ${NAGRODA_WYGRANEJ} zł!`);
   }
 
   /**
@@ -1013,25 +1008,13 @@ export class FlagBattleManager {
    * zablokowac graczom ucieczke z pola razenia (isTileLocked wplywa na ruch
    * po siatce) - dlatego to przerwanie, nie tylko wstrzymanie.
    *
-   * W stanie REWARD zwyciezca ma juz OBIECANE 2 zl/s przez 30 s - zabranie
-   * mu reszty byloby niesprawiedliwe, a zostawienie swiecacego kafelka na
-   * cala walke z bossem przeczy "wylacz minigre". Rozwiazanie: wyplacamy
-   * pozostale sekundy JEDNORAZOWO (zaokraglone w dol do pelnej sekundy - tyle,
-   * ile faktycznie naliczylby tick() co sekunde) i sprzatamy wizualia.
+   * Nagroda (NAGRODA_WYGRANEJ) jest juz wyplacona w calosci w endBattle -
+   * przerwanie w trakcie REWARD nie musi juz nic doplacac, sprzata tylko
+   * wizualia (kafelek, plotki, bijatyke).
    */
   _przerwijPrzezBossa() {
     if (this.state === 'REWARD' && this.winner) {
-      const pozostaleSekund = Math.max(0, Math.floor(30 - this.rewardTimer));
-      const wyplata = pozostaleSekund * 2;
-      if (wyplata > 0) {
-        this.economy.addMoney(wyplata);
-        if (this.winner.username) {
-          this.kickChat.recordEarned(this.winner.username, wyplata);
-        }
-      }
-      this.announce(
-        `⚔️ Boss atakuje! Bitwa o flagi przerwana - ${this.winner.username} dostaje od razu resztę nagrody (+${wyplata} zł).`,
-      );
+      this.announce(`⚔️ Boss atakuje! Bitwa o flagi przerwana - koniec swietowania dla ${this.winner.username}.`);
     } else if (this.state === 'BATTLE' || this.state === 'WAITING') {
       this.announce('⚔️ Boss atakuje! Bitwa o flagi przerwana - pole zwolnione.');
     }
