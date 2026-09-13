@@ -7,6 +7,7 @@ import { CoinPool } from './coins.js';
 import { GoldenCoinManager } from './goldcoin.js';
 import { FlagBattleManager } from './flagbattle.js';
 import { TlumaczeniaManager } from './tlumaczenia.js';
+import { PanstwaMiastaManager } from './panstwa-miasta.js';
 import { Economy, WORKER_TYPE_DEFS, MACHINE_TIERS, SAVE_KEY } from './economy.js';
 import { remote, czyLokalnie } from './remote.js';
 import { Realtime, URL_RELAYA } from './realtime.js';
@@ -163,6 +164,14 @@ async function main() {
   let tlumaczeniaBledy = 0;
   let tlumaczeniaZepsuta = false;
 
+  // Minigra "Panstwa-Miasta" - czwarta minigra na siatce areny, obok bitwy o
+  // flagi i bitwy tlumaczen. Ta sama polityka izolacji bledow (patrz komentarz
+  // przy flagBattleZepsuta nizej w animate()) - blad w tick() degraduje
+  // WYLACZNIE te minigre, reszta gry dziala dalej.
+  const panstwaMiasta = new PanstwaMiastaManager(scene, renderer);
+  let panstwaMiastaBledy = 0;
+  let panstwaMiastaZepsuta = false;
+
   const vanessa = new VanessaManager(
     scene,
     camera,
@@ -245,6 +254,7 @@ async function main() {
       workers: workerManager.getSyncState(),
       flagBattle: flagBattle.getSyncState(),
       tlumaczenia: tlumaczenia.getSyncState(),
+      panstwaMiasta: panstwaMiasta.getSyncState(),
     };
   }
 
@@ -401,6 +411,11 @@ async function main() {
     await krokStanu('tlumaczenia.applySync', () => {
       if (!remote.czyAdmin()) tlumaczenia.applySync(stan.tlumaczenia || null);
     });
+    // Minigra "Panstwa-Miasta" - ten sam wzorzec co flagBattle.applySync/
+    // tlumaczenia.applySync wyzej.
+    await krokStanu('panstwaMiasta.applySync', () => {
+      if (!remote.czyAdmin()) panstwaMiasta.applySync(stan.panstwaMiasta || null);
+    });
     try {
       await syncLeaderboardAndOverlays();
     } catch (err) {
@@ -490,6 +505,11 @@ async function main() {
       // 'flaga-info' powyzej (patrz komentarz tam).
       const text = dane && typeof dane.text === 'string' ? dane.text : null;
       if (text) tlumaczenia.announce(text);
+    } else if (nazwa === 'panstwa-miasta-info') {
+      // Natychmiastowa narracja bitwy panstw-miast - ten sam wzorzec co
+      // 'flaga-info'/'tlumaczenia-info' powyzej (patrz komentarz tam).
+      const text = dane && typeof dane.text === 'string' ? dane.text : null;
+      if (text) panstwaMiasta.announce(text);
     } else if (nazwa === 'game-over') {
       // Wlasciciel przegral cala pule z Dzordzo (boss 3) albo dal sie okrasc
       // Skorpionowi (boss 4, patrz boss.onGameOver nizej) - widz WYLACZNIE
@@ -608,6 +628,8 @@ async function main() {
     flagBattle.setHost(admin);
     // Ta sama naprawa co dla flagBattle powyzej, dla minigry tlumaczen.
     tlumaczenia.setHost(admin);
+    // Ta sama naprawa co powyzej, dla minigry panstw-miast.
+    panstwaMiasta.setHost(admin);
     if (!adminBtn) return;
     if (czyLokalnie()) {
       // Lokalnie nie ma sie gdzie logowac - chowamy przycisk.
@@ -816,6 +838,8 @@ async function main() {
       flagBattle.onChatMessage(msg.username, msg.content);
       // Odpowiedzi do bitwy tlumaczen
       tlumaczenia.onChatMessage(msg.username, msg.content);
+      // Odpowiedzi do bitwy panstw-miast
+      panstwaMiasta.onChatMessage(msg.username, msg.content);
       // Chodzenie po siatce 2D areny - tylko dla aktywnych graczy w grze (Top 10)
       // Pojedyncza komenda albo kombinacja (np. "wwd", max 5 znakow) - patrz
       // parseMovementCombo w workers.js. Nowa kombinacja od tego samego widza
@@ -906,7 +930,7 @@ async function main() {
   // workerManager.setContext (src/workers.js) egzekwuje blokady ruchu obu
   // minigier na siatce - isPlayerLocked/isTileLocked dla bitwy o flagi ORAZ
   // dla bitwy tlumaczen (patrz moveWorker() w workers.js).
-  workerManager.setContext({ boss, vanessa, flagBattle, tlumaczenia });
+  workerManager.setContext({ boss, vanessa, flagBattle, tlumaczenia, panstwaMiasta });
   vanessa.setContext({ workerManager, kickChat });
   // Ta sama polityka co machine.czyKlikaniaDozwolone powyzej - patrz komentarz
   // tam. Obejmuje wszystkie 3 sciezki klikania myszka w Vanesse (model,
@@ -969,6 +993,7 @@ async function main() {
     isHost: remote.czyAdmin(),
     boss,
     tlumaczenia, // wylacznie do odczytu tlumaczenia.tile - patrz komentarz w flagbattle.js/setContext
+    panstwaMiasta, // wylacznie do odczytu panstwaMiasta.tile - patrz komentarz w flagbattle.js/setContext
   });
   tlumaczenia.setContext({
     workerManager,
@@ -977,6 +1002,19 @@ async function main() {
     isHost: remote.czyAdmin(),
     boss,
     flagBattle, // wylacznie do odczytu flagBattle.tile - patrz komentarz w tlumaczenia.js/setContext
+    panstwaMiasta, // wylacznie do odczytu panstwaMiasta.tile - patrz komentarz w tlumaczenia.js/setContext
+  });
+  // Minigra "Panstwa-Miasta" - ten sam wzorzec co flagBattle/tlumaczenia
+  // powyzej, z referencjami do OBU pozostalych minigier (wylacznie do
+  // odczytu ich .tile - patrz komentarz w panstwa-miasta.js/setContext).
+  panstwaMiasta.setContext({
+    workerManager,
+    kickChat,
+    economy,
+    isHost: remote.czyAdmin(),
+    boss,
+    flagBattle,
+    tlumaczenia,
   });
   // Narracja bitwy ("Bitwa o flagi! X vs Y!", "X wygrywa!"...) dociera do
   // widza z hostowej karty natychmiast przez kanal realtime, zamiast czekac
@@ -1008,6 +1046,19 @@ async function main() {
     }
   };
   tlumaczenia.onRewardTick = (winner) => {
+    const w = workerManager.getWorkerType(winner.typeIndex);
+    if (!w || !w.obj) return;
+    const origin = w.obj.position.clone().add(new THREE.Vector3(0, 1.8, 0));
+    projectAndFloat(origin, '+2 zł', { crit: false });
+  };
+  // Ten sam wzorzec co flagBattle.onAnnounce/onRewardTick i
+  // tlumaczenia.onAnnounce/onRewardTick powyzej, dla minigry panstw-miast.
+  panstwaMiasta.onAnnounce = (text) => {
+    if (remote.czyAdmin()) {
+      realtime.wyslijZdarzenie('panstwa-miasta-info', { text });
+    }
+  };
+  panstwaMiasta.onRewardTick = (winner) => {
     const w = workerManager.getWorkerType(winner.typeIndex);
     if (!w || !w.obj) return;
     const origin = w.obj.position.clone().add(new THREE.Vector3(0, 1.8, 0));
@@ -1121,6 +1172,7 @@ async function main() {
     realtime,
     flagBattle,
     tlumaczenia,
+    panstwaMiasta,
     save,
     scene,
     camera,
@@ -1177,6 +1229,22 @@ async function main() {
         if (tlumaczeniaBledy >= 3) {
           tlumaczeniaZepsuta = true;
           console.error('[tlumaczenia] Minigra wylaczona po trzech bledach pod rzad - reszta gry dziala normalnie.');
+        }
+      }
+    }
+    // Ta sama izolacja bledow co flagBattle/tlumaczenia powyzej - minigra
+    // panstw-miast jest rowniez mlodym modulem, blad w jej tick() nie moze
+    // polozyc calej gry.
+    if (!panstwaMiastaZepsuta) {
+      try {
+        panstwaMiasta.tick(delta);
+        panstwaMiastaBledy = 0;
+      } catch (err) {
+        panstwaMiastaBledy += 1;
+        console.error(`[panstwa-miasta] Blad w tick() minigry (${panstwaMiastaBledy}/3):`, err);
+        if (panstwaMiastaBledy >= 3) {
+          panstwaMiastaZepsuta = true;
+          console.error('[panstwa-miasta] Minigra wylaczona po trzech bledach pod rzad - reszta gry dziala normalnie.');
         }
       }
     }

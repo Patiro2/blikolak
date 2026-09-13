@@ -234,7 +234,7 @@ export class TlumaczeniaManager {
     this.bojka = new Bojka(this.scene);
   }
 
-  setContext({ workerManager, kickChat, economy, isHost, boss, flagBattle }) {
+  setContext({ workerManager, kickChat, economy, isHost, boss, flagBattle, panstwaMiasta }) {
     this.workerManager = workerManager;
     this.kickChat = kickChat;
     this.economy = economy;
@@ -245,6 +245,9 @@ export class TlumaczeniaManager {
     // nizej). Zadnej innej wlasnosci flagBattle nie czytamy ani nie
     // zmieniamy - to jest jedyny "publiczny" kontrakt miedzy modulami.
     this.flagBattleRef = flagBattle || null;
+    // Ten sam kontrakt (WYLACZNIE odczyt .tile), dla minigry "Panstwa-Miasta" -
+    // patrz analogiczny komentarz w panstwa-miasta.js/setContext.
+    this.panstwaMiastaRef = panstwaMiasta || null;
     this.setHost(isHost);
   }
 
@@ -400,6 +403,8 @@ export class TlumaczeniaManager {
     // rowniez po przeladowaniu strony (patrz analogiczny komentarz przy
     // kluczu flaga-pole w flagbattle.js).
     const zajeteFlag = this.flagBattleRef && this.flagBattleRef.tile ? this.flagBattleRef.tile : null;
+    // Kolizja z minigra "Panstwa-Miasta" - ten sam wzorzec co zajeteFlag powyzej.
+    const zajetePanstwaMiasta = this.panstwaMiastaRef && this.panstwaMiastaRef.tile ? this.panstwaMiastaRef.tile : null;
     const klucz = `${this.economy.state.seedGry}:tlumaczenia-pole:${this.economy.state.licznikSlowek}:${this.battleId}`;
     const rng = strumien(klucz);
 
@@ -410,18 +415,20 @@ export class TlumaczeniaManager {
       const kz = losujInt(rng, -3, 3);
       if (kx === 0 && kz === 0) continue; // bankomat
       if (zajeteFlag && kx === zajeteFlag.x && kz === zajeteFlag.z) continue; // pole flag
+      if (zajetePanstwaMiasta && kx === zajetePanstwaMiasta.x && kz === zajetePanstwaMiasta.z) continue; // pole panstw-miast
       rx = kx;
       rz = kz;
       break;
     }
     if (rx === null) {
       // Awaryjny deterministyczny skan siatki (praktycznie nieosiagalne -
-      // siatka ma 48 wolnych pol poza bankomatem, z czego najwyzej jedno
-      // zajete przez flagi) - ale petla wyzej MUSI miec koniec.
+      // siatka ma 48 wolnych pol poza bankomatem, z czego najwyzej jedno-dwa
+      // zajete przez pozostale minigry) - ale petla wyzej MUSI miec koniec.
       szukanie: for (let x = -3; x <= 3; x++) {
         for (let z = -3; z <= 3; z++) {
           if (x === 0 && z === 0) continue;
           if (zajeteFlag && x === zajeteFlag.x && z === zajeteFlag.z) continue;
+          if (zajetePanstwaMiasta && x === zajetePanstwaMiasta.x && z === zajetePanstwaMiasta.z) continue;
           rx = x;
           rz = z;
           break szukanie;

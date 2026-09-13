@@ -83,6 +83,7 @@ function defaultState() {
     // przeladowaniami strony ani miedzy kolejnymi bitwami tej samej rozgrywki.
     licznikFlag: 0,
     licznikSlowek: 0,
+    licznikLiter: 0, // patrz komentarz wyzej - trwaly licznik dla minigry "Panstwa-Miasta"
     // Znacznik czasu (ms) ustawiany razem z seedGry - kotwica dla zdarzen
     // czasowych (harmonogram Vanessy, zlotej monety), patrz src/vanessa.js
     // i src/goldcoin.js: numer cyklu = floor((Date.now()-epokaStartu)/dlugoscCyklu).
@@ -135,6 +136,9 @@ export class Economy {
         }
         if (typeof merged.licznikSlowek !== 'number' || !isFinite(merged.licznikSlowek) || merged.licznikSlowek < 0) {
           merged.licznikSlowek = 0;
+        }
+        if (typeof merged.licznikLiter !== 'number' || !isFinite(merged.licznikLiter) || merged.licznikLiter < 0) {
+          merged.licznikLiter = 0;
         }
         return merged;
       }

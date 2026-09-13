@@ -161,13 +161,15 @@ export class WorkerManager {
     this.vanessaRef = null;
     this.flagBattleRef = null;
     this.tlumaczeniaRef = null;
+    this.panstwaMiastaRef = null;
   }
 
-  setContext({ boss, vanessa, flagBattle, tlumaczenia }) {
+  setContext({ boss, vanessa, flagBattle, tlumaczenia, panstwaMiasta }) {
     this.bossRef = boss;
     this.vanessaRef = vanessa;
     this.flagBattleRef = flagBattle;
     this.tlumaczeniaRef = tlumaczenia;
+    this.panstwaMiastaRef = panstwaMiasta;
   }
 
   async _getTemplate(modelKey) {
@@ -509,6 +511,14 @@ export class WorkerManager {
       return false;
     }
 
+    // Bitwa panstw-miast: identyczna blokada i identyczne uzasadnienie co
+    // powyzej dla flag/tlumaczen - trzecia minigra na siatce ma dokladnie ten
+    // sam wzorzec (dwaj walczacy nie moga sie ruszyc, dopoki ktorys nie
+    // wygra), wiec musi byc sprawdzona tym samym sposobem.
+    if (this.panstwaMiastaRef && typeof this.panstwaMiastaRef.isPlayerLocked === 'function' && this.panstwaMiastaRef.isPlayerLocked(typeIndex)) {
+      return false;
+    }
+
     // Jeśli była odgrywana animacja uderzenia w bankomat, przerywamy ją natychmiast na rzecz chodu
     if (entry.interactAction && entry.playingInteract) {
       entry.interactAction.stop();
@@ -574,6 +584,12 @@ export class WorkerManager {
     if (this.tlumaczeniaRef && typeof this.tlumaczeniaRef.isTileLocked === 'function') {
       isLockedByTlumaczenia = this.tlumaczeniaRef.isTileLocked(nextX, nextZ, typeIndex);
     }
+    // Suma logiczna z blokada pola bitwy panstw-miast - ten sam wzorzec co
+    // isLockedByFlagBattle/isLockedByTlumaczenia powyzej.
+    let isLockedByPanstwaMiasta = false;
+    if (this.panstwaMiastaRef && typeof this.panstwaMiastaRef.isTileLocked === 'function') {
+      isLockedByPanstwaMiasta = this.panstwaMiastaRef.isTileLocked(nextX, nextZ, typeIndex);
+    }
 
     // Kolizje MIEDZY POSTACIAMI sa celowo WYLACZONE - kilku widzow moze stac
     // na tym samym polu i przechodzic przez siebie, zeby nikt nie blokowal
@@ -589,7 +605,7 @@ export class WorkerManager {
     entry.targetRotY = isDiagonal ? entry.startRotY : targetHeading; // skos nie zmienia zwrotu
     entry.facingAngle = isDiagonal ? entry.facingAngle : targetHeading;
 
-    if (!inBounds || isATM || isLockedByFlagBattle || isLockedByTlumaczenia) {
+    if (!inBounds || isATM || isLockedByFlagBattle || isLockedByTlumaczenia || isLockedByPanstwaMiasta) {
       // Gracz nie może wyjść poza obszar gry lub wejść w bankomat - przy zwyklym
       // kroku obraca się w wybraną stronę, przy skosie zostaje w miejscu bez obrotu
       entry.isMoving = true;
