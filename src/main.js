@@ -10,6 +10,7 @@ import { TlumaczeniaManager } from './tlumaczenia.js';
 import { PanstwaMiastaManager } from './panstwa-miasta.js';
 import { BitwaMarekManager } from './bitwa-marek.js';
 import { JetpackManager } from './jetpack.js';
+import { WarstwaMinigier } from './warstwa-minigier.js';
 import { Economy, WORKER_TYPE_DEFS, MACHINE_TIERS, SAVE_KEY } from './economy.js';
 import { remote, czyLokalnie } from './remote.js';
 import { Realtime, URL_RELAYA } from './realtime.js';
@@ -188,6 +189,20 @@ async function main() {
   const bitwaMarek = new BitwaMarekManager(scene, renderer);
   let bitwaMarekBledy = 0;
   let bitwaMarekZepsuta = false;
+
+  // Warstwa wymuszajaca pierwszenstwo kart minigier nad modelami 3D i nad
+  // HTML-owymi nickami/dymkami pracownikow (patrz src/warstwa-minigier.js -
+  // canvas jest nieprzezroczysty, samo z-index w CSS by tu nie wystarczylo).
+  // Kontener #worker-overlays jest juz uzywany przez WorkerOverlayManager
+  // (patrz workerOverlays nizej) - ten sam element, czytany tu z zewnatrz.
+  const warstwaMinigier = new WarstwaMinigier(camera, document.getElementById('worker-overlays'), {
+    flagBattle,
+    tlumaczenia,
+    panstwaMiasta,
+    bitwaMarek,
+  });
+  let warstwaMinigierBledy = 0;
+  let warstwaMinigierZepsuta = false;
 
   const vanessa = new VanessaManager(
     scene,
@@ -1253,6 +1268,7 @@ async function main() {
     panstwaMiasta,
     bitwaMarek,
     jetpack,
+    warstwaMinigier,
     save,
     scene,
     camera,
@@ -1381,6 +1397,23 @@ async function main() {
 
     // Aktualizacja pozycji plakietek z nickami i dymków czatu nad głowami pracowników w rzucie 3D -> 2D
     workerOverlays.updatePositions(workerManager.entries, camera, canvasRect);
+
+    // Karty minigier na pierwszej warstwie (patrz src/warstwa-minigier.js) -
+    // ta sama izolacja bledow co flagBattle/tlumaczenia/panstwaMiasta/
+    // bitwaMarek/jetpack powyzej.
+    if (!warstwaMinigierZepsuta) {
+      try {
+        warstwaMinigier.update(canvasRect);
+        warstwaMinigierBledy = 0;
+      } catch (err) {
+        warstwaMinigierBledy += 1;
+        console.error(`[warstwa-minigier] Blad w update() (${warstwaMinigierBledy}/3):`, err);
+        if (warstwaMinigierBledy >= 3) {
+          warstwaMinigierZepsuta = true;
+          console.error('[warstwa-minigier] Wylaczona po trzech bledach pod rzad - reszta gry dziala normalnie.');
+        }
+      }
+    }
 
     renderer.render(scene, camera);
   }
