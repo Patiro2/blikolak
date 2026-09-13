@@ -426,6 +426,15 @@ export class LeaderboardUI {
         left.appendChild(starySpan);
       }
 
+      // Ikona ekwipunku Skorpiona (tier 4, patrz src/boss-skorpion.js) -
+      // wpisywana wprost na wpis rankingu przez BossSkorpion._renderIkonyEkwipunku.
+      if (user.przedmiotSkorpion) {
+        const przedmiotSpan = document.createElement('span');
+        przedmiotSpan.className = 'przedmiot-skorpiona';
+        przedmiotSpan.textContent = user.przedmiotSkorpion;
+        left.appendChild(przedmiotSpan);
+      }
+
       // Etykieta przypisanego pracownika
       if (kickClient) {
         const workerSlot = kickClient.getWorkerForUser(user.username);
@@ -510,6 +519,13 @@ export class WorkerOverlayManager {
     starySpan.style.display = 'none';
     nameplateEl.appendChild(starySpan);
 
+    // Ikona ekwipunku Skorpiona (tier 4, patrz src/boss-skorpion.js) -
+    // utworzona raz tutaj, tak samo jak gwiazdka wyzej.
+    const przedmiotSpan = document.createElement('span');
+    przedmiotSpan.className = 'przedmiot-skorpiona';
+    przedmiotSpan.style.display = 'none';
+    nameplateEl.appendChild(przedmiotSpan);
+
     const bubbleEl = document.createElement('div');
     bubbleEl.className = 'worker-bubble';
     bubbleEl.style.display = 'none';
@@ -528,6 +544,7 @@ export class WorkerOverlayManager {
       rankSpan,
       userSpan,
       starySpan,
+      przedmiotSpan,
       bubbleEl,
       connectorEl,
       timer: null,
@@ -557,6 +574,7 @@ export class WorkerOverlayManager {
       item.fainted = false;
       item.nameplateEl.classList.remove('worker-fainted');
       item.lastUsername = null;
+      item.przedmiotSpan.style.display = 'none';
       return;
     }
     // Nowy widz zajal ten slot (inny nick niz poprzednio) - stary znacznik
@@ -576,6 +594,8 @@ export class WorkerOverlayManager {
     const wygrane = userData.wygraneMinigry || 0;
     item.starySpan.textContent = wygrane > 0 ? `⭐${wygrane}` : '';
     item.starySpan.style.display = wygrane > 0 ? '' : 'none';
+    item.przedmiotSpan.textContent = userData.przedmiotSkorpion || '';
+    item.przedmiotSpan.style.display = userData.przedmiotSkorpion ? '' : 'none';
     item.nameplateEl.className = `worker-nameplate ${rank === 1 ? 'rank-1' : ''}`;
     // Kazdy sync rankingu (np. po zwyklym "kliku" z czatu) nadpisuje className
     // i tresc rankSpan - bez tego znacznik omdlenia (boss.js) gasnie po ulamku

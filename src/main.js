@@ -491,12 +491,14 @@ async function main() {
       const text = dane && typeof dane.text === 'string' ? dane.text : null;
       if (text) tlumaczenia.announce(text);
     } else if (nazwa === 'game-over') {
-      // Wlasciciel przegral cala pule z Dzordzo (boss 3, patrz
-      // boss.onGameOver nizej) - widz WYLACZNIE odgrywa ten sam ekran, nigdy
-      // nie odpala go sam z siebie. Reset planszy przyjdzie osobnym
-      // zdarzeniem 'reset' (albo zmiana epoki w kolejnym snapshocie).
+      // Wlasciciel przegral cala pule z Dzordzo (boss 3) albo dal sie okrasc
+      // Skorpionowi (boss 4, patrz boss.onGameOver nizej) - widz WYLACZNIE
+      // odgrywa ten sam ekran (z tym samym tekstem), nigdy nie odpala go sam
+      // z siebie. Reset planszy przyjdzie osobnym zdarzeniem 'reset' (albo
+      // zmiana epoki w kolejnym snapshocie).
+      const tekst = dane && typeof dane.tekst === 'string' ? dane.tekst : undefined;
       audio.play('game-over');
-      pokazGameOver().catch((err) => console.error('[game-over] Blad nakladki u widza:', err));
+      pokazGameOver(tekst).catch((err) => console.error('[game-over] Blad nakladki u widza:', err));
     }
   }
 
@@ -772,6 +774,11 @@ async function main() {
           for (let slot = 0; slot < 10; slot++) {
             try {
               const user = kickChat.getUserForWorker(slot);
+              // Ikona ekwipunku Skorpiona (tier 4, patrz src/boss-skorpion.js)
+              // na plakietce nad postacia - getUserForWorker buduje nowy
+              // obiekt bez tego pola, wiec dopisujemy je tu (LeaderboardUI
+              // czyta je wprost z wpisu rankingu, bez tej lokalnej latki).
+              if (user && boss.skorpion) user.przedmiotSkorpion = boss.skorpion.getItemForUsername(user.username);
               workerOverlays.updateWorkerUser(slot, user);
               if (user) {
                 await ensureWorkerType(slot);
@@ -925,17 +932,19 @@ async function main() {
       save();
     },
     save,
-    onGameOver: async () => {
-      // Wolane WYLACZNIE przez BossBlackjack (boss 3, tier 3) na hoscie, gdy
-      // pula gracza spadnie do zera po przegranej rundzie (patrz
-      // src/boss-blackjack.js/_zastosujWynik). Widzowie dostaja to samo
-      // zdarzenie natychmiast kanalem realtime (patrz zastosujZdarzenieZdalne
-      // powyzej) - oni NIGDY nie odpalaja game over sami z siebie.
+    onGameOver: async (tekst) => {
+      // Wolane przez BossBlackjack (boss 3, tier 3, bez argumentu - domyslny
+      // tekst) albo BossSkorpion (boss 4, tier 4, z wlasnym tekstem) na
+      // hoscie, gdy pula gracza spadnie do zera (patrz
+      // src/boss-blackjack.js/_zastosujWynik i src/boss-skorpion.js/_wywolajGameOver).
+      // Widzowie dostaja to samo zdarzenie (z tym samym tekstem) natychmiast
+      // kanalem realtime (patrz zastosujZdarzenieZdalne powyzej) - oni NIGDY
+      // nie odpalaja game over sami z siebie.
       if (remote.czyAdmin()) {
-        realtime.wyslijZdarzenie('game-over', {});
+        realtime.wyslijZdarzenie('game-over', { tekst });
       }
       audio.play('game-over');
-      await pokazGameOver();
+      await pokazGameOver(tekst);
       // Reset PO tym, jak ekran jest juz w calosci ciemny - nie synchronicznie
       // w srodku boss.update() (patrz zadanie wlasciciela).
       await pelnyResetGry();

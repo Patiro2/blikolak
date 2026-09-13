@@ -241,6 +241,45 @@ export const SOUND_MAP = {
     maxJednoczesnie: 2,
     wysokoscVar: 0.0,
   },
+  // Boss 4 (Skorpion, tier 4) - patrz src/boss-skorpion.js. Wszystkie ponizsze
+  // pliki juz sa w assets/audio/ (wpisy powyzej je referencuja) - zadnych
+  // nowych plikow nie trzeba dograc.
+  'skorpion-przedmiot': {
+    pliki: ['maximize_006.ogg'],
+    glosnosc: 0.45,
+    cooldownMs: 200,
+    maxJednoczesnie: 1,
+    wysokoscVar: 0.03,
+  },
+  'skorpion-zebranie': {
+    pliki: ['powerUp2.ogg'],
+    glosnosc: 0.55,
+    cooldownMs: 150,
+    maxJednoczesnie: 2,
+    wysokoscVar: 0.04,
+  },
+  'skorpion-polaczenie': {
+    pliki: ['zapThreeToneUp.ogg'],
+    glosnosc: 0.5,
+    cooldownMs: 200,
+    maxJednoczesnie: 1,
+    wysokoscVar: 0.0,
+  },
+  'skorpion-trucizna': {
+    pliki: ['impactPunch_heavy_001.ogg', 'confirmation_002.ogg'],
+    tryb: 'wszystkie',
+    glosnosc: 0.55,
+    cooldownMs: 150,
+    maxJednoczesnie: 2,
+    wysokoscVar: 0.04,
+  },
+  'skorpion-kradziez': {
+    pliki: ['tick_002.ogg'],
+    glosnosc: 0.35,
+    cooldownMs: 800,
+    maxJednoczesnie: 1,
+    wysokoscVar: 0.0,
+  },
 };
 
 function loadSettings() {
