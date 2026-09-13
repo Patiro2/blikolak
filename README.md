@@ -101,10 +101,11 @@ Stan zapisuje się sam do `localStorage` co 5 s i przy zamykaniu karty.
 | `src/remote.js` | klient stanu zdalnego (Vercel KV) - logowanie admina, odczyt/zapis stanu, tryb offline lokalny |
 | `src/boss-kowal.js` | mechanika bossa tieru 2 "Kowal_88" - osobny plik, patrz sekcja "Boss" niżej |
 | `src/boss-blackjack.js` | mechanika bossa tieru 3 "Dżordżo" (blackjack) - osobny plik, patrz sekcja "Boss" niżej |
+| `src/boss-skorpion.js` | mechanika bossa tieru 4 "Skorpion" (ucieczka po siatce, zapadanie pól, przedmioty, trucizna, kradzież puli) - osobny plik, patrz sekcja "Boss" niżej |
 | `src/flagbattle.js` | minigra "Bitwa o flagi" - losowanie kraju, dopasowanie odpowiedzi z czatu, korzysta z `countries.js` i `bojka.js`; każda flaga ma limit 60 s (`LIMIT_CZASU_FLAGI_S`) - po jego upływie host odsłania nazwę kraju bez przyznania punktu i po ~3 s losuje kolejną |
 | `src/countries.js` | słownictwo minigry "Bitwa o flagi" - lista krajów, kody ISO, akceptowane warianty nazw |
 | `src/bojka.js` | wspólna, czysto kosmetyczna animacja "bijatyki" (ciosy, kurz) używana przez obie minigry siatki (`flagbattle.js`, `tlumaczenia.js`) |
-| `src/gameover.js` | nakładka "game over" po przegranej rundzie blackjacka z bossem 3 |
+| `src/gameover.js` | nakładka "game over" po przegranej z bossem 3 (blackjack) albo okradzeniu przez bossa 4 (Skorpion) - tekst opcjonalnym parametrem |
 | `src/tutorial.js` | samouczek dla nowych widzów streama - samowystarczalny moduł, własny DOM i `localStorage` |
 | `src/wasd-guzik.js` | przycisk kopiujący do schowka gotowy skrypt WASD→czat (do wklejenia w konsoli okna czatu Kicka) |
 | `src/rng.js` | deterministyczny PRNG (`mulberry32`) dzielony przez wszystkie karty gry - patrz "Determinizm ze wspólnego ziarna" |
@@ -134,8 +135,8 @@ Gra łączy się na żywo z czatem kanału **patiro** na Kick.com przez WebSocke
 ## Boss
 
 Przy KAŻDYM awansie tieru bankomatu wyskakuje boss - `src/boss.js`, tablica
-`BOSS_DEFS` indeksowana numerem tieru, wypełnione indeksy 1-3 (tiery 4 i 5 to
-na razie `null`, czyli awans na te tiery przebiega po staremu, bez walki).
+`BOSS_DEFS` indeksowana numerem tieru, wypełnione indeksy 1-4 (tier 5 to
+na razie `null`, czyli awans na ten tier przebiega po staremu, bez walki).
 Każdy boss ma własną mechanikę w osobnym pliku:
 
 - **Tier 1 - Kamil Kovalenko** (`src/boss.js`) - opisany szczegółowo niżej:
@@ -151,10 +152,51 @@ Każdy boss ma własną mechanikę w osobnym pliku:
   w blackjacka (decyzje DOBIERZ/PASUJ liczą się z pozycji na siatce, nie z
   czatu); wygrana rozdania zadaje bossowi obrażenia, przegrana kosztuje
   uczestnika część wspólnej puli wyłożonej jako "wpisowe" na czas walki.
+- **Tier 4 - Skorpion** (`src/boss-skorpion.js`, mechanika `'skorpion'`) -
+  opisany szczegółowo niżej: ucieka po siatce 7×7, zapadając za sobą pola, i
+  co sekundę okrada wspólną pulę - czat musi zbierać butelkę i środek
+  przeczyszczający, łączyć je w truciznę i zadawać nią obrażenia z bliska.
 
 Boss tieru 1 to `wheelchair-deluxe` (Kenney mini-characters) +
 `character-male-f`, złożone w jedną grupę i wyskalowane ×3 względem zwykłych
 postaci.
+
+### Szczegóły bossa tieru 4 (Skorpion)
+
+- **Model**: `animal-crab.glb` (Kenney `cube-pets`, `assets/cubepets/`) ze
+  skalą dobraną tak, żeby zmieścić się z zapasem w jednym polu siatki 1×1, z
+  doczepionym proceduralnym ogonem skorpiona (prymitywy Three.js, bez
+  tekstury - żadna paczka Kenneya nie ma modelu skorpiona). Przedmioty:
+  butelka (`bottle.glb`, `kenney_pirate-kit`, `assets/pirate/`) i środek
+  przeczyszczający (`potion.glb`, `kenney_mini-dungeon`, `assets/dungeon/`).
+- **Ruch**: co 5 s krok na sąsiednie pole (8-sąsiedztwo), zawsze w kierunku
+  maksymalizującym odległość od najbliższego gracza (ucieczka); pole, które
+  boss opuszcza, zapada się (maks. 5 zapadniętych naraz - najstarsze odnawia
+  się, gdy przybywa 6.). Kto wejdzie na zapadnięte pole albo pole zapadnie
+  się pod nim, ginie tak samo jak od rakiety bossa 1 (traci cały dorobek,
+  wypada z rankingu). Ruch jest liczony identycznie na każdej otwartej karcie
+  gry (wspólny strumień z `src/rng.js`), więc animacja jest płynna bez
+  czekania na synchronizację co 2 s.
+- **Kradzież**: w 1. sekundzie walki Skorpion ustala kwotę = 0,5% wspólnej
+  puli i od tej chwili co sekundę odejmuje TĘ SAMĄ kwotę (pokazaną w HUD
+  bossa jako "-X zł/s"), aż pula spadnie do zera - wtedy ekran "game over,
+  skorpion was okradł" (`pokazGameOver()` z `src/gameover.js`, ten sam
+  mechanizm co przy przegranej z Dżordżo) i pełny reset gry.
+- **Przedmioty i trucizna**: na wolnym polu pojawia się najpierw butelka,
+  po kilku sekundach środek przeczyszczający (każdy typ istnieje naraz co
+  najwyżej raz - na mapie albo w czyimś ekwipunku). Gracz z pustym
+  ekwipunkiem, który wejdzie na pole z przedmiotem, zbiera go (ikona 🍾/💊
+  przy nicku - plakietka nad postacią i wiersz rankingu). Gracz z butelką i
+  gracz ze środkiem na tym samym polu tracą je i dostają ☠️ (trucizna);
+  przedmiot znika bez respawnu, dopóki nie zostanie zużyty (do połączenia
+  albo śmiercią posiadacza). Gracz z trucizną, który znajdzie się w
+  8-sąsiedztwie Skorpiona, automatycznie jej używa - Skorpion traci 17 HP.
+- **Sync i decyzje**: pozycja, numer kroku, zapadnięte pola, przedmioty,
+  ekwipunki, kwota kradzieży i HP idą w sync bossa (`getSyncState`/
+  `applySync`, jak u Kowala/Dżordżo) - widz wchodzący w trakcie walki widzi
+  to samo. Zbieranie, łączenie, użycie trucizny, śmierć na zapadniętym polu i
+  kradzież puli są decyzjami hosta (`boss.czyNaliczanieDozwolone()`, ten sam
+  wzorzec co w `src/boss-blackjack.js`) - widz je wyłącznie odtwarza z sync.
 
 ### Szczegóły bossa tieru 1 (Kamil Kovalenko)
 
@@ -538,6 +580,7 @@ window.__game.kickChat.simulate('Widz1', 'klik');            // symulacja klikni
 window.__game.kickChat.simulate('Widz1', 'Pozdro dla czatu!'); // dymek wypowiedzi nad postacią widza w 3D
 
 window.__game.boss.start(1, { force: true });               // natychmiastowe odpalenie bossa (test)
+window.__game.boss.start(4, { force: true });               // to samo dla bossa 4 - Skorpiona (patrz src/boss-skorpion.js)
 window.__game.boss.damage(5);                                // zadanie obrażeń bossowi z pominięciem czatu
 window.__game.boss.faintRandom();                             // natychmiastowy atak na pole (omdlenie stojącego)
 window.__game.boss.rocketStrike();                            // natychmiastowa salwa 10 rakiet

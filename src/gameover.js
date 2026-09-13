@@ -31,9 +31,14 @@ function zapewnijDOM() {
  * reset gry dopiero PO tym momencie (widz nie ma zobaczyc migniecia resetu
  * na jasnym tle). Nakladka sama zanika po kilku sekundach, niezaleznie od
  * tego, co wolajacy zrobi z rozwiazanym Promise.
+ *
+ * `tekst` (opcjonalny) - domyslnie stary napis "game over dżordżo" (boss 3,
+ * blackjack, bez zmian). Boss 4 (Skorpion, patrz src/boss-skorpion.js) podaje
+ * wlasny tekst "game over, skorpion was okradł".
  */
-export function pokazGameOver() {
+export function pokazGameOver(tekst) {
   zapewnijDOM();
+  textEl.textContent = tekst || 'game over dżordżo';
 
   // reflow, zeby przejscia CSS zawsze wystartowaly od nowa (dokladnie jak
   // przy letterboxie/karcie tytulowej bossa w boss.js)

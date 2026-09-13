@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
-import { loadArcade, loadDungeon } from './assets.js';
+import { loadArcade, loadDungeon, loadPirate, loadCubePets } from './assets.js';
 import { fmtShort } from './format.js';
 import { normalizePolish } from './vanessa.js';
 import { showBossNotification } from './ui.js';
@@ -10,6 +10,7 @@ import { audio } from './audio.js';
 import { strumien, losujInt, losujZ } from './rng.js';
 import { BossKowal } from './boss-kowal.js';
 import { BossBlackjack } from './boss-blackjack.js';
+import { BossSkorpion } from './boss-skorpion.js';
 
 // Architektura gotowa na kolejnych bossow (jeden na kazdy tier bankomatu) -
 // tablica indeksowana numerem tieru, wypelniony na razie tylko indeks 1.
@@ -37,7 +38,13 @@ export const BOSS_DEFS = [
     hp: 100,
     mechanika: 'blackjack',
   },
-  null, // tier 4 - TODO kolejny boss
+  {
+    tier: 4,
+    name: 'Skorpion',
+    subtitle: 'JADOWITY WŁADCA ARENY',
+    hp: 100,
+    mechanika: 'skorpion',
+  },
   null, // tier 5 - TODO kolejny boss
 ];
 
@@ -222,6 +229,11 @@ export class BossManager {
     this.blackjackTemplate = null; // character-male-b.glb (kenney_mini-arcade) - cialo Dzordzo
     this.blackjackAnimations = [];
     this.blackjack = null; // instancja BossBlackjack - tylko gdy def.mechanika === 'blackjack' (patrz src/boss-blackjack.js)
+    this.crabTemplate = null; // animal-crab.glb (kenney_cube-pets) - cialo Skorpiona
+    this.crabAnimations = [];
+    this.bottleTemplate = null; // bottle.glb (kenney_pirate-kit) - przedmiot "butelka" Skorpiona
+    this.potionTemplate = null; // potion.glb (kenney_mini-dungeon) - przedmiot "srodek" Skorpiona
+    this.skorpion = null; // instancja BossSkorpion - tylko gdy def.mechanika === 'skorpion' (patrz src/boss-skorpion.js)
 
     this.model = null; // THREE.Group (wozek + postac)
     this.charObj = null; // dziecko-postac, na nim dziala mixer/animacje
@@ -354,11 +366,14 @@ export class BossManager {
   }
 
   async init() {
-    const [chairGltf, charGltf, orcGltf, blackjackGltf] = await Promise.all([
+    const [chairGltf, charGltf, orcGltf, blackjackGltf, crabGltf, bottleGltf, potionGltf] = await Promise.all([
       loadArcade('wheelchair-deluxe'),
       loadArcade('character-male-f'),
       loadDungeon('character-orc'),
       loadArcade('character-male-b'),
+      loadCubePets('animal-crab'),
+      loadPirate('bottle'),
+      loadDungeon('potion'),
     ]);
     await this.fx.init();
     this.chairTemplate = chairGltf.scene;
@@ -368,6 +383,10 @@ export class BossManager {
     this.orcAnimations = orcGltf.animations || [];
     this.blackjackTemplate = blackjackGltf.scene;
     this.blackjackAnimations = blackjackGltf.animations || [];
+    this.crabTemplate = crabGltf.scene;
+    this.crabAnimations = crabGltf.animations || [];
+    this.bottleTemplate = bottleGltf.scene;
+    this.potionTemplate = potionGltf.scene;
   }
 
   isActive() {
@@ -423,6 +442,15 @@ export class BossManager {
     np.appendChild(overloadWrap);
     this.overloadWrapEl = overloadWrap;
     this.overloadFillEl = overloadFill;
+
+    // Wiersz kradziezy Skorpiona (tier 4, patrz src/boss-skorpion.js) - tekst
+    // "-X zł/s" pokazywany wylacznie na czas walki z tym bossem, ukryty
+    // domyslnie tak samo jak pasek przeciazenia Kowala powyzej.
+    const stealRow = document.createElement('div');
+    stealRow.className = 'boss-steal-row';
+    stealRow.style.display = 'none';
+    np.appendChild(stealRow);
+    this.stealRowEl = stealRow;
 
     // Zintegrowana sekcja działania matematycznego z paskiem odliczania
     const eqSection = document.createElement('div');
@@ -664,6 +692,11 @@ export class BossManager {
         this._log('bad', 'Nie moge wystartowac - model Dzordzo jeszcze sie nie zaladowal');
         return false;
       }
+    } else if (def.mechanika === 'skorpion') {
+      if (!this.crabTemplate) {
+        this._log('bad', 'Nie moge wystartowac - model Skorpiona jeszcze sie nie zaladowal');
+        return false;
+      }
     } else if (!this.chairTemplate || !this.charTemplate) {
       this._log('bad', 'Nie moge wystartowac - model bossa jeszcze sie nie zaladowal');
       return false;
@@ -700,6 +733,13 @@ export class BossManager {
       this.model = this.blackjack.build();
       this.mixer = null;
       this._beginCutsceneBlackjack();
+    } else if (def.mechanika === 'skorpion') {
+      this.kowal = null;
+      this.blackjack = null;
+      this.skorpion = new BossSkorpion(this);
+      this.model = this.skorpion.build();
+      this.mixer = null;
+      this._beginCutsceneSkorpion();
     } else {
       this.kowal = null;
       this.blackjack = null;
@@ -872,6 +912,44 @@ export class BossManager {
     this._log('info', 'Dzordzo dotarl na arene - start walki blackjacka');
   }
 
+  /**
+   * Wejscie Skorpiona (tier 4) - ta sama karta tytulowa/letterbox co Kowal/
+   * Dzordzo, BEZ blokady kamery. Skorpion pojawia sie juz stojacy na polu
+   * startowym (patrz BossSkorpion.beginEntrance), CZAS_WEJSCIA tam jest tylko
+   * timingiem karty tytulowej/letterboxu.
+   */
+  _beginCutsceneSkorpion() {
+    this.state = 'CUTSCENE';
+    this.cutsceneT = 0;
+
+    this.titleNameEl.textContent = `👹 ${this.def.name.toUpperCase()}`;
+    this.titleSubEl.textContent = this.def.subtitle || '';
+    if (this.nameRowEl) this.nameRowEl.textContent = `👹 ${this.def.name}`;
+
+    void this.letterboxTop.offsetWidth;
+    this.letterboxTop.classList.add('show');
+    this.letterboxBottom.classList.add('show');
+    this.titleCardEl.classList.remove('show');
+    void this.titleCardEl.offsetWidth;
+    this.titleCardEl.classList.add('show');
+
+    this.nameplateEl.style.display = 'flex';
+    if (this.overloadWrapEl) this.overloadWrapEl.style.display = 'none';
+    this.hpFillEl.style.width = '100%';
+    this.hpTextEl.textContent = `${this.hp} / ${this.maxHp}`;
+
+    this.skorpion.beginEntrance();
+  }
+
+  _endCutsceneSkorpion() {
+    this.letterboxTop.classList.remove('show');
+    this.letterboxBottom.classList.remove('show');
+    this.titleCardEl.classList.remove('show');
+
+    this.state = 'FIGHT';
+    this._log('info', 'Skorpion wszedl na arene - start walki');
+  }
+
   /** Czy boss aktualnie ma pelna kontrole nad kamera (main.js pomija wtedy controls.update()). */
   isCameraLocked() {
     return this._camLockActive;
@@ -908,6 +986,11 @@ export class BossManager {
     if (this.def && this.def.mechanika === 'blackjack') {
       this.blackjack.update(delta);
       if (!this.blackjack.fazaWejscia) this._endCutsceneBlackjack();
+      return;
+    }
+    if (this.def && this.def.mechanika === 'skorpion') {
+      this.skorpion.update(delta);
+      if (!this.skorpion.fazaWejscia) this._endCutsceneSkorpion();
       return;
     }
 
@@ -1022,6 +1105,10 @@ export class BossManager {
       this.blackjack.update(delta);
       return;
     }
+    if (this.def && this.def.mechanika === 'skorpion') {
+      this.skorpion.update(delta);
+      return;
+    }
 
     // Wstrzas kamery po uderzeniu (dogasa w pierwszych ulamkach sekundy walki)
     if (this._camShakeT > 0) {
@@ -1129,6 +1216,13 @@ export class BossManager {
     // awatarow na siatce (patrz BossBlackjack._countBySide), nie przez czat -
     // czat nie ma tu zadnej roli, wiec po prostu nic nie robimy.
     if (this.def && this.def.mechanika === 'blackjack') {
+      return;
+    }
+
+    // Skorpion (tier 4): decyzje ida przez pozycje na siatce i ekwipunki
+    // (patrz BossSkorpion), nie przez czat - ruch gracza jest juz obslugiwany
+    // osobno w main.js (parseMovementDirection), wiec tu nic nie robimy.
+    if (this.def && this.def.mechanika === 'skorpion') {
       return;
     }
 
@@ -1330,6 +1424,16 @@ export class BossManager {
         `Stał na polu, na które wszedł Kowal. Stracił cały dorobek (<strong>${fmtShort(lostAmount)} zł</strong>) i wypadł z rankingu.`,
       );
       this._log('bad', `Kowal_88 "zabil" @${username} wchodzac na jego pole - stracil ${lostAmount} zl i wypadl z rankingu`, {
+        ofiara: username,
+        utraconeZl: lostAmount,
+      });
+    } else if (source === 'skorpion') {
+      showBossNotification(
+        'kill',
+        `💀 SKORPION POCHŁONĄŁ @${username}!`,
+        `Wszedł na zapadnięte pole areny. Stracił cały dorobek (<strong>${fmtShort(lostAmount)} zł</strong>) i wypadł z rankingu.`,
+      );
+      this._log('bad', `Skorpion "zabil" @${username} - zapadniete pole - stracil ${lostAmount} zl i wypadl z rankingu`, {
         ofiara: username,
         utraconeZl: lostAmount,
       });
@@ -1718,6 +1822,21 @@ export class BossManager {
       return;
     }
 
+    if (this.def && this.def.mechanika === 'skorpion') {
+      // Cube-pets nie maja klipu "die" (slownik zwierzat: static/idle/walk/
+      // run/eat/dance/gesture-positive/gesture-negative) - "gesture-negative"
+      // jest najblizszym odpowiednikiem reakcji porazki.
+      if (this.skorpion) this.skorpion.playAction('gesture-negative', { hard: true, once: true });
+      this._victoryT = 0;
+      if (this.stealRowEl) this.stealRowEl.style.display = 'none';
+      showBossNotification(
+        'boss',
+        '🏆 SKORPION POKONANY!',
+        'Czat otruł Skorpiona! Bankomat wraca na nowym tierze.',
+      );
+      return;
+    }
+
     // Boss siedzi w wozku - klip "die" (dla postaci stojacej) wygladal tu zle.
     // Zamiast niego bezwladne osuniecie sie w fotelu na kosciach.
     this.playAction('wheelchair-sit', { hard: true });
@@ -1742,6 +1861,9 @@ export class BossManager {
     }
     if (this.def && this.def.mechanika === 'blackjack' && this.blackjack && this.blackjack.mixer) {
       this.blackjack.mixer.update(delta);
+    }
+    if (this.def && this.def.mechanika === 'skorpion' && this.skorpion && this.skorpion.mixer) {
+      this.skorpion.mixer.update(delta);
     }
     this._victoryT = (this._victoryT || 0) + delta;
     if (this.model) {
@@ -1790,7 +1912,12 @@ export class BossManager {
       this.blackjack.teardown();
       this.blackjack = null;
     }
+    if (this.skorpion) {
+      this.skorpion.teardown();
+      this.skorpion = null;
+    }
     if (this.bjPanelEl) this.bjPanelEl.classList.remove('show');
+    if (this.stealRowEl) this.stealRowEl.style.display = 'none';
     if (this.model) {
       this.scene.remove(this.model);
       this.model = null;
@@ -1915,6 +2042,9 @@ export class BossManager {
     if (this.def && this.def.mechanika === 'blackjack' && this.blackjack) {
       stan.blackjack = this.blackjack.getSyncState();
     }
+    if (this.def && this.def.mechanika === 'skorpion' && this.skorpion) {
+      stan.skorpion = this.skorpion.getSyncState();
+    }
     return stan;
   }
 
@@ -1947,6 +2077,10 @@ export class BossManager {
       }
       if (this.def && this.def.mechanika === 'blackjack') {
         if (this.blackjack && bossState.blackjack) this.blackjack.applySync(bossState.blackjack);
+        return;
+      }
+      if (this.def && this.def.mechanika === 'skorpion') {
+        if (this.skorpion && bossState.skorpion) this.skorpion.applySync(bossState.skorpion);
         return;
       }
 
@@ -1983,6 +2117,11 @@ export class BossManager {
     } else if (def.mechanika === 'blackjack') {
       if (!this.blackjackTemplate) {
         this._log('bad', 'Nie moge dolaczyc do walki (sync) - model Dzordzo jeszcze sie nie zaladowal');
+        return false;
+      }
+    } else if (def.mechanika === 'skorpion') {
+      if (!this.crabTemplate) {
+        this._log('bad', 'Nie moge dolaczyc do walki (sync) - model Skorpiona jeszcze sie nie zaladowal');
         return false;
       }
     } else if (!this.chairTemplate || !this.charTemplate) {
@@ -2030,6 +2169,22 @@ export class BossManager {
       this.model = this.blackjack.build();
       this.mixer = null;
       this.blackjack.startFromSync(bossState.blackjack);
+
+      this.state = 'FIGHT';
+      if (this.nameplateEl) this.nameplateEl.style.display = 'flex';
+      if (this.overloadWrapEl) this.overloadWrapEl.style.display = 'none';
+      if (this.hpFillEl) this.hpFillEl.style.width = `${(this.hp / this.maxHp) * 100}%`;
+      if (this.hpTextEl) this.hpTextEl.textContent = `${this.hp} / ${this.maxHp}`;
+      return true;
+    }
+
+    if (def.mechanika === 'skorpion') {
+      this.kowal = null;
+      this.blackjack = null;
+      this.skorpion = new BossSkorpion(this);
+      this.model = this.skorpion.build();
+      this.mixer = null;
+      this.skorpion.startFromSync(bossState.skorpion);
 
       this.state = 'FIGHT';
       if (this.nameplateEl) this.nameplateEl.style.display = 'flex';

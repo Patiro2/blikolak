@@ -386,6 +386,12 @@ html, body {
   margin-left: 2px;
 }
 
+/* Ikona ekwipunku Skorpiona (tier 4, patrz src/boss-skorpion.js) - ranking i plakietka nad postacia */
+.przedmiot-skorpiona {
+  font-size: 12px;
+  margin-left: 2px;
+}
+
 .leaderboard-row .worker-tag {
   font-size: 10px;
   color: #8fa0b0;
@@ -1300,6 +1306,16 @@ html, body {
   width: 0%;
   background: linear-gradient(90deg, #0a6fb8, #2fb4ff);
   transition: width 0.25s ease;
+}
+
+/* Wiersz kradziezy Skorpiona (tier 4, patrz src/boss-skorpion.js) - tekst
+   "-X zł/s" pokazywany wylacznie na czas walki z tym bossem. */
+.boss-steal-row {
+  font-size: 12px;
+  font-weight: 800;
+  color: #ff9a4a;
+  text-shadow: 0 0 8px rgba(255, 90, 0, 0.7);
+  white-space: nowrap;
 }
 
 /* Dymek Kowala_88 - cykliczne teksty nad plakietka bossa. */
