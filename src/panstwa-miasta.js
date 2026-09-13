@@ -238,19 +238,20 @@ export class PanstwaMiastaManager {
     this.bojka = new Bojka(this.scene);
   }
 
-  setContext({ workerManager, kickChat, economy, isHost, boss, flagBattle, tlumaczenia }) {
+  setContext({ workerManager, kickChat, economy, isHost, boss, flagBattle, tlumaczenia, bitwaMarek }) {
     this.workerManager = workerManager;
     this.kickChat = kickChat;
     this.economy = economy;
     this.boss = boss || null;
-    // Referencje do minigier "Bitwa o flagi" i "Tlumaczenia" - WYLACZNIE do
-    // odczytu ich biezacych kafelkow (.tile), zeby losowanie pola panstw-miast
-    // nigdy nie trafilo w kafelek zajety przez ktorakolwiek z nich (patrz
-    // spawnBattleSquare nizej). Ten sam trojstronny kontrakt "tylko do
-    // odczytu cudzego .tile", jaki juz laczy flagBattle i tlumaczenia
-    // nawzajem (patrz ich setContext).
+    // Referencje do minigier "Bitwa o flagi", "Tlumaczenia" i "Zgadnij marke" -
+    // WYLACZNIE do odczytu ich biezacych kafelkow (.tile), zeby losowanie
+    // pola panstw-miast nigdy nie trafilo w kafelek zajety przez
+    // ktorakolwiek z nich (patrz spawnBattleSquare nizej). Ten sam
+    // czworostronny kontrakt "tylko do odczytu cudzego .tile", jaki juz
+    // laczy flagBattle/tlumaczenia/bitwaMarek nawzajem (patrz ich setContext).
     this.flagBattleRef = flagBattle || null;
     this.tlumaczeniaRef = tlumaczenia || null;
+    this.bitwaMarekRef = bitwaMarek || null;
     this.setHost(isHost);
   }
 
@@ -406,6 +407,8 @@ export class PanstwaMiastaManager {
 
     const zajeteFlag = this.flagBattleRef && this.flagBattleRef.tile ? this.flagBattleRef.tile : null;
     const zajeteTlumaczenia = this.tlumaczeniaRef && this.tlumaczeniaRef.tile ? this.tlumaczeniaRef.tile : null;
+    // Kolizja z minigra "Zgadnij marke" - ten sam wzorzec co zajeteFlag/zajeteTlumaczenia powyzej.
+    const zajeteMarki = this.bitwaMarekRef && this.bitwaMarekRef.tile ? this.bitwaMarekRef.tile : null;
     const klucz = `${this.economy.state.seedGry}:panstwa-miasta-pole:${this.economy.state.licznikLiter}:${this.battleId}`;
     const rng = strumien(klucz);
 
@@ -417,6 +420,7 @@ export class PanstwaMiastaManager {
       if (kx === 0 && kz === 0) continue; // bankomat
       if (zajeteFlag && kx === zajeteFlag.x && kz === zajeteFlag.z) continue; // pole flag
       if (zajeteTlumaczenia && kx === zajeteTlumaczenia.x && kz === zajeteTlumaczenia.z) continue; // pole tlumaczen
+      if (zajeteMarki && kx === zajeteMarki.x && kz === zajeteMarki.z) continue; // pole marek
       rx = kx;
       rz = kz;
       break;
@@ -429,6 +433,7 @@ export class PanstwaMiastaManager {
           if (x === 0 && z === 0) continue;
           if (zajeteFlag && x === zajeteFlag.x && z === zajeteFlag.z) continue;
           if (zajeteTlumaczenia && x === zajeteTlumaczenia.x && z === zajeteTlumaczenia.z) continue;
+          if (zajeteMarki && x === zajeteMarki.x && z === zajeteMarki.z) continue;
           rx = x;
           rz = z;
           break szukanie;

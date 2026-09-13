@@ -8,6 +8,7 @@ import { GoldenCoinManager } from './goldcoin.js';
 import { FlagBattleManager } from './flagbattle.js';
 import { TlumaczeniaManager } from './tlumaczenia.js';
 import { PanstwaMiastaManager } from './panstwa-miasta.js';
+import { BitwaMarekManager } from './bitwa-marek.js';
 import { Economy, WORKER_TYPE_DEFS, MACHINE_TIERS, SAVE_KEY } from './economy.js';
 import { remote, czyLokalnie } from './remote.js';
 import { Realtime, URL_RELAYA } from './realtime.js';
@@ -172,6 +173,14 @@ async function main() {
   let panstwaMiastaBledy = 0;
   let panstwaMiastaZepsuta = false;
 
+  // Minigra "Zgadnij marke" - piata minigra na siatce areny, obok bitwy o
+  // flagi, bitwy tlumaczen i panstw-miast. Ta sama polityka izolacji bledow
+  // (patrz komentarz przy flagBattleZepsuta nizej w animate()) - blad w
+  // tick() degraduje WYLACZNIE te minigre, reszta gry dziala dalej.
+  const bitwaMarek = new BitwaMarekManager(scene, renderer);
+  let bitwaMarekBledy = 0;
+  let bitwaMarekZepsuta = false;
+
   const vanessa = new VanessaManager(
     scene,
     camera,
@@ -255,6 +264,7 @@ async function main() {
       flagBattle: flagBattle.getSyncState(),
       tlumaczenia: tlumaczenia.getSyncState(),
       panstwaMiasta: panstwaMiasta.getSyncState(),
+      bitwaMarek: bitwaMarek.getSyncState(),
     };
   }
 
@@ -416,6 +426,11 @@ async function main() {
     await krokStanu('panstwaMiasta.applySync', () => {
       if (!remote.czyAdmin()) panstwaMiasta.applySync(stan.panstwaMiasta || null);
     });
+    // Minigra "Zgadnij marke" - ten sam wzorzec co flagBattle.applySync/
+    // tlumaczenia.applySync/panstwaMiasta.applySync wyzej.
+    await krokStanu('bitwaMarek.applySync', () => {
+      if (!remote.czyAdmin()) bitwaMarek.applySync(stan.bitwaMarek || null);
+    });
     try {
       await syncLeaderboardAndOverlays();
     } catch (err) {
@@ -510,6 +525,11 @@ async function main() {
       // 'flaga-info'/'tlumaczenia-info' powyzej (patrz komentarz tam).
       const text = dane && typeof dane.text === 'string' ? dane.text : null;
       if (text) panstwaMiasta.announce(text);
+    } else if (nazwa === 'marki-info') {
+      // Natychmiastowa narracja bitwy o marki - ten sam wzorzec co
+      // 'flaga-info'/'tlumaczenia-info'/'panstwa-miasta-info' powyzej.
+      const text = dane && typeof dane.text === 'string' ? dane.text : null;
+      if (text) bitwaMarek.announce(text);
     } else if (nazwa === 'game-over') {
       // Wlasciciel przegral cala pule z Dzordzo (boss 3) albo dal sie okrasc
       // Skorpionowi (boss 4, patrz boss.onGameOver nizej) - widz WYLACZNIE
@@ -630,6 +650,8 @@ async function main() {
     tlumaczenia.setHost(admin);
     // Ta sama naprawa co powyzej, dla minigry panstw-miast.
     panstwaMiasta.setHost(admin);
+    // Ta sama naprawa co powyzej, dla minigry "Zgadnij marke".
+    bitwaMarek.setHost(admin);
     if (!adminBtn) return;
     if (czyLokalnie()) {
       // Lokalnie nie ma sie gdzie logowac - chowamy przycisk.
@@ -840,6 +862,8 @@ async function main() {
       tlumaczenia.onChatMessage(msg.username, msg.content);
       // Odpowiedzi do bitwy panstw-miast
       panstwaMiasta.onChatMessage(msg.username, msg.content);
+      // Odpowiedzi do bitwy o marki
+      bitwaMarek.onChatMessage(msg.username, msg.content);
       // Chodzenie po siatce 2D areny - tylko dla aktywnych graczy w grze (Top 10)
       // Pojedyncza komenda albo kombinacja (np. "wwd", max 5 znakow) - patrz
       // parseMovementCombo w workers.js. Nowa kombinacja od tego samego widza
@@ -927,10 +951,11 @@ async function main() {
       });
     },
   });
-  // workerManager.setContext (src/workers.js) egzekwuje blokady ruchu obu
-  // minigier na siatce - isPlayerLocked/isTileLocked dla bitwy o flagi ORAZ
-  // dla bitwy tlumaczen (patrz moveWorker() w workers.js).
-  workerManager.setContext({ boss, vanessa, flagBattle, tlumaczenia, panstwaMiasta });
+  // workerManager.setContext (src/workers.js) egzekwuje blokady ruchu
+  // wszystkich minigier na siatce - isPlayerLocked/isTileLocked dla bitwy o
+  // flagi, bitwy tlumaczen, panstw-miast ORAZ bitwy o marki (patrz
+  // moveWorker() w workers.js).
+  workerManager.setContext({ boss, vanessa, flagBattle, tlumaczenia, panstwaMiasta, bitwaMarek });
   vanessa.setContext({ workerManager, kickChat });
   // Ta sama polityka co machine.czyKlikaniaDozwolone powyzej - patrz komentarz
   // tam. Obejmuje wszystkie 3 sciezki klikania myszka w Vanesse (model,
@@ -994,6 +1019,7 @@ async function main() {
     boss,
     tlumaczenia, // wylacznie do odczytu tlumaczenia.tile - patrz komentarz w flagbattle.js/setContext
     panstwaMiasta, // wylacznie do odczytu panstwaMiasta.tile - patrz komentarz w flagbattle.js/setContext
+    bitwaMarek, // wylacznie do odczytu bitwaMarek.tile - patrz komentarz w flagbattle.js/setContext
   });
   tlumaczenia.setContext({
     workerManager,
@@ -1003,6 +1029,7 @@ async function main() {
     boss,
     flagBattle, // wylacznie do odczytu flagBattle.tile - patrz komentarz w tlumaczenia.js/setContext
     panstwaMiasta, // wylacznie do odczytu panstwaMiasta.tile - patrz komentarz w tlumaczenia.js/setContext
+    bitwaMarek, // wylacznie do odczytu bitwaMarek.tile - patrz komentarz w tlumaczenia.js/setContext
   });
   // Minigra "Panstwa-Miasta" - ten sam wzorzec co flagBattle/tlumaczenia
   // powyzej, z referencjami do OBU pozostalych minigier (wylacznie do
@@ -1015,6 +1042,21 @@ async function main() {
     boss,
     flagBattle,
     tlumaczenia,
+    bitwaMarek, // wylacznie do odczytu bitwaMarek.tile - patrz komentarz w panstwa-miasta.js/setContext
+  });
+  // Minigra "Zgadnij marke" - ten sam wzorzec co pozostale trzy minigry
+  // powyzej, z referencjami do WSZYSTKICH pozostalych trzech minigier
+  // (wylacznie do odczytu ich .tile - patrz komentarz w
+  // bitwa-marek.js/setContext).
+  bitwaMarek.setContext({
+    workerManager,
+    kickChat,
+    economy,
+    isHost: remote.czyAdmin(),
+    boss,
+    flagBattle,
+    tlumaczenia,
+    panstwaMiasta,
   });
   // Narracja bitwy ("Bitwa o flagi! X vs Y!", "X wygrywa!"...) dociera do
   // widza z hostowej karty natychmiast przez kanal realtime, zamiast czekac
@@ -1059,6 +1101,19 @@ async function main() {
     }
   };
   panstwaMiasta.onRewardTick = (winner) => {
+    const w = workerManager.getWorkerType(winner.typeIndex);
+    if (!w || !w.obj) return;
+    const origin = w.obj.position.clone().add(new THREE.Vector3(0, 1.8, 0));
+    projectAndFloat(origin, '+2 zł', { crit: false });
+  };
+  // Ten sam wzorzec co flagBattle/tlumaczenia/panstwaMiasta onAnnounce/
+  // onRewardTick powyzej, dla minigry "Zgadnij marke".
+  bitwaMarek.onAnnounce = (text) => {
+    if (remote.czyAdmin()) {
+      realtime.wyslijZdarzenie('marki-info', { text });
+    }
+  };
+  bitwaMarek.onRewardTick = (winner) => {
     const w = workerManager.getWorkerType(winner.typeIndex);
     if (!w || !w.obj) return;
     const origin = w.obj.position.clone().add(new THREE.Vector3(0, 1.8, 0));
@@ -1173,6 +1228,7 @@ async function main() {
     flagBattle,
     tlumaczenia,
     panstwaMiasta,
+    bitwaMarek,
     save,
     scene,
     camera,
@@ -1245,6 +1301,22 @@ async function main() {
         if (panstwaMiastaBledy >= 3) {
           panstwaMiastaZepsuta = true;
           console.error('[panstwa-miasta] Minigra wylaczona po trzech bledach pod rzad - reszta gry dziala normalnie.');
+        }
+      }
+    }
+    // Ta sama izolacja bledow co flagBattle/tlumaczenia/panstwaMiasta powyzej -
+    // minigra "Zgadnij marke" jest rowniez mlodym modulem, blad w jej tick()
+    // nie moze polozyc calej gry.
+    if (!bitwaMarekZepsuta) {
+      try {
+        bitwaMarek.tick(delta);
+        bitwaMarekBledy = 0;
+      } catch (err) {
+        bitwaMarekBledy += 1;
+        console.error(`[marki] Blad w tick() minigry (${bitwaMarekBledy}/3):`, err);
+        if (bitwaMarekBledy >= 3) {
+          bitwaMarekZepsuta = true;
+          console.error('[marki] Minigra wylaczona po trzech bledach pod rzad - reszta gry dziala normalnie.');
         }
       }
     }

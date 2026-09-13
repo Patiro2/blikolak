@@ -351,7 +351,7 @@ export class FlagBattleManager {
     this.bojka = new Bojka(this.scene);
   }
 
-  setContext({ workerManager, kickChat, economy, isHost, boss, tlumaczenia, panstwaMiasta }) {
+  setContext({ workerManager, kickChat, economy, isHost, boss, tlumaczenia, panstwaMiasta, bitwaMarek }) {
     this.workerManager = workerManager;
     this.kickChat = kickChat;
     this.economy = economy;
@@ -365,6 +365,9 @@ export class FlagBattleManager {
     // Ten sam kontrakt (WYLACZNIE odczyt .tile), dla minigry "Panstwa-Miasta" -
     // patrz analogiczny komentarz w panstwa-miasta.js/setContext.
     this.panstwaMiastaRef = panstwaMiasta || null;
+    // Ten sam kontrakt (WYLACZNIE odczyt .tile), dla minigry "Zgadnij marke" -
+    // patrz analogiczny komentarz w bitwa-marek.js/setContext.
+    this.bitwaMarekRef = bitwaMarek || null;
     // NAPRAWA: przed ta zmiana kazda otwarta karta (host i kazdy widz) miala
     // wlasna, niezalezna instancje FlagBattleManager i tick() na kazdej z nich
     // losowal Math.random() SAM - inny kafelek, inna flaga, w innym momencie.
@@ -608,6 +611,8 @@ export class FlagBattleManager {
     const zajeteTlumaczenia = this.tlumaczeniaRef && this.tlumaczeniaRef.tile ? this.tlumaczeniaRef.tile : null;
     // Kolizja z minigra "Panstwa-Miasta" - ten sam wzorzec co zajeteTlumaczenia powyzej.
     const zajetePanstwaMiasta = this.panstwaMiastaRef && this.panstwaMiastaRef.tile ? this.panstwaMiastaRef.tile : null;
+    // Kolizja z minigra "Zgadnij marke" - ten sam wzorzec co zajeteTlumaczenia powyzej.
+    const zajeteMarki = this.bitwaMarekRef && this.bitwaMarekRef.tile ? this.bitwaMarekRef.tile : null;
 
     let rx = null;
     let rz = null;
@@ -617,6 +622,7 @@ export class FlagBattleManager {
       if (kx === 0 && kz === 0) continue; // bankomat
       if (zajeteTlumaczenia && kx === zajeteTlumaczenia.x && kz === zajeteTlumaczenia.z) continue; // pole tlumaczen
       if (zajetePanstwaMiasta && kx === zajetePanstwaMiasta.x && kz === zajetePanstwaMiasta.z) continue; // pole panstw-miast
+      if (zajeteMarki && kx === zajeteMarki.x && kz === zajeteMarki.z) continue; // pole marek
       rx = kx;
       rz = kz;
       break;
@@ -629,6 +635,7 @@ export class FlagBattleManager {
           if (x === 0 && z === 0) continue;
           if (zajeteTlumaczenia && x === zajeteTlumaczenia.x && z === zajeteTlumaczenia.z) continue;
           if (zajetePanstwaMiasta && x === zajetePanstwaMiasta.x && z === zajetePanstwaMiasta.z) continue;
+          if (zajeteMarki && x === zajeteMarki.x && z === zajeteMarki.z) continue;
           rx = x;
           rz = z;
           break szukanie;
