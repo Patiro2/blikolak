@@ -319,17 +319,17 @@ export class KickChatClient {
   /**
    * Dolicza zarobek widzowi w rankingu. `countsAsClick` (domyslnie true)
    * decyduje, czy ten zarobek zwieksza tez licznik `clicks` w rankingu -
-   * ten licznik MUSI odzwierciedlac wylacznie realne komendy "klik" z czatu.
-   * Zrodla zarobku inne niz komenda "klik" (np. zebranie zlotej monety przez
-   * dobiegniecie postaci) wywoluja to z countsAsClick=false, zeby nie
+   * ten licznik MUSI odzwierciedlac wylacznie realne wiadomosci z czatu.
+   * Zrodla zarobku inne niz wiadomosc na czacie (np. zebranie zlotej monety
+   * przez dobiegniecie postaci) wywoluja to z countsAsClick=false, zeby nie
    * fabrykowac klikniec, ktorych widz nigdy nie napisal.
    */
   recordEarned(username, amount, color, countsAsClick = true) {
     if (!username) return;
     const cleanUsername = stripNickPrefix(username);
     const key = cleanUsername.toLowerCase();
-    // Jeśli gracz zginął podczas walki z bossem, "klik" odradza go w grze
-    // z nowym dorobkiem, pozwalając ponownie dołączyć do Top 10
+    // Jeśli gracz zginął podczas walki z bossem, kolejna wiadomosc odradza
+    // go w grze z nowym dorobkiem, pozwalając ponownie dołączyć do Top 10
     if (this.eliminated.has(key)) {
       this.eliminated.delete(key);
     }
@@ -357,7 +357,7 @@ export class KickChatClient {
 
   /**
    * Kradnie okreslona kwote zl z dorobku (totalEarned) widza. Nie rusza
-   * pola `clicks` - ono zostaje niezalezna statystyka liczby komend "klik".
+   * pola `clicks` - ono zostaje niezalezna statystyka liczby wiadomosci-klikow.
    * Zwraca faktycznie skradzioną kwotę (obcięta do tego, co widz ma).
    */
   stealMoneyFromUser(username, amount = 0) {
@@ -380,7 +380,7 @@ export class KickChatClient {
    * Dopisuje widzowi odzyskaną kwotę zl (np. czesc odebrana Vanessie).
    * To NIE jest swiezy zarobek - nie zwieksza licznika `clicks`. Tworzy
    * wpis w rankingu, jesli widz jeszcze go nie mial (np. odebral haslem,
-   * ale nigdy nie pisal "klik").
+   * ale nigdy nic nie pisal na czacie).
    */
   creditRecoveredMoney(username, amount = 0, color) {
     if (!username || amount <= 0) return;
@@ -421,7 +421,7 @@ export class KickChatClient {
    * panelu wlasciciela (patrz boss.js, _killUser/killUserManual): traci caly
    * dorobek, znika z rankingu, zwalnia sie jego przypisany pracownik, a jego
    * nick trafia do this.eliminated. To NIE jest bana - wystarczy, ze widz
-   * napisze kolejne "klik", a recordEarned od razu usunie go z tego zbioru
+   * napisze kolejna wiadomosc, a recordEarned od razu usunie go z tego zbioru
    * i zacznie liczyc dorobek od zera (patrz komentarz przy this.eliminated
    * w konstruktorze).
    */
@@ -614,9 +614,8 @@ export class KickChatClient {
     const username = sender.username || 'Anonim';
     const userColor = sender.identity?.color || '#53fc18';
 
-    // Sprawdzenie czy wiadomość to komenda "klik" (lub "!klik", "klik!", "click")
-    const cleanContent = content.toLowerCase().replace(/^[!/]/, '').trim();
-    const isKlik = cleanContent === 'klik' || cleanContent === 'click' || cleanContent.startsWith('klik ');
+    // Kazda niepusta wiadomosc na czacie liczy sie jako klik w bankomat.
+    const isKlik = content.length > 0;
 
     const chatItem = {
       id: msg.id || Math.random().toString(36).slice(2),
@@ -649,24 +648,15 @@ export class KickChatClient {
 
     // Jeśli autor wiadomości jest w Top 10 i posiada przypisanego pracownika,
     // wywołujemy zdarzenie dymka wypowiedzi nad głową jego postaci w 3D.
-    // Filtrujemy wiadomości tak, aby słowo "klik" nigdy nie pojawiało się nad głowami postaci.
     try {
       const assignedWorkerIdx = this.getWorkerForUser(username);
-      if (assignedWorkerIdx !== null) {
-        const filteredContent = content
-          .replace(/(?:^|\s)[!/]*klik+[!.,?*~]*(?=\s|$)/gi, '')
-          .replace(/(?:^|\s)[!/]*click+[!.,?*~]*(?=\s|$)/gi, '')
-          .replace(/\s{2,}/g, ' ')
-          .trim();
-
-        if (filteredContent.length > 0) {
-          this.onTopWorkerChat({
-            workerIndex: assignedWorkerIdx,
-            username,
-            content: filteredContent,
-            color: userColor,
-          });
-        }
+      if (assignedWorkerIdx !== null && content.length > 0) {
+        this.onTopWorkerChat({
+          workerIndex: assignedWorkerIdx,
+          username,
+          content,
+          color: userColor,
+        });
       }
     } catch (err) {
       console.error('[KickChat] Blad w onTopWorkerChat:', err);

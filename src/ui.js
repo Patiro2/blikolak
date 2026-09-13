@@ -298,14 +298,6 @@ export class KickUI {
     if (!this.messagesEl) return;
     const div = document.createElement('div');
     div.className = 'kick-msg';
-    if (msg.isKlik) div.classList.add('kick-msg-klik');
-
-    if (msg.isKlik) {
-      const tag = document.createElement('span');
-      tag.className = 'kick-tag-klik';
-      tag.textContent = 'KLIK';
-      div.appendChild(tag);
-    }
 
     const userSpan = document.createElement('span');
     userSpan.className = 'user';
@@ -402,7 +394,7 @@ export class LeaderboardUI {
     if (topEarners.length === 0) {
       const empty = document.createElement('div');
       empty.className = 'leaderboard-empty';
-      empty.innerHTML = 'Napisz <b>klik</b> na czacie Kicka,<br>aby zająć 1. miejsce w rankingu!';
+      empty.innerHTML = 'Napisz <b>cokolwiek</b> na czacie Kicka,<br>aby zająć 1. miejsce w rankingu!';
       this.listEl.appendChild(empty);
       return;
     }
@@ -587,12 +579,7 @@ export class WorkerOverlayManager {
 
   showSpeechBubble(workerIndex, text) {
     if (!text) return;
-    // Nigdy nie wyświetlaj słowa "klik" ani wariantów nad głowami postaci
-    const clean = text
-      .replace(/(?:^|\s)[!/]*klik+[!.,?*~]*(?=\s|$)/gi, '')
-      .replace(/(?:^|\s)[!/]*click+[!.,?*~]*(?=\s|$)/gi, '')
-      .replace(/\s{2,}/g, ' ')
-      .trim();
+    const clean = text.trim();
     if (!clean) return;
 
     const item = this._getOrCreate(workerIndex);

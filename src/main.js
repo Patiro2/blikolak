@@ -686,7 +686,7 @@ async function main() {
     // akcji (ta sama zasada co przy spawnVanessaBtn/spawnBossBtn wyzej).
     if (!remote.czyAdmin()) return;
     const potwierdzone = window.confirm(
-      `Na pewno wyeliminować @${nick}? Straci cały dorobek i zniknie z rankingu (może wrócić od zera, pisząc "klik").`,
+      `Na pewno wyeliminować @${nick}? Straci cały dorobek i zniknie z rankingu (może wrócić od zera, pisząc cokolwiek na czacie).`,
     );
     if (!potwierdzone) return;
     boss.killUserManual(nick);
@@ -826,11 +826,7 @@ async function main() {
       // Komendy ruchu nie powinny wyzwalać animacji uderzenia w bankomat ani dymków
       if (parseMovementDirection(content)) return;
 
-      const clean = (content || '')
-        .replace(/(?:^|\s)[!/]*klik+[!.,?*~]*(?=\s|$)/gi, '')
-        .replace(/(?:^|\s)[!/]*click+[!.,?*~]*(?=\s|$)/gi, '')
-        .replace(/\s{2,}/g, ' ')
-        .trim();
+      const clean = (content || '').trim();
       if (!clean) return;
 
       workerOverlays.showSpeechBubble(workerIndex, clean);
@@ -842,7 +838,7 @@ async function main() {
     onKlik: async (sender, chatItem) => {
       const nick = sender.username || 'Widz';
 
-      // Omdlony przez bossa widz nie moze klikac - jego komenda jest w calosci
+      // Omdlony przez bossa widz nie moze klikac - jego wiadomosc jest w calosci
       // ignorowana (bez kasy, bez licznika klikow, bez wplywu na prog tieru).
       if (boss.isFainted(nick)) {
         return;
@@ -867,7 +863,7 @@ async function main() {
 
       // UWAGA: klik z czatu NIE jest tu rozglaszany zdarzeniem realtime.
       // Kazda karta (wlasciciela i kazdego widza) ma wlasne polaczenie z
-      // czatem Kicka i widzi te sama wiadomosc "klik" sama, natychmiast -
+      // czatem Kicka i widzi te sama wiadomosc sama, natychmiast -
       // wiec rozgloszenie byloby zbedne i dawaloby podwojny efekt u widzow
       // (raz z ich wlasnego czatu, raz z tego zdarzenia). Zdarzenie 'klik'
       // jest rozglaszane WYLACZNIE dla klikniec wlasciciela myszka w model

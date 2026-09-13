@@ -806,24 +806,6 @@ html, body {
   vertical-align: middle;
 }
 
-.kick-msg-klik {
-  background: rgba(83, 252, 24, 0.12);
-  border-left: 3px solid #53fc18;
-  padding: 2px 6px;
-  border-radius: 4px;
-}
-
-.kick-tag-klik {
-  background: #53fc18;
-  color: #000;
-  font-size: 9px;
-  font-weight: 900;
-  padding: 1px 4px;
-  border-radius: 3px;
-  margin-right: 5px;
-  vertical-align: middle;
-}
-
 #kick-footer-tip {
   font-size: 11px;
   color: #8fa0b0;

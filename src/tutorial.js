@@ -33,7 +33,7 @@ const SEKCJE = [
   {
     tytul: 'Klikanie',
     akapity: [
-      'Napisz <code>klik</code> na czacie Kicka, żeby kliknąć w bankomat (działa też <code>click</code>, <code>!klik</code>, <code>/klik</code>).',
+      'Każda wiadomość na czacie Kicka to kliknięcie w bankomat - nieważne co napiszesz.',
       'Jedno kliknięcie to na start <b>1 zł</b> - kwota rośnie wraz z ulepszaniem bankomatu.',
       '<b>5%</b> szans na trafienie krytyczne, które daje <b>3x</b> więcej.',
       '<b>Kombo</b>: kliknięcia z czatu w odstępie do 0,7 s nabijają mnożnik - +4% za stopień, maksymalnie +100%.',
