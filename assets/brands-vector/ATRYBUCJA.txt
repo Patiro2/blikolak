@@ -1,0 +1,12 @@
+Zrodlo: pliki SVG w tym katalogu pochodza z projektu simple-icons
+(https://simpleicons.org, repozytorium: https://github.com/simple-icons/simple-icons).
+
+Licencja: CC0 1.0 Universal (domena publiczna). Tresc licencji:
+https://creativecommons.org/publicdomain/zero/1.0/
+
+Kazdy plik SVG ma wstrzykniety oficjalny kolor marki jako atrybut fill
+oraz nazwe marki w elemencie <title>.
+
+Nazwy marek, logotypy i znaki towarowe pozostaja wlasnoscia ich
+odpowiednich wlascicieli - licencja CC0 dotyczy wylacznie samych plikow
+SVG (wektorowego zapisu ksztaltu), nie praw do marki.
