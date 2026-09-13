@@ -850,6 +850,40 @@ export class BossBlackjack {
   // ================= WEJSCIE NA ARENE =================
 
   /**
+   * Na START walki (wolane WYLACZNIE z beginEntrance, NIE z startFromSync -
+   * widz dolaczajacy w trakcie ma dostac aktualne pozycje z synchronizacji,
+   * nie resetowac glosy) przenosi WSZYSTKICH pracownikow na neutralna
+   * kolumne x=0 - zadanie wlasciciela: ktos moze byc AFK i "glosowac" samym
+   * stanem sprzed walki. Rozklada ich po wolnych polach tej kolumny
+   * CYKLICZNIE wedlug indeksu w entries (deterministycznie - host i widz
+   * licza to samo), pomijajac z=0 (tam stoi bankomat).
+   */
+  _przesunWszystkichNaSrodek() {
+    const wm = this.boss.workerManager;
+    if (!wm) return;
+    const KOLUMNA_Z = [-3, -2, -1, 1, 2, 3];
+    wm.entries.forEach((entry, i) => {
+      if (!entry || !entry.obj) return;
+      const z = KOLUMNA_Z[i % KOLUMNA_Z.length];
+      entry.isMoving = false;
+      if (entry.walkAction) entry.walkAction.stop();
+      entry.gridX = 0;
+      entry.gridZ = z;
+      entry.targetGridX = 0;
+      entry.targetGridZ = z;
+      entry.facingAngle = 0; // w strone kamery/bankomatu
+      entry.startRotY = 0;
+      entry.targetRotY = 0;
+      entry.obj.position.set(0, 0, z);
+      entry.obj.rotation.y = 0;
+      entry.startPos.set(0, 0, z);
+      entry.targetPos.set(0, 0, z);
+      // Wzorzec z setFainted (przywracanie z omdlenia) - nie T-poza po stop().
+      if (entry.idleAction && !entry.isFainted) entry.idleAction.reset().play();
+    });
+  }
+
+  /**
    * Boss pojawia sie JUZ STOJACY na FINAL_POS i od razu gra idle (bez marszu
    * z tylu sceny - wlasciciel: "boss ma STAC z animacja idle"). Timing
    * CZAS_WEJSCIA jest zachowany 1:1 (patrz _updateEntrance) tylko po to, zeby
@@ -862,6 +896,15 @@ export class BossBlackjack {
     // zadanie: "ta sama kwota przy kazdej przegranej, nie przeliczana").
     const pula = this.boss.economy && this.boss.economy.state ? this.boss.economy.state.money : 0;
     this.kara = Math.max(1, Math.round(KARA_UDZIAL * pula));
+
+    // Wszyscy na neutralna kolumne PRZED pierwsza faza WYBOR (patrz metoda
+    // wyzej) - zeby nikt AFK nie glosowal samym stanem sprzed walki.
+    this._przesunWszystkichNaSrodek();
+    showBossNotification(
+      'boss',
+      '🃏 DŻORDŻO WCHODZI NA ARENĘ!',
+      'Wszyscy na środkowej linii - wejdź na lewą (DOBIERZ) albo prawą (PASUJ) stronę, żeby głosować!',
+    );
 
     if (this.model) {
       this.model.position.copy(FINAL_POS);
