@@ -452,6 +452,16 @@ tego sprawdzenia; to normalne i znika po wdrożeniu na Vercela.
 | `src/remote.js` | klient stanu zdalnego, logowanie, tryb offline |
 | `package.json` | wyłącznie `"type": "module"` - żadnych zależności do instalowania |
 
+## Kody
+
+Widz może na czacie wpisać kod (jak w GTA), żeby odblokować efekt na swoim
+nicku - wielkość liter i opcjonalny prefiks `!` bez znaczenia. Kod dopisuje
+się jako jedna linijka w słowniku `KODY` w `src/kick.js`.
+
+| Kod | Efekt |
+|---|---|
+| `aezakmi` | Nick animowany tęczowym gradientem wszędzie w grze (czat, ranking, plakietka nad postacią) |
+
 ## Reset gry
 
 Przycisk **Reset gry** (obok przycisku respienia Vanessy, w lewym górnym

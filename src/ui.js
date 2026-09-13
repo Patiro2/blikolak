@@ -301,7 +301,8 @@ export class KickUI {
 
     const userSpan = document.createElement('span');
     userSpan.className = 'user';
-    userSpan.style.color = msg.color || '#53fc18';
+    userSpan.classList.toggle('nick-teczowy', !!msg.teczowyNick);
+    userSpan.style.color = msg.teczowyNick ? '' : (msg.color || '#53fc18');
     userSpan.textContent = msg.username + ':';
     div.appendChild(userSpan);
 
@@ -414,7 +415,8 @@ export class LeaderboardUI {
 
       const nickSpan = document.createElement('span');
       nickSpan.className = 'nick';
-      nickSpan.style.color = user.color || '#53fc18';
+      nickSpan.classList.toggle('nick-teczowy', !!user.teczowyNick);
+      nickSpan.style.color = user.teczowyNick ? '' : (user.color || '#53fc18');
       nickSpan.textContent = user.username;
       left.appendChild(nickSpan);
 
@@ -572,7 +574,8 @@ export class WorkerOverlayManager {
     const rankLabel = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : (rank ? `#${rank}` : '');
     item.savedRank = rankLabel;
     item.userSpan.textContent = userData.username;
-    item.userSpan.style.color = userData.color || '#53fc18';
+    item.userSpan.classList.toggle('nick-teczowy', !!userData.teczowyNick);
+    item.userSpan.style.color = userData.teczowyNick ? '' : (userData.color || '#53fc18');
     const wygrane = userData.wygraneMinigry || 0;
     item.starySpan.textContent = wygrane > 0 ? `⭐${wygrane}` : '';
     item.starySpan.style.display = wygrane > 0 ? '' : 'none';

@@ -347,6 +347,37 @@ html, body {
   white-space: nowrap;
 }
 
+/* Kod czatu "aezakmi" - teczowy animowany gradient na nicku (czat, ranking,
+   plakietka nad postacia). Inline style.color jest czyszczony w JS tam,
+   gdzie ta klasa jest dodawana, zeby nie przykryl gradientu. */
+.nick-teczowy {
+  background-image: linear-gradient(90deg, #ff0040, #ff8a00, #ffe600, #2bff00, #00e5ff, #3d5bff, #c400ff, #ff0040);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  animation: teczowy-nick 3s linear infinite;
+}
+
+/* text-shadow psuje gradient przy color: transparent - plakietka nad postacia
+   dostaje odpowiednik przez filter zamiast text-shadow. */
+.worker-nameplate .np-user.nick-teczowy {
+  text-shadow: none;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.8));
+}
+
+@keyframes teczowy-nick {
+  from { background-position: 0% center; }
+  to { background-position: 200% center; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nick-teczowy {
+    animation: none;
+  }
+}
+
 /* Gwiazdka z liczba wygranych minigier - ranking i plakietka nad postacia */
 .gwiazdki-wygranych {
   font-size: 10px;
