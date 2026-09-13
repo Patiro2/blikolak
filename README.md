@@ -27,7 +27,7 @@ Port można podać jako argument: `python serve.py 8080`.
   ORAZ do indywidualnego dorobku tego widza w rankingu Top 10.
 - **Automatyczny awans tieru bankomatu** — bankomat sam awansuje na kolejny
   model, gdy łączna liczba klików przekroczy próg (0 / 100 / 500 / 2000 /
-  8000 / 25000 — patrz `MACHINE_TIER_CLICK_THRESHOLDS` w `src/economy.js`).
+  6000 / 12000 — patrz `MACHINE_TIER_CLICK_THRESHOLDS` w `src/economy.js`).
   Awans podmienia model 3D i pokazuje baner na górze ekranu. Do progu liczą się
   kliki z czatu **oraz** kliknięcia streamera myszką w model — obie drogi idą
   przez tę samą funkcję `obsluzAwansTieru()` w `main.js`, więc tak samo odpalają
