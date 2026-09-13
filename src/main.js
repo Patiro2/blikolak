@@ -14,7 +14,7 @@ import { WarstwaMinigier } from './warstwa-minigier.js';
 import { Economy, WORKER_TYPE_DEFS, MACHINE_TIERS, SAVE_KEY } from './economy.js';
 import { remote, czyLokalnie } from './remote.js';
 import { Realtime, URL_RELAYA } from './realtime.js';
-import { LEADERBOARD_KEY, ASSIGNMENTS_KEY } from './kick.js';
+import { LEADERBOARD_KEY, ASSIGNMENTS_KEY, JOINED_KEY } from './kick.js';
 import { UI, KickUI, KickEmbedUI, LeaderboardUI, WorkerOverlayManager, LegendUI } from './ui.js';
 import { KickChatClient } from './kick.js';
 import { VanessaManager, showTopAnnouncement } from './vanessa.js';
@@ -52,6 +52,7 @@ async function main() {
       if (stanZdalny.economy) localStorage.setItem(SAVE_KEY, JSON.stringify(stanZdalny.economy));
       if (stanZdalny.leaderboard) localStorage.setItem(LEADERBOARD_KEY, JSON.stringify(stanZdalny.leaderboard));
       if (stanZdalny.assignments) localStorage.setItem(ASSIGNMENTS_KEY, JSON.stringify(stanZdalny.assignments));
+      if (stanZdalny.joined) localStorage.setItem(JOINED_KEY, JSON.stringify(stanZdalny.joined));
       console.info('[stan] Wczytano stan gry z serwera');
     } catch (err) {
       console.warn('[stan] Nie udalo sie wsiac stanu z serwera do localStorage:', err);
@@ -291,6 +292,7 @@ async function main() {
       economy: economy.state,
       leaderboard: kickChat.leaderboard,
       assignments: kickChat.assignments,
+      joined: kickChat.joined,
       boss: boss.getSyncState(),
       workers: workerManager.getSyncState(),
       flagBattle: flagBattle.getSyncState(),
@@ -453,6 +455,7 @@ async function main() {
     await krokStanu('leaderboard+assignments', () => {
       if (stan.leaderboard) kickChat.leaderboard = stan.leaderboard;
       if (stan.assignments) kickChat.assignments = stan.assignments;
+      if (stan.joined) kickChat.joined = stan.joined;
       kickChat.updateAssignments();
     });
     await krokStanu('machine.setTier', async () => {
@@ -951,6 +954,11 @@ async function main() {
     },
     onMessage: (msg) => {
       kickUI.addMessage(msg);
+      // Widz, ktory jeszcze nie napisal "!join" (patrz kick.js _processChatMessage,
+      // chatItem.dolaczony === false) - wiadomosc trafia do widzetu czatu
+      // powyzej, ale nic wiecej sie nie dzieje: bez Vanessy, bossa, minigier
+      // i ruchu po siatce.
+      if (msg.dolaczony === false) return;
       // Sprawdzenie czy widz na czacie napisał sekretne hasło Vanessy
       vanessa.checkChatWord(msg.content, msg.username, msg.color);
       // Odpowiedzi na dzialania matematyczne bossa oraz komenda "pomoc" (omdlenia)

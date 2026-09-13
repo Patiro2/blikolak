@@ -31,7 +31,8 @@ const SEKCJE = [
   {
     tytul: 'Klikanie',
     akapity: [
-      'Każda wiadomość na czacie Kicka - obojętnie jaka - to jedno kliknięcie w bankomat. Nie musisz pisać "klik".',
+      'Najpierw napisz <code>!join</code> na czacie, żeby dołączyć do gry - bez tego twoje wiadomości się nie liczą.',
+      'Po dołączeniu: każda wiadomość na czacie Kicka - obojętnie jaka - to jedno kliknięcie w bankomat. Nie musisz pisać "klik".',
       'Jedno kliknięcie to na start <b>1 zł</b> - kwota rośnie wraz z ulepszaniem bankomatu.',
       '<b>5%</b> szans na trafienie krytyczne, które daje <b>3x</b> więcej.',
       '<b>Kombo</b>: wiadomości w odstępie do 0,7 s nabijają wspólny mnożnik - +4% za stopień, maksymalnie +100%.',

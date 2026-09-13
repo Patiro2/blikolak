@@ -22,6 +22,9 @@ Port można podać jako argument: `python serve.py 8080`.
 
 ## Jak to działa
 
+- **Dołączenie do gry** — widz musi najpierw napisać `!join` (albo `/join`) na
+  czacie. Dopiero potem jego wiadomości liczą się jako `klik`, kody, komendy
+  ruchu itd. — patrz `KickChatClient.joined` w `src/kick.js`.
 - **Wspólna pula czatu** — licznik w lewym górnym rogu to NIE portfel gracza,
   tylko łączny dorobek całego czatu. Każdy `klik` widza dokłada do tej puli
   ORAZ do indywidualnego dorobku tego widza w rankingu Top 10.
@@ -126,7 +129,8 @@ a każdy `.glb` ładuje teksturę względnym URI. Nie spłaszczaj tych folderów
 ## Integracja z Kick.com & Ranking Top 10
 
 Gra łączy się na żywo z czatem kanału **patiro** na Kick.com przez WebSocket Pusher (`ws-us2.pusher.com`, chatroom `37663`):
-- **Czat na żywo**: Widzowie widzą swoje wiadomości w dedykowanym widżecie w prawym dolnym rogu.
+- **Czat na żywo**: Widzowie widzą swoje wiadomości w dedykowanym widżecie w prawym dolnym rogu (nawet zanim dołączą do gry).
+- **Dołączenie `!join`**: widz musi napisać `!join` (lub `/join`), zanim jego wiadomości zaczną się liczyć — patrz sekcja "Jak to działa" wyżej.
 - **Komenda `klik`**: Każda wiadomość o treści `klik` (lub `!klik`) wywołuje kliknięcie w automat, nalicza zarobek do wspólnej puli czatu, dodaje punkty widzowi w rankingu i liczy się do progu awansu tieru automatu.
 - **Stały Leaderboard**: Zawsze widoczna lista Top 10 widzów, którzy wygenerowali najwięcej zysku (z medalami 🥇🥈🥉, kolorami nicków z Kicka i przypisanymi rolami).
 - **Awatar pracownika dla każdego z Top 10**:

@@ -13,6 +13,7 @@ const PUSHER_CLUSTER = 'us2';
 const DEFAULT_CHATROOM_ID = 37663; // chatroom_id dla kanalu patiro
 export const LEADERBOARD_KEY = 'bankomat-clicker-kick-leaderboard';
 export const ASSIGNMENTS_KEY = 'bankomat-clicker-worker-assignments';
+export const JOINED_KEY = 'bankomat-clicker-kick-joined';
 
 // Przy spamie na czacie (np. 200 wiadomosci "klik" w ciagu kilku sekund) nie
 // chcemy zapisywac do localStorage ani przerysowywac rankingu przy KAZDEJ
@@ -173,6 +174,11 @@ export class KickChatClient {
 
     this.leaderboard = this._loadLeaderboard();
     this.assignments = this._loadAssignments();
+    // Widzowie, ktorzy napisali "!join" - klucz normalizeNick, wartosc true.
+    // Trwaly i synchronizowany dokladnie jak leaderboard/assignments (patrz
+    // _loadJoined/_flushSave nizej i zbierzStan/zastosujStanZSerwera w
+    // main.js) - widz wchodzacy na strone ma widziec ten sam zbior co host.
+    this.joined = this._loadJoined();
     this.updateAssignments();
 
     // Widzowie "wyeliminowani" przez bossa lub przez panel eliminacji
@@ -225,6 +231,20 @@ export class KickChatClient {
     this._scheduleSave();
   }
 
+  _loadJoined() {
+    try {
+      const raw = localStorage.getItem(JOINED_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch (_) {
+      return {};
+    }
+  }
+
+  /** Zapis zbioru dolaczonych widzow - przechodzi przez wspolny debounce (patrz _scheduleSave). */
+  _saveJoined() {
+    this._scheduleSave();
+  }
+
   /**
    * Debounce zapisow do localStorage: kazda wiadomosc na czacie wywoluje
    * leaderboard + assignments save, ale przy spamie (np. 200 "klik" pod rzad)
@@ -246,6 +266,9 @@ export class KickChatClient {
     } catch (_) {}
     try {
       localStorage.setItem(ASSIGNMENTS_KEY, JSON.stringify(this.assignments));
+    } catch (_) {}
+    try {
+      localStorage.setItem(JOINED_KEY, JSON.stringify(this.joined));
     } catch (_) {}
   }
 
@@ -383,6 +406,12 @@ export class KickChatClient {
     if (!username) return false;
     const clean = normalizeNick(username);
     return this.eliminated.has(clean);
+  }
+
+  /** Czy widz uprzednio napisal "!join" (patrz _processChatMessage). */
+  isJoined(username) {
+    if (!username) return false;
+    return !!this.joined[normalizeNick(username)];
   }
 
   /**
@@ -535,10 +564,14 @@ export class KickChatClient {
     this.leaderboard = {};
     this.assignments = { userToWorker: {}, workerToUser: {} };
     this.eliminated.clear();
+    // Wszyscy musza napisac "!join" od nowa po resecie (przycisk "Reset gry"
+    // i pelny reset po game over bossow - patrz pelnyResetGry w main.js).
+    this.joined = {};
     this.stats.kliksReceived = 0;
     try {
       localStorage.removeItem(LEADERBOARD_KEY);
       localStorage.removeItem(ASSIGNMENTS_KEY);
+      localStorage.removeItem(JOINED_KEY);
     } catch (_) {}
     this._lastUpdateEmit = Date.now();
     this.onLeaderboardUpdate([]);
@@ -691,8 +724,44 @@ export class KickChatClient {
       return;
     }
 
+    // Widz musi wpierw napisac "!join" (albo "/join"), zanim jego wiadomosci
+    // licza sie jako klik/kod/skin/rocketman/dymek nad glowa - patrz
+    // this.joined. Sprawdzamy PRZED przetworzeniem TEJ wiadomosci, wiec sama
+    // wiadomosc "!join" tez NIE liczy sie jako klik. Widz i tak widzi swoja
+    // wiadomosc w widzecie czatu (main.js onMessage robi kickUI.addMessage
+    // PRZED sprawdzeniem chatItem.dolaczony === false) - tylko boss/vanessa/
+    // minigry/ruch (reszta onMessage w main.js) sa pomijane dla niedolaczonych.
+    const wasJoined = this.isJoined(username);
+    if (!wasJoined) {
+      if (/^[!/]join$/i.test(content)) {
+        this.joined[normalizeNick(username)] = true;
+        this._saveJoined();
+        try {
+          showTopAnnouncement('Dołączono do gry!', `${username} napisał !join i może teraz klikać`);
+        } catch (err) {
+          console.error('[KickChat] Blad w showTopAnnouncement (join):', err);
+        }
+      }
+      const chatItem = {
+        id: msg.id || Math.random().toString(36).slice(2),
+        username,
+        color: userColor,
+        content,
+        isKlik: false,
+        dolaczony: false,
+        badges: sender.identity?.badges_v2 || [],
+        createdAt: msg.created_at || new Date().toISOString(),
+      };
+      try {
+        this.onMessage(chatItem);
+      } catch (err) {
+        console.error('[KickChat] Blad w onMessage:', err);
+      }
+      return;
+    }
+
     // Kazda niepusta wiadomosc na czacie liczy sie jako klik w bankomat.
-    const isKlik = content.length > 0;
+    const isKlik = content.length > 0 && !/^[!/]join$/i.test(content); // ponowne !join nie jest klikiem
 
     const chatItem = {
       id: msg.id || Math.random().toString(36).slice(2),
@@ -812,6 +881,13 @@ export class KickChatClient {
    * Metoda symulacji - przydatna do testów lokalnych lub offline.
    */
   simulate(username = 'TestViewer', text = 'klik') {
+    // Testy/symulacja: widz symulowany dolacza automatycznie, zeby nie trzeba
+    // bylo osobno symulowac "!join" przed kazdym testem klikania.
+    const key = normalizeNick(username);
+    if (!this.joined[key]) {
+      this.joined[key] = true;
+      this._saveJoined();
+    }
     this._processChatMessage({
       id: 'sim-' + Date.now(),
       content: text,
