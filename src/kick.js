@@ -147,6 +147,9 @@ export class KickChatClient {
     this.onStatusChange = options.onStatusChange || (() => {});
     this.onLeaderboardUpdate = options.onLeaderboardUpdate || (() => {});
     this.onTopWorkerChat = options.onTopWorkerChat || (() => {});
+    // Sekretny kod czatu "rocketman" (patrz KODY nizej) - callback do managera
+    // jetpacka (src/jetpack.js), NIE efekt rankingu jak reszta KODY.
+    this.onRocketman = options.onRocketman || (() => {});
 
     this.ws = null;
     this.status = 'disconnected'; // 'connecting' | 'connected' | 'disconnected' | 'error'
@@ -734,6 +737,18 @@ export class KickChatClient {
           } catch (err) {
             console.error('[KickChat] Blad w showTopAnnouncement:', err);
           }
+        }
+      }
+
+      // Sekretny kod czatu "rocketman" (jak w GTA) - NIE wchodzi do KODY
+      // powyzej, bo nie modyfikuje wpisu rankingu ani nie pokazuje banera
+      // tęczowego nicku, tylko odpala jetpack na planszy (src/jetpack.js).
+      // Nazwa celowo nie jest nigdzie dokumentowana (legenda/tutorial).
+      if (normalizeKodCzatu(content) === 'rocketman') {
+        try {
+          this.onRocketman(username);
+        } catch (err) {
+          console.error('[KickChat] Blad w onRocketman:', err);
         }
       }
 

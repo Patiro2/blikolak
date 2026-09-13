@@ -9,6 +9,7 @@ import { FlagBattleManager } from './flagbattle.js';
 import { TlumaczeniaManager } from './tlumaczenia.js';
 import { PanstwaMiastaManager } from './panstwa-miasta.js';
 import { BitwaMarekManager } from './bitwa-marek.js';
+import { JetpackManager } from './jetpack.js';
 import { Economy, WORKER_TYPE_DEFS, MACHINE_TIERS, SAVE_KEY } from './economy.js';
 import { remote, czyLokalnie } from './remote.js';
 import { Realtime, URL_RELAYA } from './realtime.js';
@@ -157,6 +158,13 @@ async function main() {
   let flagBattleBledy = 0;
   let flagBattleZepsuta = false;
 
+  // Jetpack z sekretnego kodu czatu "rocketman" (patrz src/jetpack.js i
+  // KODY w kick.js) - wylacznie wizualny efekt, izolacja bledow tick() tym
+  // samym wzorcem co flagBattle/tlumaczenia/panstwaMiasta/bitwaMarek nizej.
+  const jetpack = new JetpackManager(scene);
+  let jetpackBledy = 0;
+  let jetpackZepsuty = false;
+
   // Minigra "Tlumaczenia" - druga minigra na siatce areny, obok bitwy o
   // flagi. Ta sama polityka izolacji bledow (patrz komentarz przy
   // flagBattleZepsuta nizej w animate()) - blad w tick() degraduje WYLACZNIE
@@ -265,6 +273,7 @@ async function main() {
       tlumaczenia: tlumaczenia.getSyncState(),
       panstwaMiasta: panstwaMiasta.getSyncState(),
       bitwaMarek: bitwaMarek.getSyncState(),
+      jetpack: jetpack.getSyncState(),
     };
   }
 
@@ -430,6 +439,11 @@ async function main() {
     // tlumaczenia.applySync/panstwaMiasta.applySync wyzej.
     await krokStanu('bitwaMarek.applySync', () => {
       if (!remote.czyAdmin()) bitwaMarek.applySync(stan.bitwaMarek || null);
+    });
+    // Jetpack z kodu czatu "rocketman" - ten sam wzorzec co pozostale minigry
+    // powyzej (patrz src/jetpack.js).
+    await krokStanu('jetpack.applySync', () => {
+      if (!remote.czyAdmin()) jetpack.applySync(stan.jetpack || null);
     });
     try {
       await syncLeaderboardAndOverlays();
@@ -652,6 +666,8 @@ async function main() {
     panstwaMiasta.setHost(admin);
     // Ta sama naprawa co powyzej, dla minigry "Zgadnij marke".
     bitwaMarek.setHost(admin);
+    // Ta sama naprawa co powyzej, dla jetpacka (src/jetpack.js).
+    jetpack.setHost(admin);
     if (!adminBtn) return;
     if (czyLokalnie()) {
       // Lokalnie nie ma sie gdzie logowac - chowamy przycisk.
@@ -851,6 +867,11 @@ async function main() {
       kickUI.updateStatus(status, message);
       kickUI.updateKliksCount(stats.kliksReceived);
     },
+    // Sekretny kod czatu "rocketman" (patrz kick.js KODY/onRocketman) - host
+    // decyduje, widz dostaje efekt przez applySync (patrz jetpack.js).
+    onRocketman: () => {
+      jetpack.triggerRocketman();
+    },
     onMessage: (msg) => {
       kickUI.addMessage(msg);
       // Sprawdzenie czy widz na czacie napisał sekretne hasło Vanessy
@@ -957,6 +978,7 @@ async function main() {
   // flagi, bitwy tlumaczen, panstw-miast ORAZ bitwy o marki (patrz
   // moveWorker() w workers.js).
   workerManager.setContext({ boss, vanessa, flagBattle, tlumaczenia, panstwaMiasta, bitwaMarek });
+  jetpack.setContext({ workerManager, flagBattle, tlumaczenia, panstwaMiasta, bitwaMarek });
   vanessa.setContext({ workerManager, kickChat });
   // Ta sama polityka co machine.czyKlikaniaDozwolone powyzej - patrz komentarz
   // tam. Obejmuje wszystkie 3 sciezki klikania myszka w Vanesse (model,
@@ -1230,6 +1252,7 @@ async function main() {
     tlumaczenia,
     panstwaMiasta,
     bitwaMarek,
+    jetpack,
     save,
     scene,
     camera,
@@ -1318,6 +1341,22 @@ async function main() {
         if (bitwaMarekBledy >= 3) {
           bitwaMarekZepsuta = true;
           console.error('[marki] Minigra wylaczona po trzech bledach pod rzad - reszta gry dziala normalnie.');
+        }
+      }
+    }
+    // Ta sama izolacja bledow co flagBattle/tlumaczenia/panstwaMiasta/bitwaMarek
+    // powyzej - jetpack (kod czatu "rocketman", patrz src/jetpack.js) jest
+    // rowniez wylacznie kosmetycznym, mlodym modulem.
+    if (!jetpackZepsuty) {
+      try {
+        jetpack.tick(delta);
+        jetpackBledy = 0;
+      } catch (err) {
+        jetpackBledy += 1;
+        console.error(`[jetpack] Blad w tick() (${jetpackBledy}/3):`, err);
+        if (jetpackBledy >= 3) {
+          jetpackZepsuty = true;
+          console.error('[jetpack] Wylaczony po trzech bledach pod rzad - reszta gry dziala normalnie.');
         }
       }
     }
