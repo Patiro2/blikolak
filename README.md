@@ -59,11 +59,12 @@ Port można podać jako argument: `python serve.py 8080`.
   ruszać swoją postacią komendami na czacie: `up`/`w`/`góra`, `down`/`s`/`dół`,
   `left`/`a`/`lewo`, `right`/`d`/`prawo` (i kilka polskich wariantów, np.
   "w lewo", "do przodu"), a `q`/`e` to krok po skosie do przodu-w-lewo/w-prawo,
-  bez obrotu postaci. Kierunki są WZGLĘDEM tego, gdzie postać aktualnie
+  `z`/`c` to krok po skosie do tyłu-w-lewo/w-prawo, oba bez obrotu postaci.
+  Kierunki są WZGLĘDEM tego, gdzie postać aktualnie
   patrzy (jak sterowanie "zza pleców postaci"), nie względem osi świata -
   `left`/`right` obracają postać o 90° i robią krok, `up`/`down` to krok do
   przodu/tyłu względem aktualnego zwrotu. Widz może też napisać kombinację 2-5
-  liter `w`/`a`/`s`/`d` w jednej wiadomości (np. `ww` = 2 pola do przodu, `wd` =
+  liter `w`/`a`/`s`/`d`/`q`/`e`/`z`/`c` w jednej wiadomości (np. `ww` = 2 pola do przodu, `wd` =
   przód i w prawo) - postać wykonuje kroki po kolei, jeden po zakończeniu
   poprzedniego; nowa kombinacja od tego samego widza zastępuje resztę
   poprzedniej kolejki. Postać nie wychodzi poza arenę 7×7

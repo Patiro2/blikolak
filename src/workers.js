@@ -94,6 +94,10 @@ export function parseMovementDirection(text) {
   if (norm === 'q') return 'diag-left';
   if (norm === 'e') return 'diag-right';
 
+  // Skos do tyłu w lewo / w prawo (względem aktualnego zwrotu postaci)
+  if (norm === 'z') return 'diag-back-left';
+  if (norm === 'c') return 'diag-back-right';
+
   return null;
 }
 
@@ -115,9 +119,13 @@ export function parseMovementCombo(text) {
     .trim();
   const t = clean.toLowerCase().replace(/^[!/]+/, '').replace(/[!.,?*~]+$/, '').trim();
 
-  if (!/^[wasdqe]{2,5}$/.test(t)) return null;
+  if (!/^[wasdqezc]{2,5}$/.test(t)) return null;
 
-  const map = { w: 'up', s: 'down', a: 'left', d: 'right', q: 'diag-left', e: 'diag-right' };
+  const map = {
+    w: 'up', s: 'down', a: 'left', d: 'right',
+    q: 'diag-left', e: 'diag-right',
+    z: 'diag-back-left', c: 'diag-back-right',
+  };
   return t.split('').map((c) => map[c]);
 }
 
@@ -507,17 +515,21 @@ export class WorkerManager {
       entry.playingInteract = false;
     }
 
-    // Ruch po skosie (q/e) NIE zmienia zwrotu postaci - w przeciwienstwie do
+    // Ruch po skosie (q/e/z/c) NIE zmienia zwrotu postaci - w przeciwienstwie do
     // zwyklych kierunkow ponizej, targetRotY/facingAngle zostaja rowne
-    // aktualnemu kierunkowi patrzenia, a przesuniecie to suma wektora "przod"
+    // aktualnemu kierunkowi patrzenia, a przesuniecie to suma wektora "przod"/"tyl"
     // i wektora "lewo"/"prawo" liczonych z tego samego facingAngle (jak w/a/s/d).
-    const isDiagonal = direction === 'diag-left' || direction === 'diag-right';
+    // q/e = skos do przodu (lewo/prawo), z/c = skos do tylu (lewo/prawo) -
+    // ta sama zasada, wektor "przod" zamieniony na "tyl" (facingAngle + PI) dla z/c.
+    const diagLateralSign = { 'diag-left': 1, 'diag-right': -1, 'diag-back-left': 1, 'diag-back-right': -1 }[direction];
+    const diagIsBack = direction === 'diag-back-left' || direction === 'diag-back-right';
+    const isDiagonal = diagLateralSign !== undefined;
 
     let targetHeading;
     let dx, dz;
     if (isDiagonal) {
-      const forward = snapToCardinal(entry.facingAngle);
-      const lateral = snapToCardinal(entry.facingAngle + (direction === 'diag-left' ? Math.PI / 2 : -Math.PI / 2));
+      const forward = snapToCardinal(entry.facingAngle + (diagIsBack ? Math.PI : 0));
+      const lateral = snapToCardinal(entry.facingAngle + diagLateralSign * (Math.PI / 2));
       dx = Math.round(Math.sin(forward)) + Math.round(Math.sin(lateral));
       dz = Math.round(Math.cos(forward)) + Math.round(Math.cos(lateral));
       targetHeading = snapToCardinal(entry.facingAngle); // bez zmiany zwrotu
