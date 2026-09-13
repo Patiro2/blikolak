@@ -47,11 +47,11 @@ export class Realtime {
       baza = `${proto}://${baza}`;
     }
     const sep = baza.includes('?') ? '&' : '?';
-    let pelny = `${baza}${sep}rola=${this.rola}`;
-    if (this.rola === 'host' && this.token) {
-      pelny += `&token=${encodeURIComponent(this.token)}`;
-    }
-    return pelny;
+    // Token NIE leci juz w query stringu (Render loguje sciezki zadan, a token
+    // hosta jest identyczny z ADMIN_TOKEN Vercela - patrz ramka 'auth' w
+    // handlerze 'open' nizej). rola=host zostaje w URL-u, bo serwer musi
+    // wiedziec, czego sie spodziewac, zanim ramka 'auth' w ogole nadejdzie.
+    return `${baza}${sep}rola=${this.rola}`;
   }
 
   polacz() {
@@ -80,6 +80,15 @@ export class Realtime {
       if (this.ws !== ws) return; // polaczenie juz zastapione/zamkniete - ignorujemy spozniony event
       this.polaczonyFlag = true;
       this._opoznienie = OPOZNIENIE_START_MS;
+      // Token idzie pierwsza ramka PO otwarciu polaczenia, nie w URL-u -
+      // patrz komentarz w _budujUrl.
+      if (this.rola === 'host' && this.token) {
+        try {
+          ws.send(JSON.stringify({ typ: 'auth', token: this.token }));
+        } catch (err) {
+          console.warn('[realtime] Blad wysylki ramki auth:', err);
+        }
+      }
       this._zglosStatus();
     });
 

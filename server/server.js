@@ -102,6 +102,49 @@ function rozgloszWidzom(obiekt) {
   for (const w of widzowie) wyslij(w, obiekt);
 }
 
+/** Limit tempa: max LIMIT_RAMEK_NA_SEKUNDE ramek/s na polaczenie (host lub host-oczekujacy). */
+function limitTempaPrzekroczony(ws) {
+  const teraz = Date.now();
+  if (teraz - ws._ramkiOkno.poczatek >= 1000) {
+    ws._ramkiOkno.poczatek = teraz;
+    ws._ramkiOkno.licznik = 0;
+  }
+  ws._ramkiOkno.licznik += 1;
+  return ws._ramkiOkno.licznik > LIMIT_RAMEK_NA_SEKUNDE;
+}
+
+/** Polaczenie przechodzi (lub od razu wchodzi) na role pelnoprawnego hosta. */
+function przejmijRoleHosta(ws) {
+  if (ws._authTimer) {
+    clearTimeout(ws._authTimer);
+    ws._authTimer = null;
+  }
+  if (hostWs) {
+    log('Nowy host przejmuje role - stary rozlaczany');
+    wyslij(hostWs, { typ: 'zastapiony' });
+    hostWs.close(4002, 'zastapiony przez nowego hosta');
+  }
+  hostWs = ws;
+  ws._rola = 'host';
+  log('Host polaczony');
+  rozgloszWszystkim({ typ: 'host-online' });
+}
+
+/** Zla probka autoryzacji hosta (URL albo ramka auth) - ta sama sciezka odrzucenia co dawniej. */
+function odrzucZlyTokenHosta(ws) {
+  log('Odrzucono autoryzacje hosta - zly token');
+  // Kod 4001 nie przechodzi przez proxy hostingow (Render zamienia go na
+  // 1006), wiec klient nie odroznilby zlego hasla od awarii sieci i
+  // ponawialby w nieskonczonosc. Wysylamy wiec najpierw zwykla ramke - ta
+  // przechodzi zawsze - i dopiero potem zamykamy polaczenie.
+  wyslij(ws, { typ: 'zly-token' });
+  setTimeout(() => {
+    try {
+      ws.close(4001, 'zly token');
+    } catch (_) {}
+  }, 50);
+}
+
 // --- HTTP: GET /zdrowie ----------------------------------------------------
 
 const httpServer = http.createServer((req, res) => {
@@ -138,30 +181,30 @@ wss.on('connection', (ws, req) => {
   const token = url.searchParams.get('token') || '';
 
   if (rola === 'host') {
-    if (!tokenPoprawny(token)) {
-      log('Odrzucono polaczenie hosta - zly token');
-      // Kod 4001 nie przechodzi przez proxy hostingow (Render zamienia go na
-      // 1006), wiec klient nie odroznilby zlego hasla od awarii sieci i
-      // ponawialby w nieskonczonosc. Wysylamy wiec najpierw zwykla ramke -
-      // ta przechodzi zawsze - i dopiero potem zamykamy polaczenie.
-      wyslij(ws, { typ: 'zly-token' });
-      setTimeout(() => {
-        try {
-          ws.close(4001, 'zly token');
-        } catch (_) {}
-      }, 50);
-      return;
-    }
-    if (hostWs) {
-      log('Nowy host przejmuje role - stary rozlaczany');
-      wyslij(hostWs, { typ: 'zastapiony' });
-      hostWs.close(4002, 'zastapiony przez nowego hosta');
-    }
-    hostWs = ws;
-    ws._rola = 'host';
     ws._ramkiOkno = { poczatek: Date.now(), licznik: 0 };
-    log('Host polaczony');
-    rozgloszWszystkim({ typ: 'host-online' });
+    if (tokenPoprawny(token)) {
+      // SCIEZKA ZGODNOSCI WSTECZ: token w query stringu URL-a. Render (serwer
+      // relay) i Vercel (frontend) wdrazaja sie NIEZALEZNIE, wiec przez chwile
+      // po wdrozeniu tylko jednej strony stary klient (bez ramki 'auth')
+      // bedzie gadal z nowym serwerem - musi wciaz dzialac. Ta galaz jest do
+      // USUNIECIA, gdy obie strony beda juz na nowej wersji (token wtedy
+      // idzie wylacznie ramka 'auth' ponizej, nie trafia do logow zadan).
+      przejmijRoleHosta(ws);
+    } else {
+      // Brak poprawnego tokenu w URL-u NIE jest juz od razu odrzucany - laduje
+      // w stanie "niezautoryzowany host": nie jest hostem, nic z rozgloszen
+      // nie dostaje, jego ramki (poza 'auth') sa ignorowane jak ramki widza.
+      // Autoryzacja idzie pierwsza ramka po otwarciu polaczenia (patrz 'message'
+      // nizej), zeby token hosta nie ladowal sie w logach zadan przekaznika.
+      ws._rola = 'host-oczekujacy';
+      log('Polaczenie hosta bez tokenu w URL-u - czekam na ramke auth');
+      ws._authTimer = setTimeout(() => {
+        log('Host-oczekujacy nie przyslal ramki auth w 10s - zamykam');
+        try {
+          ws.close(4001, 'brak auth');
+        } catch (_) {}
+      }, 10000);
+    }
   } else {
     if (widzowie.size >= LIMIT_WIDZOW) {
       // Ochrona przed zalaniem przekaznika polaczeniami (rola widza nie
@@ -191,25 +234,41 @@ wss.on('connection', (ws, req) => {
   });
 
   ws.on('message', (raw) => {
-    if (ws._rola !== 'host') {
+    if (ws._rola === 'widz') {
       // Widz nie moze wstrzykiwac zadnego stanu - ramki od widza sa ignorowane.
       return;
     }
-    if (raw.length > LIMIT_RAMKI_BAJTOW) {
-      log(`Ramka hosta odrzucona - za duza (${raw.length} B)`);
+
+    if (ws._rola === 'host-oczekujacy') {
+      // Limit tempa obejmuje TEZ proby autoryzacji - bez tego kazdy moglby
+      // bez zadnego ograniczenia zgadywac token ramkami 'auth' (darmowy oracle).
+      if (limitTempaPrzekroczony(ws)) return;
+
+      let wiadomosc;
+      try {
+        wiadomosc = JSON.parse(raw.toString());
+      } catch (err) {
+        return;
+      }
+      if (!wiadomosc || typeof wiadomosc !== 'object') return;
+
+      if (wiadomosc.typ === 'auth') {
+        if (tokenPoprawny(wiadomosc.token)) {
+          przejmijRoleHosta(ws);
+        } else {
+          odrzucZlyTokenHosta(ws);
+        }
+      }
+      // Inne typy ramek od niezautoryzowanego hosta sa ignorowane jak od widza.
       return;
     }
 
-    // Limit tempa: max LIMIT_RAMEK_NA_SEKUNDE ramek/s od hosta.
-    const teraz = Date.now();
-    if (teraz - ws._ramkiOkno.poczatek >= 1000) {
-      ws._ramkiOkno.poczatek = teraz;
-      ws._ramkiOkno.licznik = 0;
-    }
-    ws._ramkiOkno.licznik += 1;
-    if (ws._ramkiOkno.licznik > LIMIT_RAMEK_NA_SEKUNDE) {
-      return;
-    }
+    // ws._rola === 'host' (pelnoprawny, po przejeciu roli).
+    // NAPRAWA: LIMIT_RAMKI_BAJTOW jest juz egzekwowany przez maxPayload przekazane
+    // do WebSocketServer nizej (na poziomie samej biblioteki ws, zanim event
+    // 'message' w ogole sie odpali) - dodatkowy warunek na dlugosc raw tutaj byl
+    // martwym kodem, bo ramka wieksza niz limit nigdy by tu nie dotarla.
+    if (limitTempaPrzekroczony(ws)) return;
 
     let wiadomosc;
     try {
@@ -230,16 +289,21 @@ wss.on('connection', (ws, req) => {
   });
 
   ws.on('close', () => {
+    if (ws._authTimer) {
+      clearTimeout(ws._authTimer);
+      ws._authTimer = null;
+    }
     if (ws._rola === 'host') {
       if (hostWs === ws) {
         hostWs = null;
         log('Host rozlaczony');
         rozgloszWszystkim({ typ: 'host-offline' });
       }
-    } else {
+    } else if (ws._rola === 'widz') {
       widzowie.delete(ws);
       log(`Widz rozlaczony (lacznie: ${widzowie.size})`);
     }
+    // 'host-oczekujacy' rozlaczony bez autoryzacji - nic do posprzatania poza timerem wyzej.
   });
 
   ws.on('error', (err) => {

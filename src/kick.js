@@ -44,6 +44,22 @@ export function normalizeNick(username) {
   return stripNickPrefix(username).toLowerCase();
 }
 
+/**
+ * Oczyszcza nick widza do bezpiecznego podzbioru znakow, jakie Kick w ogole
+ * dopuszcza w nazwach: litery (TAKZE spoza ASCII - "Jozek" z "o" kreskowanym
+ * ma zostac soba, nie "Jzek"), cyfry, "_", "-", ".". Wszystko inne jest
+ * wycinane. To JEDYNY strażnik na granicy zaufania - nick z czatu trafia
+ * pozniej do innerHTML w kilkunastu miejscach (vanessa.js, ui.js, minigry,
+ * wilkolak-zwyciestwo.js), wiec musi byc oczyszczony RAZ, tutaj, zanim
+ * wejdzie do reszty gry. Pusty wynik po oczyszczeniu -> 'Anonim'. Dlugosc
+ * ograniczona do 32 znakow, zeby nick z setek znakow nie rozwalal ukladu
+ * plakietki/dymka.
+ */
+export function czystyNick(username) {
+  const czysty = String(username || '').replace(/[^\p{L}\p{N}_.-]/gu, '').slice(0, 32);
+  return czysty || 'Anonim';
+}
+
 // Nicki botow czatu, ktore NIE moga wchodzic do gry (klik, ranking, kody,
 // komendy) - patrz czyZablokowany i jej uzycie w _processChatMessage.
 const ZABLOKOWANE_NICKI = new Set(['botrix']);
@@ -206,7 +222,15 @@ export class KickChatClient {
   _loadLeaderboard() {
     try {
       const raw = localStorage.getItem(LEADERBOARD_KEY);
-      return raw ? JSON.parse(raw) : {};
+      const wczytany = raw ? JSON.parse(raw) : {};
+      // Ranking mogl zostac zapisany PRZED wprowadzeniem czystyNick - przepuszczamy
+      // kazdy wpis przez nia teraz, zeby stare, niebezpieczne nicki tez zostaly oczyszczone.
+      for (const entry of Object.values(wczytany)) {
+        if (entry && typeof entry === 'object') {
+          entry.username = czystyNick(entry.username);
+        }
+      }
+      return wczytany;
     } catch (_) {
       return {};
     }
@@ -713,8 +737,11 @@ export class KickChatClient {
 
     const content = (msg.content || '').trim();
     const sender = msg.sender || { username: 'Anonim', identity: { color: '#53fc18' } };
-    const username = sender.username || 'Anonim';
+    const username = czystyNick(sender.username);
     const userColor = sender.identity?.color || '#53fc18';
+    // Kopia sendera z oczyszczonym nickiem - main.js czyta sender.username
+    // dalej w lancuchu (onKlik), wiec surowy nick nie moze tam przeciekac.
+    const cleanSender = { ...sender, username };
 
     // Boty czatu (patrz ZABLOKOWANE_NICKI) nie wchodza do gry: zaden klik,
     // wpis w rankingu, kod, dymek nad glowa pracownika ani nawet wiadomosc w
@@ -786,7 +813,7 @@ export class KickChatClient {
     if (isKlik) {
       this.stats.kliksReceived += 1;
       try {
-        this.onKlik(sender, chatItem);
+        this.onKlik(cleanSender, chatItem);
       } catch (err) {
         console.error('[KickChat] Blad w onKlik:', err);
       }
