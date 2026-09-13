@@ -7,6 +7,7 @@ import {
   tokenizujOdpowiedzMarki,
 } from './marki.js';
 import { usunTagiEmotek } from './kick.js';
+import { showTopAnnouncement } from './vanessa.js';
 import { loadForest } from './assets.js';
 import { strumien, losujInt, pozycjaBezPowtorek } from './rng.js';
 import { Bojka } from './bojka.js';
@@ -796,6 +797,29 @@ export class BitwaMarekManager {
     }
 
     this.announce(`🎉 ${winnerPlayer.username} WYGRYWA! Przez 30 sekund dostaje 2 zł/s pasywnie!`);
+    this._pokazBanerZwyciezcy(winnerPlayer);
+  }
+
+  /**
+   * Widoczny na ekranie baner zwyciezcy (obok istniejacego announce() na
+   * czacie) - uzywa wspolnego mechanizmu projektu showTopAnnouncement
+   * (./vanessa.js, patrz goldcoin.js/kick.js/main.js po identyczny wzorzec
+   * wywolania). Wolane z DWOCH miejsc, zeby baner pokazal sie u KAZDEGO:
+   * tutaj (endBattle, host) i w applySync (widz, w momencie WEJSCIA w stan
+   * REWARD - patrz strażnik prevState tam, zeby nie migac co snapshot).
+   * Opakowane w try/catch jak w kick.js - baner nigdy nie moze wywalic
+   * logiki konca bitwy.
+   */
+  _pokazBanerZwyciezcy(winnerPlayer) {
+    try {
+      showTopAnnouncement(
+        `🎉 ${winnerPlayer.username} WYGRYWA!`,
+        'Zgadnij markę! Przez 30 sekund dostaje <strong>2 zł/s</strong> pasywnie!',
+        3000,
+      );
+    } catch (err) {
+      console.warn('[marki] Blad w showTopAnnouncement:', err);
+    }
   }
 
   /** Identyczne uzasadnienie co _przerwijPrzezBossa w flagbattle.js/tlumaczenia.js/panstwa-miasta.js. */
@@ -949,6 +973,15 @@ export class BitwaMarekManager {
       this.bojka.start(this.tile, this.players, `${this.economy.state.seedGry}:marki-bojka:${this.battleId}`);
     } else if (prevState === 'BATTLE' && this.state !== 'BATTLE') {
       this.bojka.stop(this.workerManager);
+    }
+
+    // Baner zwyciezcy u widza: host go juz pokazal w endBattle() u siebie -
+    // tutaj wykrywamy WEJSCIE widza w stan REWARD (prevState !== 'REWARD'),
+    // nie sam fakt bycia w REWARD, bo applySync leci co snapshot (~co 2s) i
+    // baner migalby przy kazdym z nich. Ten strażnik odpala go dokladnie raz
+    // na bitwe po stronie widza.
+    if (this.state === 'REWARD' && prevState !== 'REWARD' && this.winner) {
+      this._pokazBanerZwyciezcy(this.winner);
     }
 
     if (this.state === 'BATTLE' && this.markiZgadniete > prevMarkiZgadniete) {

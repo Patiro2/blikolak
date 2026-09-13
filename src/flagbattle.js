@@ -34,12 +34,13 @@ const ROZMIAR_TEKSTURY_FLAGI_W = 512;
 const ROZMIAR_TEKSTURY_FLAGI_H = 384; // 512x384 = 4:3, dopasowane do viewBox 640x480 kazdego pliku flag-icons
 
 // Limit czasu na zgadniecie POJEDYNCZEJ flagi (nie calej bitwy - patrz
-// zaktualizowany komentarz przy _sprawdzWyjscieAwaryjne nizej). Liczony
+// zaktualizowany komentarz przy _sprawdzWyjscieAwaryjne nizej): 15 sekund,
+// zeby flaga, ktorej nikt nie zna, nie zatrzymywala bitwy na dluzej. Liczony
 // WYLACZNIE przez hosta w tick() (this.flagRoundTimer, zerowany w kazdym
 // nextRound()). Po uplywie: host odslania nazwe kraju (_czasFlagiUplynal),
 // po ODSLONIECIE_CZAS_S losuje kolejna flage. Stala latwa do zmiany na
 // potrzeby recznych testow.
-const LIMIT_CZASU_FLAGI_S = 60;
+const LIMIT_CZASU_FLAGI_S = 15;
 const ODSLONIECIE_CZAS_S = 3;
 
 // Wysokosc znacznika kontestowanego pola. NIE wolno kolidowac z innymi
