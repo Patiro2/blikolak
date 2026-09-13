@@ -1,9 +1,13 @@
-<svg width="64" height="64" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
-  <defs/>
-  <g>
-    <path stroke="none" fill="#259F6C" d="M64 21 L0 21 0 0 64 0 64 21"/>
-    <path stroke="none" fill="#EEEEF7" d="M64 21 L64 43 0 43 0 21 64 21"/>
-    <path stroke="none" fill="#EC2037" d="M0 43 L64 43 64 64 0 64 0 43"/>
-    <path stroke="none" fill="#25252A" d="M3.65 64 L0 64 0 0 3.6 0 32 21 32 43 3.65 64"/>
+<svg xmlns="http://www.w3.org/2000/svg" id="flag-icons-kw" viewBox="0 0 640 480">
+  <defs>
+    <clipPath id="kw-a">
+      <path fill-opacity=".7" d="M0 0h682.7v512H0z"/>
+    </clipPath>
+  </defs>
+  <g fill-rule="evenodd" stroke-width="1pt" clip-path="url(#kw-a)" transform="scale(.9375)">
+    <path fill="#fff" d="M0 170.6h1024v170.7H0z"/>
+    <path fill="#f31830" d="M0 341.3h1024V512H0z"/>
+    <path fill="#00d941" d="M0 0h1024v170.7H0z"/>
+    <path fill="#000001" d="M0 0v512l255.4-170.7.6-170.8z"/>
   </g>
 </svg>

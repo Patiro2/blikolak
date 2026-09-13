@@ -1,9 +1,13 @@
-<svg width="64" height="64" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
-  <defs/>
-  <g>
-    <path stroke="none" fill="#FCC920" d="M64 16 L64 24 24 64 16 64 64 16 M0 48 L0 40 40 0 48 0 0 48"/>
-    <path stroke="none" fill="#25252A" d="M0 48 L48 0 64 0 64 16 16 64 0 64 0 48"/>
-    <path stroke="none" fill="#259F6C" d="M0 40 L0 0 40 0 0 40"/>
-    <path stroke="none" fill="#5193EE" d="M64 24 L64 64 24 64 64 24"/>
+<svg xmlns="http://www.w3.org/2000/svg" id="flag-icons-tz" viewBox="0 0 640 480">
+  <defs>
+    <clipPath id="tz-a">
+      <path fill-opacity=".7" d="M10 0h160v120H10z"/>
+    </clipPath>
+  </defs>
+  <g fill-rule="evenodd" stroke-width="1pt" clip-path="url(#tz-a)" transform="matrix(4 0 0 4 -40 0)">
+    <path fill="#09f" d="M0 0h180v120H0z"/>
+    <path fill="#090" d="M0 0h180L0 120z"/>
+    <path fill="#000001" d="M0 120h40l140-95V0h-40L0 95z"/>
+    <path fill="#ff0" d="M0 91.5 137.2 0h13.5L0 100.5zM29.3 120 180 19.5v9L42.8 120z"/>
   </g>
 </svg>

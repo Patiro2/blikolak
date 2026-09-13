@@ -1,7 +1,11 @@
-<svg width="64" height="64" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
-  <defs/>
-  <g>
-    <path stroke="none" fill="#5193EE" d="M0 0 L64 0 64 64 0 64 0 0"/>
-    <path stroke="none" fill="#FCC920" d="M42 32 Q42 38.6 37.3 43.3 32.6 48 26 48 19.4 48 14.65 43.3 10 38.6 10 32 10 25.4 14.65 20.65 19.4 16 26 16 32.6 16 37.3 20.65 42 25.4 42 32"/>
+<svg xmlns="http://www.w3.org/2000/svg" id="flag-icons-pw" viewBox="0 0 640 480">
+  <defs>
+    <clipPath id="pw-a">
+      <path fill-opacity=".7" d="M-70.3 0h640v480h-640z"/>
+    </clipPath>
+  </defs>
+  <g fill-rule="evenodd" stroke-width="1pt" clip-path="url(#pw-a)" transform="translate(70.3)">
+    <path fill="#4aadd6" d="M-173.4 0h846.3v480h-846.3z"/>
+    <path fill="#ffde00" d="M335.6 232.1a135.9 130.1 0 1 1-271.7 0 135.9 130.1 0 1 1 271.7 0"/>
   </g>
 </svg>

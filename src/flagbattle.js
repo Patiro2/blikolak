@@ -4,7 +4,13 @@ import { usunTagiEmotek } from './kick.js';
 import { loadForest } from './assets.js';
 import { strumien, losujInt, tasuj } from './rng.js';
 
-// Naprawa koloru/rozdzielczosci flag (dwie NIEZALEZNE przyczyny):
+// Zrodlo flag: assets/flags-vector/<KOD>.svg pochodzi z pakietu flag-icons
+// (github.com/lipis/flag-icons, MIT - patrz assets/flags-vector/LICENSE-flag-icons.txt),
+// proporcja 4:3 (viewBox="0 0 640 480" w kazdym pliku), pelny kolor i
+// szczegolowe herby (nie plaska stylizowana paleta jak w dawnym zestawie
+// Kenney) - stad NIE MA juz tu podmiany kolorow na "nasycona palete": kolory
+// zrodlowe sa juz wlasciwe, jedyna naprawa potrzebna do koloru pozostaje (1)
+// nizej.
 //
 // 1) Zarzadzanie kolorem: renderer ma outputColorSpace = SRGBColorSpace i
 //    ACESFilmicToneMapping (patrz src/scene.js) - tekstura bez
@@ -12,31 +18,19 @@ import { strumien, losujInt, tasuj } from './rng.js';
 //    wiec kolory wychodza wyplowiale/przesuniete, a plaska grafika bez
 //    material.toneMapped = false dodatkowo traci nasycenie przez tone
 //    mapping pomyslany do oswietlonych scen 3D, nie plaskich ikon.
-// 2) Paleta zrodlowa: caly pakiet flag uzywa jednej przygaszonej,
-//    zestylizowanej palety (9 kolorow odpowiada za wiekszosc powierzchni
-//    wszystkich 232 flag) - np. biel to #EEEEF7 (lekko niebieskawa), a nie
-//    prawdziwa biel. To NIE jest blad renderu, tak wygladaja same pliki
-//    zrodlowe (PNG i SVG identycznie) - poprawka wymaga podmiany kolorow.
 //
-// Rozwiazanie: SVG (wektor, wiec dowolna rozdzielczosc) ladowany jako tekst,
-// kolory z palety podmieniane na nasycone, rasteryzacja przez Image+canvas
-// w 256x256 (dawne PNG mialy 64x64), i z canvasu CanvasTexture z poprawnym
-// colorSpace i anizotropia. Wynik cache'owany po kodzie kraju - flaga
-// rasteryzuje sie raz na sesje, kazda kolejna runda z tym samym krajem
+// Rozwiazanie: SVG (wektor, wiec dowolna rozdzielczosc) ladowany jako tekst;
+// wiele plikow flag-icons NIE MA atrybutow width/height na <svg> (tylko
+// viewBox) - Image zaladowany z takiego Bloba moze zrasteryzowac sie z
+// zerowym/domyslnym rozmiarem w niektorych przegladarkach, wiec PRZED
+// zbudowaniem Bloba wstrzykujemy jawne width/height dopasowane do viewBox
+// (patrz zapewnijWymiarySvg nizej). Rasteryzacja przez Image+canvas w
+// rozdzielczosci 4:3 (ROZMIAR_TEKSTURY_FLAGI_W x _H), z canvasu CanvasTexture
+// z poprawnym colorSpace i anizotropia. Wynik cache'owany po kodzie kraju -
+// flaga rasteryzuje sie raz na sesje, kazda kolejna runda z tym samym krajem
 // dostaje ta sama tekstura z cache (zero nowych obiektow, zero wycieku).
-const PALETA_KOLOROW = {
-  '#EEEEF7': '#FFFFFF',
-  '#EC2037': '#D7141A',
-  '#25252A': '#111111',
-  '#FCC920': '#FFCE00',
-  '#259F6C': '#009B3A',
-  '#3439CB': '#0038A8',
-  '#392D8C': '#24246E',
-  '#5193EE': '#5B9BD5',
-  '#C4863B': '#B8762E',
-};
-
-const ROZMIAR_TEKSTURY_FLAGI = 256; // bylo 64 (PNG "Default")
+const ROZMIAR_TEKSTURY_FLAGI_W = 512;
+const ROZMIAR_TEKSTURY_FLAGI_H = 384; // 512x384 = 4:3, dopasowane do viewBox 640x480 kazdego pliku flag-icons
 
 // Wysokosc znacznika kontestowanego pola. NIE wolno kolidowac z innymi
 // warstwami podlogi areny: 0.025 wierzch kafla podlogi (scene.js), 0.035
@@ -140,111 +134,54 @@ function najlepszyKodDlaOdpowiedzi(tokeny) {
 // powstala wiecej niz jedna instancja FlagBattleManager na tej samej karcie.
 const cacheTeksturFlag = new Map();
 
-function podmienKoloryNaNasycone(svgText) {
-  let out = svgText;
-  for (const [stary, nowy] of Object.entries(PALETA_KOLOROW)) {
-    out = out.split(stary).join(nowy);
-  }
-  return out;
-}
-
-// Awaryjna sciezka dla flag, ktorych zrodlowy SVG jest nie do naprawy
-// (zdegenerowana/niepelna geometria - zobacz komentarz przy AS ponizej).
-// Dla tych kodow rasteryzujemy PNG z paczki (assets/flags-png/) zamiast
-// SVG, i podmieniamy paleta NA PIKSELACH canvasu (PNG uzywa tej samej
-// zestylizowanej palety co SVG, wiec bez podmiany flaga wygladalaby blado
-// na tle reszty). Dopasowanie koloru jest "najblizszy sasiad" z progiem
-// odleglosci w przestrzeni RGB - lapie piksele antyaliasingu blisko
-// jednego z 9 kolorow palety, zostawia bez zmian piksele dalekie od
-// wszystkich (np. gdyby PNG mial kolor spoza znanej palety).
-//
-// AS (Samoa Amerykanskie): assets/flags-vector/AS.svg ma geometrie
-// przycieta/zdegenerowana - wspolrzedne ujemne w okolicy -14..+14 przy
-// viewBox 64x64, wiec rysunek renderuje sie jako niewidoczny/przyciety
-// skrawek w rogu, nie flage. Rekonstrukcja wektorowa orla z symbolami
-// wladzy "na oko" bylaby zgadywanka - zamiast tego PNG z paczki (ten sam
-// zasob, ktory Kenney faktycznie wyeksportowal jako obrazek flagi).
-const KODY_PNG_FALLBACK = new Set(['AS']);
-
-function hexNaRgb(hex) {
-  const n = parseInt(hex.slice(1), 16);
-  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
-}
-const PALETA_RGB = Object.entries(PALETA_KOLOROW).map(([stary, nowy]) => [hexNaRgb(stary), hexNaRgb(nowy)]);
-// Prog dopasowania "najblizszy sasiad" - suma kwadratow roznic na R,G,B.
-// 40 na kanal (40*40*3) lapie piksele antyaliasingu przy krawedziach
-// ksztaltow, nie zmienia kolorow spoza palety.
-const PROG_DOPASOWANIA_RGB = 40 * 40 * 3;
-
-function podmienKoloryNaNasyconeNaPikselach(ctx, szerokosc, wysokosc) {
-  const imgData = ctx.getImageData(0, 0, szerokosc, wysokosc);
-  const d = imgData.data;
-  for (let i = 0; i < d.length; i += 4) {
-    const r = d[i], g = d[i + 1], b = d[i + 2];
-    let najlepszy = null;
-    let najlepszaOdleglosc = Infinity;
-    for (const [zrodlo, cel] of PALETA_RGB) {
-      const odleglosc = (r - zrodlo[0]) ** 2 + (g - zrodlo[1]) ** 2 + (b - zrodlo[2]) ** 2;
-      if (odleglosc < najlepszaOdleglosc) {
-        najlepszaOdleglosc = odleglosc;
-        najlepszy = cel;
-      }
-    }
-    if (najlepszy && najlepszaOdleglosc < PROG_DOPASOWANIA_RGB) {
-      d[i] = najlepszy[0];
-      d[i + 1] = najlepszy[1];
-      d[i + 2] = najlepszy[2];
-    }
-  }
-  ctx.putImageData(imgData, 0, 0);
+// Wiele plikow flag-icons ma na <svg> WYLACZNIE viewBox (bez width/height) -
+// Image zaladowany z takiego pliku (przez Blob URL) moze w niektorych
+// przegladarkach zrasteryzowac sie z domyslnym/zerowym rozmiarem zamiast
+// odziedziczyc proporcje z viewBox. Zeby tego uniknac, wstrzykujemy jawne
+// width/height w atrybuty <svg> PRZED zbudowaniem Bloba - jesli juz sa,
+// zostawiamy je bez zmian.
+function zapewnijWymiarySvg(svgText) {
+  const ma = /<svg\b[^>]*\bwidth\s*=/i.test(svgText);
+  if (ma) return svgText;
+  return svgText.replace(
+    /<svg\b/i,
+    `<svg width="${ROZMIAR_TEKSTURY_FLAGI_W}" height="${ROZMIAR_TEKSTURY_FLAGI_H}"`,
+  );
 }
 
 /**
- * Pobiera SVG flagi, podmienia paleta, rasteryzuje do canvasu 256x256 i
- * zwraca CanvasTexture z poprawnym colorSpace/anizotropia. Wynik cache'owany
- * po kodzie kraju - druga i kolejne prosby o te sama flage dostaja gotowa
- * tekstura z cache, bez ponownego pobierania/rasteryzacji.
+ * Pobiera SVG flagi (assets/flags-vector/<KOD>.svg, pakiet flag-icons),
+ * rasteryzuje do canvasu w proporcji 4:3 i zwraca CanvasTexture z poprawnym
+ * colorSpace/anizotropia. Wynik cache'owany po kodzie kraju - druga i kolejne
+ * prosby o te sama flage dostaja gotowa tekstura z cache, bez ponownego
+ * pobierania/rasteryzacji.
  */
 function zaladujTeksturaFlagi(kod, renderer) {
   if (cacheTeksturFlag.has(kod)) return cacheTeksturFlag.get(kod);
 
   const promise = (async () => {
     const canvas = document.createElement('canvas');
-    canvas.width = ROZMIAR_TEKSTURY_FLAGI;
-    canvas.height = ROZMIAR_TEKSTURY_FLAGI;
+    canvas.width = ROZMIAR_TEKSTURY_FLAGI_W;
+    canvas.height = ROZMIAR_TEKSTURY_FLAGI_H;
     const ctx = canvas.getContext('2d');
 
-    if (KODY_PNG_FALLBACK.has(kod)) {
-      // Sciezka awaryjna PNG (patrz komentarz przy KODY_PNG_FALLBACK) -
-      // brak URL.createObjectURL/revokeObjectURL, bo Image laduje plik
-      // bezposrednio z assets/flags-png/, bez posredniego Bloba.
+    const resp = await fetch(`assets/flags-vector/${kod}.svg`);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status} przy pobieraniu assets/flags-vector/${kod}.svg`);
+    const svgTextOryginalny = await resp.text();
+    const svgText = zapewnijWymiarySvg(svgTextOryginalny);
+
+    const blob = new Blob([svgText], { type: 'image/svg+xml' });
+    const url = URL.createObjectURL(blob);
+    try {
       const img = await new Promise((resolve, reject) => {
         const im = new Image();
         im.onload = () => resolve(im);
-        im.onerror = () => reject(new Error(`Blad rasteryzacji PNG flagi ${kod}`));
-        im.src = `assets/flags-png/${kod}.png`;
+        im.onerror = () => reject(new Error(`Blad rasteryzacji SVG flagi ${kod}`));
+        im.src = url;
       });
-      ctx.drawImage(img, 0, 0, ROZMIAR_TEKSTURY_FLAGI, ROZMIAR_TEKSTURY_FLAGI);
-      podmienKoloryNaNasyconeNaPikselach(ctx, ROZMIAR_TEKSTURY_FLAGI, ROZMIAR_TEKSTURY_FLAGI);
-    } else {
-      const resp = await fetch(`assets/flags-vector/${kod}.svg`);
-      if (!resp.ok) throw new Error(`HTTP ${resp.status} przy pobieraniu assets/flags-vector/${kod}.svg`);
-      const svgTextOryginalny = await resp.text();
-      const svgText = podmienKoloryNaNasycone(svgTextOryginalny);
-
-      const blob = new Blob([svgText], { type: 'image/svg+xml' });
-      const url = URL.createObjectURL(blob);
-      try {
-        const img = await new Promise((resolve, reject) => {
-          const im = new Image();
-          im.onload = () => resolve(im);
-          im.onerror = () => reject(new Error(`Blad rasteryzacji SVG flagi ${kod}`));
-          im.src = url;
-        });
-        ctx.drawImage(img, 0, 0, ROZMIAR_TEKSTURY_FLAGI, ROZMIAR_TEKSTURY_FLAGI);
-      } finally {
-        URL.revokeObjectURL(url);
-      }
+      ctx.drawImage(img, 0, 0, ROZMIAR_TEKSTURY_FLAGI_W, ROZMIAR_TEKSTURY_FLAGI_H);
+    } finally {
+      URL.revokeObjectURL(url);
     }
 
     const texture = new THREE.CanvasTexture(canvas);
@@ -347,10 +284,10 @@ export class FlagBattleManager {
 
     // Sprite z flagą. toneMapped = false - to plaska 2D grafika (ikona), nie
     // oswietlona powierzchnia 3D, wiec ACESFilmicToneMapping z renderera nie
-    // powinien jej przygaszac/przesuwac kolorow (patrz komentarz nad PALETA_KOLOROW).
+    // powinien jej przygaszac/przesuwac kolorow (patrz komentarz nad ROZMIAR_TEKSTURY_FLAGI_W).
     this.flagMaterial = new THREE.SpriteMaterial({ color: 0xffffff, toneMapped: false });
     this.flagSprite = new THREE.Sprite(this.flagMaterial);
-    this.flagSprite.scale.set(1.5, 1.0, 1.0); // proporcja flagi
+    this.flagSprite.scale.set(1.4, 1.05, 1.0); // proporcja 4:3 (flagi flag-icons, viewBox 640x480)
     this.flagSprite.position.y = 3.0; // Nad polem
     this.flagSprite.visible = false;
     this.scene.add(this.flagSprite);

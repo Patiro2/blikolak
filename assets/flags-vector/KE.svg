@@ -1,13 +1,23 @@
-<svg width="64" height="64" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
-  <defs/>
-  <g>
-    <path stroke="none" fill="#25252A" d="M0 0 L64 0 64 19.2 0 19.2 0 0"/>
-    <path stroke="none" fill="#EEEEF7" d="M0 19.2 L64 19.2 64 22.4 0 22.4 0 19.2"/>
-    <path stroke="none" fill="#EC2037" d="M0 22.4 L64 22.4 64 41.6 0 41.6 0 22.4"/>
-    <path stroke="none" fill="#EEEEF7" d="M0 41.6 L64 41.6 64 44.8 0 44.8 0 41.6"/>
-    <path stroke="none" fill="#259F6C" d="M0 44.8 L64 44.8 64 64 0 64 0 44.8"/>
-    <path stroke="none" fill="#EC2037" d="M22.95 21.3 Q25.1 11 32 11 38.9 11 41.1 21.3 38.1 24.3 38.1 32 38.1 39.7 41.1 42.75 38.9 53 32 53 25.1 53 22.95 42.75 25.9 39.7 25.9 32 25.9 24.3 22.95 21.3"/>
-    <path stroke="none" fill="#25252A" d="M22.95 21.3 Q25.9 24.3 25.9 32 25.9 39.7 22.95 42.75 22 38.25 22 32 22 25.75 22.95 21.3 M41.1 21.3 Q42 25.75 42 32 42 38.25 41.1 42.75 38.1 39.7 38.1 32 38.1 24.3 41.1 21.3"/>
-    <path stroke="none" fill="#FFFFFF" d="M36 32 Q36 33.65 34.8 34.8 33.65 36 32 36 30.35 36 29.15 34.8 28 33.65 28 32 28 30.35 29.15 29.15 30.35 28 32 28 33.65 28 34.8 29.15 36 30.35 36 32"/>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" id="flag-icons-ke" viewBox="0 0 640 480">
+  <defs>
+    <path id="ke-a" stroke-miterlimit="10" d="m-28.6 47.5 1.8 1 46.7-81c2.7-.6 4.2-3.2 5.7-5.8 1-1.8 5-8.7 6.7-17.7a58 58 0 0 0-11.9 14.7c-1.5 2.6-3 5.2-2.3 7.9z"/>
+  </defs>
+  <path fill="#fff" d="M0 0h640v480H0z"/>
+  <path fill="#000001" d="M0 0h640v144H0z"/>
+  <path fill="#060" d="M0 336h640v144H0z"/>
+  <g id="ke-b" transform="matrix(3 0 0 3 320 240)">
+    <use xlink:href="#ke-a" width="100%" height="100%" stroke="#000"/>
+    <use xlink:href="#ke-a" width="100%" height="100%" fill="#fff"/>
+  </g>
+  <use xlink:href="#ke-b" width="100%" height="100%" transform="matrix(-1 0 0 1 640 0)"/>
+  <path fill="#b00" d="M640.5 168H377c-9-24-39-72-57-72s-48 48-57 72H-.2v144H263c9 24 39 72 57 72s48-48 57-72h263.5z"/>
+  <path id="ke-c" d="M377 312c9-24 15-48 15-72s-6-48-15-72c-9 24-15 48-15 72s6 48 15 72"/>
+  <use xlink:href="#ke-c" width="100%" height="100%" transform="matrix(-1 0 0 1 640 0)"/>
+  <g fill="#fff" transform="matrix(3 0 0 3 320 240)">
+    <ellipse rx="4" ry="6"/>
+    <path id="ke-d" d="M1 5.8s4 8 4 21-4 21-4 21z"/>
+    <use xlink:href="#ke-d" width="100%" height="100%" transform="scale(-1)"/>
+    <use xlink:href="#ke-d" width="100%" height="100%" transform="scale(-1 1)"/>
+    <use xlink:href="#ke-d" width="100%" height="100%" transform="scale(1 -1)"/>
   </g>
 </svg>

@@ -1,8 +1,14 @@
-<svg width="64" height="64" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
-  <defs/>
-  <g>
-    <path stroke="none" fill="#FCC920" d="M24 0 L64 0 64 32 24 32 24 0"/>
-    <path stroke="none" fill="#259F6C" d="M24 0 L24 32 24 64 0 64 0 0 24 0"/>
-    <path stroke="none" fill="#EC2037" d="M64 32 L64 64 24 64 24 32 64 32"/>
+<svg xmlns="http://www.w3.org/2000/svg" id="flag-icons-bj" viewBox="0 0 640 480">
+  <defs>
+    <clipPath id="bj-a">
+      <path fill="gray" d="M67.6-154h666v666h-666z"/>
+    </clipPath>
+  </defs>
+  <g clip-path="url(#bj-a)" transform="matrix(.961 0 0 .7207 -65 111)">
+    <g fill-rule="evenodd" stroke-width="1pt">
+      <path fill="#319400" d="M0-154h333v666H0z"/>
+      <path fill="#ffd600" d="M333-154h666v333H333z"/>
+      <path fill="#de2110" d="M333 179h666v333H333z"/>
+    </g>
   </g>
 </svg>

@@ -1,9 +1,8 @@
-<svg width="64" height="64" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
-  <defs/>
-  <g>
-    <path stroke="none" fill="#EC2037" d="M0 16 L0 0 64 0 64 16 0 16"/>
-    <path stroke="none" fill="#FCC920" d="M64 32 L64 48 0 48 0 32 64 32"/>
-    <path stroke="none" fill="#3439CB" d="M64 32 L0 32 0 16 64 16 64 32"/>
-    <path stroke="none" fill="#259F6C" d="M64 48 L64 64 0 64 0 48 64 48"/>
+<svg xmlns="http://www.w3.org/2000/svg" id="flag-icons-mu" viewBox="0 0 640 480">
+  <g fill-rule="evenodd">
+    <path fill="#00a04d" d="M0 360h640v120H0z"/>
+    <path fill="#151f6d" d="M0 120h640v120H0z"/>
+    <path fill="#ee2737" d="M0 0h640v120H0z"/>
+    <path fill="#ffcd00" d="M0 240h640v120H0z"/>
   </g>
 </svg>

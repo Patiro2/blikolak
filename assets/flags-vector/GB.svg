@@ -1,12 +1,7 @@
-<svg width="64" height="64" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
-  <defs/>
-  <g>
-    <path stroke="none" fill="#3439CB" d="M4 0 L64 0 64 60 4 0 M0 64 L0 4 60 64 0 64"/>
-    <path stroke="none" fill="#EC2037" d="M60 64 L0 4 0 0 4 0 64 60 64 64 60 64"/>
-    <path stroke="none" fill="#EEEEF7" d="M60 64 L56 64 0 8 0 4 60 64 M4 0 L8 0 64 56 64 60 4 0"/>
-    <path stroke="none" fill="#EC2037" d="M4 64 L0 64 0 60 60 0 64 0 64 4 4 64"/>
-    <path stroke="none" fill="#EEEEF7" d="M4 64 L64 4 64 8 8 64 4 64 M0 60 L0 56 56 0 60 0 0 60"/>
-    <path stroke="none" fill="#EEEEF7" d="M64 26 L38 26 38 0 42 0 42 22 64 22 64 26 M26 0 L26 26 0 26 0 22 22 22 22 0 26 0 M0 38 L26 38 26 64 22 64 22 42 0 42 0 38 M38 64 L38 38 64 38 64 42 42 42 42 64 38 64"/>
-    <path stroke="none" fill="#EC2037" d="M38 64 L26 64 26 38 0 38 0 26 26 26 26 0 38 0 38 26 64 26 64 38 38 38 38 64"/>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" id="flag-icons-gb" viewBox="0 0 640 480">
+  <path fill="#012169" d="M0 0h640v480H0z"/>
+  <path fill="#FFF" d="m75 0 244 181L562 0h78v62L400 241l240 178v61h-80L320 301 81 480H0v-60l239-178L0 64V0z"/>
+  <path fill="#C8102E" d="m424 281 216 159v40L369 281zm-184 20 6 35L54 480H0zM640 0v3L391 191l2-44L590 0zM0 0l239 176h-60L0 42z"/>
+  <path fill="#FFF" d="M241 0v480h160V0zM0 160v160h640V160z"/>
+  <path fill="#C8102E" d="M0 193v96h640v-96zM273 0v480h96V0z"/>
 </svg>

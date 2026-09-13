@@ -1,8 +1,7 @@
-<svg width="64" height="64" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
-  <defs/>
-  <g>
-    <path stroke="none" fill="#EC2037" d="M0 21 L0 0 64 0 64 21 0 21"/>
-    <path stroke="none" fill="#EEEEF7" d="M0 21 L64 21 64 43 0 43 0 21"/>
-    <path stroke="none" fill="#25252A" d="M64 43 L64 64 0 64 0 43 64 43"/>
+<svg xmlns="http://www.w3.org/2000/svg" id="flag-icons-ye" viewBox="0 0 640 480">
+  <g fill-rule="evenodd" stroke-width="1pt">
+    <path fill="#fff" d="M0 0h640v472.8H0z"/>
+    <path fill="#f10600" d="M0 0h640v157.4H0z"/>
+    <path fill="#000001" d="M0 322.6h640V480H0z"/>
   </g>
 </svg>
