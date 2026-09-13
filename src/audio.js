@@ -545,6 +545,123 @@ export class AudioManager {
   activeVoiceCount() {
     return this._activeVoicesTotal;
   }
+
+  // ============= DZWIEKI PROCEDURALNE WILKOLAKA (tier 5, boss-wilkolak.js) =============
+  // Generowane wprost oscylatorami/szumem Web Audio - BEZ plikow (patrz
+  // zadanie wlasciciela: "wlasciciel podmieni je pozniej na pliki"). Kazdy to
+  // jedna malutka, czytelnie nazwana funkcja, respektujaca to samo
+  // odblokowanie/glosnosc/wyciszenie co reszta gry (podpiete pod masterGain).
+
+  /** Bramka wspolna dla wszystkich dzwiekow proceduralnych - patrz _playInner wyzej. */
+  _procCtx() {
+    if (!this._unlocked) return null;
+    return this._ensureContext();
+  }
+
+  /** Bufor bialego szumu o zadanej dlugosci - uzywany przez chlipanie/swist/uderzenie. */
+  _noiseBuffer(ctx, sekundy) {
+    const len = Math.max(1, Math.floor(ctx.sampleRate * sekundy));
+    const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+    return buf;
+  }
+
+  /** Wycie - oscylator z glissando (gora-dol) + wolne vibrato. */
+  wilkolakWycie() {
+    const ctx = this._procCtx();
+    if (!ctx) return;
+    const t0 = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(220, t0);
+    osc.frequency.exponentialRampToValueAtTime(520, t0 + 0.5);
+    osc.frequency.exponentialRampToValueAtTime(260, t0 + 1.7);
+
+    const lfo = ctx.createOscillator();
+    const lfoGain = ctx.createGain();
+    lfo.frequency.value = 6.5;
+    lfoGain.gain.value = 14;
+    lfo.connect(lfoGain).connect(osc.frequency);
+
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, t0);
+    gain.gain.linearRampToValueAtTime(0.4 * this._effectiveVolume(), t0 + 0.15);
+    gain.gain.linearRampToValueAtTime(0.0001, t0 + 1.8);
+
+    osc.connect(gain).connect(this.masterGain);
+    osc.start(t0); lfo.start(t0);
+    osc.stop(t0 + 1.85); lfo.stop(t0 + 1.85);
+  }
+
+  /** Chlipanie (Placz) - kilka krotkich, cichnacych szumow z przerwami. */
+  wilkolakChlipanie() {
+    const ctx = this._procCtx();
+    if (!ctx) return;
+    const t0 = ctx.currentTime;
+    for (let i = 0; i < 4; i++) {
+      const start = t0 + i * 0.42;
+      const src = ctx.createBufferSource();
+      src.buffer = this._noiseBuffer(ctx, 0.18);
+      const filtr = ctx.createBiquadFilter();
+      filtr.type = 'bandpass';
+      filtr.frequency.value = 900;
+      filtr.Q.value = 0.9;
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.linearRampToValueAtTime(0.35 * this._effectiveVolume(), start + 0.03);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.18);
+      src.connect(filtr).connect(gain).connect(this.masterGain);
+      src.start(start);
+      src.stop(start + 0.2);
+    }
+  }
+
+  /** Swist sweepu (bieg/rzut) - szum przez filtr pasmowy zmiatajacy w gore. */
+  wilkolakSwist() {
+    const ctx = this._procCtx();
+    if (!ctx) return;
+    const t0 = ctx.currentTime;
+    const src = ctx.createBufferSource();
+    src.buffer = this._noiseBuffer(ctx, 0.4);
+    const filtr = ctx.createBiquadFilter();
+    filtr.type = 'bandpass';
+    filtr.Q.value = 1.1;
+    filtr.frequency.setValueAtTime(400, t0);
+    filtr.frequency.exponentialRampToValueAtTime(3200, t0 + 0.35);
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, t0);
+    gain.gain.linearRampToValueAtTime(0.3 * this._effectiveVolume(), t0 + 0.05);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.4);
+    src.connect(filtr).connect(gain).connect(this.masterGain);
+    src.start(t0);
+    src.stop(t0 + 0.42);
+  }
+
+  /** Uderzenie (sweep/stun/nur/kontra) - krotki niski "thud" + trzask szumu. */
+  wilkolakUderzenie() {
+    const ctx = this._procCtx();
+    if (!ctx) return;
+    const t0 = ctx.currentTime;
+
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(160, t0);
+    osc.frequency.exponentialRampToValueAtTime(45, t0 + 0.22);
+    const oscGain = ctx.createGain();
+    oscGain.gain.setValueAtTime(0.5 * this._effectiveVolume(), t0);
+    oscGain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.25);
+    osc.connect(oscGain).connect(this.masterGain);
+    osc.start(t0); osc.stop(t0 + 0.26);
+
+    const src = ctx.createBufferSource();
+    src.buffer = this._noiseBuffer(ctx, 0.08);
+    const noiseGain = ctx.createGain();
+    noiseGain.gain.setValueAtTime(0.35 * this._effectiveVolume(), t0);
+    noiseGain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.08);
+    src.connect(noiseGain).connect(this.masterGain);
+    src.start(t0); src.stop(t0 + 0.09);
+  }
 }
 
 // Singleton - importowany bezposrednio zamiast przekazywania przez konstruktory

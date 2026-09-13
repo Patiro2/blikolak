@@ -340,6 +340,7 @@ html, body {
 #leaderboard-list .rank { font-size: 1em; width: 1.67em; }
 #leaderboard-list .gwiazdki-wygranych { font-size: 0.83em; }
 #leaderboard-list .przedmiot-skorpiona { font-size: 1em; }
+#leaderboard-list .wilkolak-ban-ikona { font-size: 1em; }
 #leaderboard-list .worker-tag { font-size: 0.83em; }
 
 .leaderboard-empty {
@@ -439,6 +440,40 @@ html, body {
 .przedmiot-skorpiona {
   font-size: 12px;
   margin-left: 2px;
+}
+
+/* Ikona bana Wilkolaka (tier 5, Szal banowy, patrz src/boss-wilkolak.js) - ranking i plakietka nad postacia */
+.wilkolak-ban-ikona {
+  font-size: 12px;
+  margin-left: 2px;
+}
+
+/* Naklada "Placz" Wilkolaka (tier 5) - ciemny ekran + spadajace lzy. Proste
+   DOM/CSS (patrz zadanie: "proste czastki/DOM lub Three.js") zamiast biblioteki
+   czastek - nieproporcjonalny wysilek na jeden atak jednego bossa. */
+.wilkolak-placz-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center, rgba(10, 15, 40, 0.35) 0%, rgba(5, 8, 20, 0.65) 100%);
+  overflow: hidden;
+}
+
+.wilkolak-lza {
+  position: absolute;
+  top: -5%;
+  width: 3px;
+  height: 18px;
+  border-radius: 2px;
+  background: linear-gradient(#bfe4ff, rgba(191, 228, 255, 0));
+  opacity: 0.75;
+  animation: wilkolak-lza-spadek linear infinite;
+}
+
+@keyframes wilkolak-lza-spadek {
+  from { transform: translateY(0); }
+  to { transform: translateY(115vh); }
 }
 
 .leaderboard-row .worker-tag {

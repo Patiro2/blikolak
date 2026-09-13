@@ -108,6 +108,7 @@ Stan zapisuje się sam do `localStorage` co 5 s i przy zamykaniu karty.
 | `src/boss-kowal.js` | mechanika bossa tieru 2 "Kowal_88" - osobny plik, patrz sekcja "Boss" niżej |
 | `src/boss-blackjack.js` | mechanika bossa tieru 3 "Dżordżo" (blackjack) - osobny plik, patrz sekcja "Boss" niżej |
 | `src/boss-skorpion.js` | mechanika bossa tieru 4 "Skorpion" (ucieczka po siatce, zapadanie pól, przedmioty, trucizna, kradzież puli) - osobny plik, patrz sekcja "Boss" niżej |
+| `src/boss-wilkolak.js` | mechanika bossa tieru 5 "Wilkołak" (Szał alkoholowy z kontrą/stunem, Nur, Płacz, Szał banowy - FAZA 1; Przejście i FAZA 2 to ETAP 2) - osobny plik, patrz sekcja "Boss" niżej |
 | `src/flagbattle.js` | minigra "Bitwa o flagi" - losowanie kraju, dopasowanie odpowiedzi z czatu, korzysta z `countries.js` i `bojka.js`; każda flaga ma limit 60 s (`LIMIT_CZASU_FLAGI_S`) - po jego upływie host odsłania nazwę kraju bez przyznania punktu i po ~3 s losuje kolejną |
 | `src/countries.js` | słownictwo minigry "Bitwa o flagi" - lista krajów, kody ISO, akceptowane warianty nazw |
 | `src/bojka.js` | wspólna, czysto kosmetyczna animacja "bijatyki" (ciosy, kurz) używana przez obie minigry siatki (`flagbattle.js`, `tlumaczenia.js`) |
@@ -141,8 +142,7 @@ Gra łączy się na żywo z czatem kanału **patiro** na Kick.com przez WebSocke
 ## Boss
 
 Przy KAŻDYM awansie tieru bankomatu wyskakuje boss - `src/boss.js`, tablica
-`BOSS_DEFS` indeksowana numerem tieru, wypełnione indeksy 1-4 (tier 5 to
-na razie `null`, czyli awans na ten tier przebiega po staremu, bez walki).
+`BOSS_DEFS` indeksowana numerem tieru, wypełnione indeksy 1-5.
 Każdy boss ma własną mechanikę w osobnym pliku:
 
 - **Tier 1 - Kamil Kovalenko** (`src/boss.js`) - opisany szczegółowo niżej:
@@ -162,6 +162,10 @@ Każdy boss ma własną mechanikę w osobnym pliku:
   opisany szczegółowo niżej: ucieka po siatce 7×7, zapadając za sobą pola, i
   co sekundę okrada wspólną pulę - czat musi zbierać butelkę i środek
   przeczyszczający, łączyć je w truciznę i zadawać nią obrażenia z bliska.
+- **Tier 5 - Wilkołak, "OSTATNI BOSS MYŚLIBORZA"** (`src/boss-wilkolak.js`,
+  mechanika `'wilkolak'`) - opisany szczegółowo niżej (FAZA 1, 100→50 HP):
+  losowo Szał alkoholowy (zamach z kontrą "ło tego" i stunem), Nur (wężyk po
+  arenie) albo Płacz (zbiórka na kwadracie 3×3), rzadko Szał banowy.
 
 Boss tieru 1 to `wheelchair-deluxe` (Kenney mini-characters) +
 `character-male-f`, złożone w jedną grupę i wyskalowane ×3 względem zwykłych
@@ -204,6 +208,72 @@ postaci.
   kradzież puli są decyzjami hosta (`boss.czyNaliczanieDozwolone()`, ten sam
   wzorzec co w `src/boss-blackjack.js`) - widz je wyłącznie odtwarza z sync.
 
+### Szczegóły bossa tieru 5 (Wilkołak) - ETAP 1 (FAZA 1, 100→50 HP)
+
+> Zaimplementowana jest na razie WYŁĄCZNIE FAZA 1 (100→50 HP). Gdy HP spadnie
+> do ≤50, `BossWilkolak._wejdzWFaze2()` loguje TODO i walka toczy się dalej w
+> FAZIE 1 (ten sam zestaw ataków) - Przejście, FAZA 2 (rzut piwem) i ekran
+> zwycięstwa to ETAP 2. Pokonanie przy 0 HP idzie na razie zwykłą ścieżką
+> `_onDefeatedBoss` (jak Skorpion) - bez pełnoekranowego ekranu zwycięstwa.
+
+- **Model**: `character-male-a.glb` (Kenney `mini-arcade`, `assets/arcade/` -
+  ten sam rig/klipy co reszta postaci w grze) przyciemniony (kolor materiału
+  ×0,4), skala ×2 względem zwykłych postaci graczy, z proceduralnymi uszami i
+  pyskiem doczepionymi do kości `head` oraz ogonem doczepionym do kości
+  `torso` (prymitywy Three.js, brązowo-szare - żadna paczka Kenneya nie ma
+  modelu wilkołaka).
+- **Dźwięki**: generowane wprost oscylatorami/szumem Web Audio, bez plików
+  (`audio.wilkolakWycie/-Chlipanie/-Swist/-Uderzenie` w `src/audio.js`) -
+  właściciel podmieni je później na pliki.
+- **Pętla ataków FAZY 1**: co 8-12 s losowy atak z `{Szał alkoholowy, Nur,
+  Płacz}` (`this.pulaAtakow` w `BossWilkolak` - pole instancji, żeby ETAP 2
+  mógł je łatwo podmienić po Przejściu), zamiast tego ~10% szans na Szał
+  banowy. Telegraf ataku (kto/gdzie/kiedy, ruch, znaczniki pól) jest liczony
+  deterministycznie ze wspólnego strumienia (`src/rng.js`) na KAŻDEJ karcie
+  gry - tak samo jak ruch Skorpiona; decyzje z ekonomicznym skutkiem
+  (obrażenia, śmierć, kradzież, nagrody, bany) są bramkowane
+  `boss.czyNaliczanieDozwolone()` - widz odtwarza wynik z sync
+  (`getSyncState`/`applySync`/`startFromSync`, ten sam wzorzec co Kowal/Skorpion).
+- **Szał alkoholowy**: wilkołak biegnie (`sprint`) na pole obok losowego
+  żywego gracza i odwraca się do niego przodem. 2 s zamachu - 3 pola przed nim
+  (rząd w poprzek kierunku patrzenia) świecą czerwono. Gracz stojący ZA jego
+  plecami (jedno z 3 tylnych pól) może skontrować pisząc na czacie `ło tego`
+  (też `lo tego`, dowolna wielkość liter - pierwszy wygrywa): atak przerwany,
+  kontrujący dostaje 100 zł, wilkołak dostaje STUN na 10 s - w tym czasie 3
+  pola za jego plecami świecą niebiesko, a gdy stanie na nich (każde pole inny
+  gracz) wymagana liczba graczy (`min(3, graczy w grze)`, pomniejszona o pola
+  poza areną/na bankomacie), traci jednorazowo 25 HP. Bez kontry: sweep zabija
+  każdego na 3 czerwonych polach (skutek jak rakieta bossa 1).
+- **Nur**: serpentyna co drugi rząd/kolumnę (losowa orientacja
+  pozioma/pionowa i róg startowy), z pominięciem pola bankomatu (wilkołak je
+  "przeskakuje" - widoczny mały skok w animacji). Cała trasa świeci czerwono
+  3 s przed startem, gaśnie za wilkołakiem w miarę ruchu (0,2 s/pole). Gracz,
+  na którego pole wejdzie, traci 50% WŁASNEGO dorobku (`kickChat.
+  stealMoneyFromUser`, ta sama kwota schodzi też ze wspólnej puli) i zostaje
+  przesunięty na najbliższe wolne pole poza trasą - max raz na jeden Nur.
+- **Płacz**: ciemna nakładka na ekranie ze spadającymi łzami (proste
+  DOM/CSS, `.wilkolak-placz-overlay`/`.wilkolak-lza` w `style.css`) + dźwięk
+  chlipania. Losowy kwadrat 3×3 (bez bankomatu) świeci niebiesko, 15 s na
+  dojście z widocznym odliczaniem; wymagane `ceil(40% graczy w grze)`
+  (minimum 1). Sukces: nikt nie ginie, każdy na kwadracie +25 zł. Porażka:
+  wspólna pula traci 34%, obecni i tak dostają +25 zł, losuje się NOWY
+  kwadrat (do 3 powtórek, potem atak się kończy).
+- **Szał banowy**: rzadki (~10%), wilkołak rzuca słowem "BAN" w losowego
+  żywego gracza (zawsze trafia). Ban na 10 s: ignorowane są wszystkie jego
+  komendy poza ruchem (klik, `ło tego`, `rzut`, `pomoc`...) - bramkowane
+  `boss.isBanned(nick)` (main.js `onKlik`) i `BossWilkolak.onChatMessage`.
+  Ikona 🚫 nad awatarem i w rankingu (ten sam wzorzec co ikona ekwipunku
+  Skorpiona - `wilkolakBan` na wpisie rankingu).
+- **Sterowanie z czatu**: frazy normalizowane istniejącymi `normalizePolish`/
+  `normalizeNick`/`usunTagiEmotek`. `ło tego`/`lo tego` kontruje Szał
+  alkoholowy (tylko w oknie zamachu, tylko gracz na tylnych polach). `rzut`
+  jest już rozpoznawany, ale bez efektu - to komenda FAZY 2 (rzut piwem),
+  którą podepnie ETAP 2.
+- **Testy**: przycisk **🐺 Zresp wilkołaka** (`boss.start(5, { force: true })`)
+  i **🩸 Faza 2 (test)** (ustawia HP wilkołaka na 50, żeby łatwo sprawdzić
+  próg `_wejdzWFaze2` bez przechodzenia całej FAZY 1) obok reszty przycisków
+  testowych w HUD.
+
 ### Szczegóły bossa tieru 1 (Kamil Kovalenko)
 
 - **Trigger**: gdy czat wbije próg klików na kolejny tier i ten boss nie był
@@ -225,8 +295,9 @@ postaci.
   paskiem odliczania 8 s. Każda wiadomość z czatu, w której którykolwiek token
   po oczyszczeniu (`replace(/[^\d-]/g,'')`) zgadza się z wynikiem, to trafienie -
   liczy się pierwsza poprawna odpowiedź. Trafienie zabiera 5 HP (20 trafień =
-  pokonanie), po ~1,2 s pojawia się nowe działanie. Odpowiadający NIE dostaje
-  złotówek ani klików - to czysta minigra, ranking się nie zmienia.
+  pokonanie), po ~1,2 s pojawia się nowe działanie. Odpowiadający dostaje 10 zł
+  (`REWARD_PER_HIT`) - trafia jednocześnie do wspólnej puli i do jego dorobku
+  w rankingu, ale nie liczy się jako "klik" (`countsAsClick=false`).
   Normalnie odpowiadać mogą tylko osoby z Top 10 z przypisanym pracownikiem
   (i tylko jeśli nie są aktualnie omdlone) - ale jeśli w danym momencie nie ma
   ANI JEDNEJ takiej osoby (ranking pusty albo wszyscy uprawnieni omdleli),
@@ -281,7 +352,10 @@ postaci.
   startu bossa, zostaje odpędzona (`despawn()`).
 
 Panel testowy: przycisk **👹 Zresp bossa** obok "Zresp Vanessę" wywołuje
-`boss.start(1, { force: true })` niezależnie od `bossesDefeated`.
+`boss.start(1, { force: true })` niezależnie od `bossesDefeated`. Analogicznie
+**🐺 Zresp wilkołaka** wywołuje `boss.start(5, { force: true })` (patrz sekcja
+"Szczegóły bossa tieru 5" wyżej), a **🩸 Faza 2 (test)** ustawia HP wilkołaka
+na 50.
 
 ## Minigra: Bitwa tłumaczeń
 
@@ -587,6 +661,7 @@ window.__game.kickChat.simulate('Widz1', 'Pozdro dla czatu!'); // dymek wypowied
 
 window.__game.boss.start(1, { force: true });               // natychmiastowe odpalenie bossa (test)
 window.__game.boss.start(4, { force: true });               // to samo dla bossa 4 - Skorpiona (patrz src/boss-skorpion.js)
+window.__game.boss.start(5, { force: true });               // to samo dla bossa 5 - Wilkołaka (patrz src/boss-wilkolak.js)
 window.__game.boss.damage(5);                                // zadanie obrażeń bossowi z pominięciem czatu
 window.__game.boss.faintRandom();                             // natychmiastowy atak na pole (omdlenie stojącego)
 window.__game.boss.rocketStrike();                            // natychmiastowa salwa 10 rakiet

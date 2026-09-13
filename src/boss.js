@@ -11,6 +11,7 @@ import { strumien, losujInt, losujZ } from './rng.js';
 import { BossKowal } from './boss-kowal.js';
 import { BossBlackjack } from './boss-blackjack.js';
 import { BossSkorpion } from './boss-skorpion.js';
+import { BossWilkolak } from './boss-wilkolak.js';
 import { arenaHalf } from './arena.js';
 
 // Architektura gotowa na kolejnych bossow (jeden na kazdy tier bankomatu) -
@@ -46,7 +47,13 @@ export const BOSS_DEFS = [
     hp: 100,
     mechanika: 'skorpion',
   },
-  null, // tier 5 - TODO kolejny boss
+  {
+    tier: 5,
+    name: 'Wilkołak',
+    subtitle: 'OSTATNI BOSS MYŚLIBORZA',
+    hp: 100,
+    mechanika: 'wilkolak',
+  },
 ];
 
 const HP_PER_HIT = 5;
@@ -249,6 +256,9 @@ export class BossManager {
     this.bottleTemplate = null; // bottle.glb (kenney_pirate-kit) - przedmiot "butelka" Skorpiona
     this.potionTemplate = null; // potion.glb (kenney_mini-dungeon) - przedmiot "srodek" Skorpiona
     this.skorpion = null; // instancja BossSkorpion - tylko gdy def.mechanika === 'skorpion' (patrz src/boss-skorpion.js)
+    this.wilkolakTemplate = null; // character-male-a.glb (kenney_mini-arcade) - cialo Wilkolaka
+    this.wilkolakAnimations = [];
+    this.wilkolak = null; // instancja BossWilkolak - tylko gdy def.mechanika === 'wilkolak' (patrz src/boss-wilkolak.js)
 
     this.model = null; // THREE.Group (wozek + postac)
     this.charObj = null; // dziecko-postac, na nim dziala mixer/animacje
@@ -381,7 +391,7 @@ export class BossManager {
   }
 
   async init() {
-    const [chairGltf, charGltf, orcGltf, blackjackGltf, crabGltf, bottleGltf, potionGltf] = await Promise.all([
+    const [chairGltf, charGltf, orcGltf, blackjackGltf, crabGltf, bottleGltf, potionGltf, wilkolakGltf] = await Promise.all([
       loadArcade('wheelchair-deluxe'),
       loadArcade('character-male-f'),
       loadDungeon('character-orc'),
@@ -389,6 +399,7 @@ export class BossManager {
       loadCubePets('animal-crab'),
       loadPirate('bottle'),
       loadDungeon('potion'),
+      loadArcade('character-male-a'),
     ]);
     await this.fx.init();
     this.chairTemplate = chairGltf.scene;
@@ -402,6 +413,8 @@ export class BossManager {
     this.crabAnimations = crabGltf.animations || [];
     this.bottleTemplate = bottleGltf.scene;
     this.potionTemplate = potionGltf.scene;
+    this.wilkolakTemplate = wilkolakGltf.scene;
+    this.wilkolakAnimations = wilkolakGltf.animations || [];
   }
 
   isActive() {
@@ -412,6 +425,12 @@ export class BossManager {
   isFainted(username) {
     if (!username) return false;
     return this.faintedMap.has(normalizeNick(username));
+  }
+
+  /** Czy dany widz jest zbanowany przez Wilkolaka (Szal banowy, tier 5) - patrz main.js onKlik. */
+  isBanned(username) {
+    if (!username || !this.wilkolak) return false;
+    return this.wilkolak.isBanned(username);
   }
 
   // --- DOM overlaye: plakietka z HP, dymek z dzialaniem, letterbox, karta tytulowa ---
@@ -712,6 +731,11 @@ export class BossManager {
         this._log('bad', 'Nie moge wystartowac - model Skorpiona jeszcze sie nie zaladowal');
         return false;
       }
+    } else if (def.mechanika === 'wilkolak') {
+      if (!this.wilkolakTemplate) {
+        this._log('bad', 'Nie moge wystartowac - model Wilkolaka jeszcze sie nie zaladowal');
+        return false;
+      }
     } else if (!this.chairTemplate || !this.charTemplate) {
       this._log('bad', 'Nie moge wystartowac - model bossa jeszcze sie nie zaladowal');
       return false;
@@ -755,6 +779,14 @@ export class BossManager {
       this.model = this.skorpion.build();
       this.mixer = null;
       this._beginCutsceneSkorpion();
+    } else if (def.mechanika === 'wilkolak') {
+      this.kowal = null;
+      this.blackjack = null;
+      this.skorpion = null;
+      this.wilkolak = new BossWilkolak(this);
+      this.model = this.wilkolak.build();
+      this.mixer = null;
+      this._beginCutsceneWilkolak();
     } else {
       this.kowal = null;
       this.blackjack = null;
@@ -965,6 +997,44 @@ export class BossManager {
     this._log('info', 'Skorpion wszedl na arene - start walki');
   }
 
+  /**
+   * Wejscie Wilkolaka (tier 5) - ta sama karta tytulowa/letterbox co reszta
+   * bossow 2-4, BEZ blokady kamery. Wilkolak pojawia sie juz stojacy na polu
+   * startowym (patrz BossWilkolak.beginEntrance), CZAS_WEJSCIA tam jest tylko
+   * timingiem karty tytulowej/letterboxu.
+   */
+  _beginCutsceneWilkolak() {
+    this.state = 'CUTSCENE';
+    this.cutsceneT = 0;
+
+    this.titleNameEl.textContent = `👹 ${this.def.name.toUpperCase()}`;
+    this.titleSubEl.textContent = this.def.subtitle || '';
+    if (this.nameRowEl) this.nameRowEl.textContent = `👹 ${this.def.name}`;
+
+    void this.letterboxTop.offsetWidth;
+    this.letterboxTop.classList.add('show');
+    this.letterboxBottom.classList.add('show');
+    this.titleCardEl.classList.remove('show');
+    void this.titleCardEl.offsetWidth;
+    this.titleCardEl.classList.add('show');
+
+    this.nameplateEl.style.display = 'flex';
+    if (this.overloadWrapEl) this.overloadWrapEl.style.display = 'none';
+    this.hpFillEl.style.width = '100%';
+    this.hpTextEl.textContent = `${this.hp} / ${this.maxHp}`;
+
+    this.wilkolak.beginEntrance();
+  }
+
+  _endCutsceneWilkolak() {
+    this.letterboxTop.classList.remove('show');
+    this.letterboxBottom.classList.remove('show');
+    this.titleCardEl.classList.remove('show');
+
+    this.state = 'FIGHT';
+    this._log('info', 'Wilkolak wszedl na arene - start walki');
+  }
+
   /** Czy boss aktualnie ma pelna kontrole nad kamera (main.js pomija wtedy controls.update()). */
   isCameraLocked() {
     return this._camLockActive;
@@ -1006,6 +1076,11 @@ export class BossManager {
     if (this.def && this.def.mechanika === 'skorpion') {
       this.skorpion.update(delta);
       if (!this.skorpion.fazaWejscia) this._endCutsceneSkorpion();
+      return;
+    }
+    if (this.def && this.def.mechanika === 'wilkolak') {
+      this.wilkolak.update(delta);
+      if (!this.wilkolak.fazaWejscia) this._endCutsceneWilkolak();
       return;
     }
 
@@ -1124,6 +1199,10 @@ export class BossManager {
       this.skorpion.update(delta);
       return;
     }
+    if (this.def && this.def.mechanika === 'wilkolak') {
+      this.wilkolak.update(delta);
+      return;
+    }
 
     // Wstrzas kamery po uderzeniu (dogasa w pierwszych ulamkach sekundy walki)
     if (this._camShakeT > 0) {
@@ -1238,6 +1317,14 @@ export class BossManager {
     // (patrz BossSkorpion), nie przez czat - ruch gracza jest juz obslugiwany
     // osobno w main.js (parseMovementDirection), wiec tu nic nie robimy.
     if (this.def && this.def.mechanika === 'skorpion') {
+      return;
+    }
+
+    // Wilkolak (tier 5): frazy sterujace ("lo tego"/"rzut") ida przez
+    // BossWilkolak.onChatMessage (patrz src/boss-wilkolak.js) - tam tez jest
+    // bramka bana (Szal banowy ignoruje wszystkie jego komendy poza ruchem).
+    if (this.def && this.def.mechanika === 'wilkolak') {
+      if (this.wilkolak) this.wilkolak.onChatMessage(username, content);
       return;
     }
 
@@ -1449,6 +1536,16 @@ export class BossManager {
         `Wszedł na zapadnięte pole areny. Stracił cały dorobek (<strong>${fmtShort(lostAmount)} zł</strong>) i wypadł z rankingu.`,
       );
       this._log('bad', `Skorpion "zabil" @${username} - zapadniete pole - stracil ${lostAmount} zl i wypadl z rankingu`, {
+        ofiara: username,
+        utraconeZl: lostAmount,
+      });
+    } else if (source === 'wilkolak') {
+      showBossNotification(
+        'kill',
+        `💀 WILKOŁAK ROZSZARPAŁ @${username}!`,
+        `Stał na polu zamachu Szału alkoholowego. Stracił cały dorobek (<strong>${fmtShort(lostAmount)} zł</strong>) i wypadł z rankingu.`,
+      );
+      this._log('bad', `Wilkolak "zabil" @${username} - Szal alkoholowy - stracil ${lostAmount} zl i wypadl z rankingu`, {
         ofiara: username,
         utraconeZl: lostAmount,
       });
@@ -1854,6 +1951,21 @@ export class BossManager {
       return;
     }
 
+    if (this.def && this.def.mechanika === 'wilkolak') {
+      // Wilkolak stoi (postac skinowana, nie siedzi w wozku) - standardowy
+      // klip "die" pasuje tu wprost, tak samo jak Kowal/Dzordzo. Pokonanie
+      // przy 0 HP jest na razie zwykla sciezka _onDefeatedBoss (ETAP 2 doda
+      // pelnoekranowy ekran zwyciestwa z Top10, patrz spec-wilkolak.md).
+      if (this.wilkolak) this.wilkolak.playAction('die', { hard: true, once: true });
+      this._victoryT = 0;
+      showBossNotification(
+        'boss',
+        '🏆 WILKOŁAK POKONANY!',
+        'Myślibórz uratowany! Bankomat wraca na nowym tierze.',
+      );
+      return;
+    }
+
     // Boss siedzi w wozku - klip "die" (dla postaci stojacej) wygladal tu zle.
     // Zamiast niego bezwladne osuniecie sie w fotelu na kosciach.
     this.playAction('wheelchair-sit', { hard: true });
@@ -1881,6 +1993,9 @@ export class BossManager {
     }
     if (this.def && this.def.mechanika === 'skorpion' && this.skorpion && this.skorpion.mixer) {
       this.skorpion.mixer.update(delta);
+    }
+    if (this.def && this.def.mechanika === 'wilkolak' && this.wilkolak && this.wilkolak.mixer) {
+      this.wilkolak.mixer.update(delta);
     }
     this._victoryT = (this._victoryT || 0) + delta;
     if (this.model) {
@@ -1932,6 +2047,10 @@ export class BossManager {
     if (this.skorpion) {
       this.skorpion.teardown();
       this.skorpion = null;
+    }
+    if (this.wilkolak) {
+      this.wilkolak.teardown();
+      this.wilkolak = null;
     }
     if (this.bjPanelEl) this.bjPanelEl.classList.remove('show');
     if (this.stealRowEl) this.stealRowEl.style.display = 'none';
@@ -2062,6 +2181,9 @@ export class BossManager {
     if (this.def && this.def.mechanika === 'skorpion' && this.skorpion) {
       stan.skorpion = this.skorpion.getSyncState();
     }
+    if (this.def && this.def.mechanika === 'wilkolak' && this.wilkolak) {
+      stan.wilkolak = this.wilkolak.getSyncState();
+    }
     return stan;
   }
 
@@ -2098,6 +2220,10 @@ export class BossManager {
       }
       if (this.def && this.def.mechanika === 'skorpion') {
         if (this.skorpion && bossState.skorpion) this.skorpion.applySync(bossState.skorpion);
+        return;
+      }
+      if (this.def && this.def.mechanika === 'wilkolak') {
+        if (this.wilkolak && bossState.wilkolak) this.wilkolak.applySync(bossState.wilkolak);
         return;
       }
 
@@ -2139,6 +2265,11 @@ export class BossManager {
     } else if (def.mechanika === 'skorpion') {
       if (!this.crabTemplate) {
         this._log('bad', 'Nie moge dolaczyc do walki (sync) - model Skorpiona jeszcze sie nie zaladowal');
+        return false;
+      }
+    } else if (def.mechanika === 'wilkolak') {
+      if (!this.wilkolakTemplate) {
+        this._log('bad', 'Nie moge dolaczyc do walki (sync) - model Wilkolaka jeszcze sie nie zaladowal');
         return false;
       }
     } else if (!this.chairTemplate || !this.charTemplate) {
@@ -2202,6 +2333,23 @@ export class BossManager {
       this.model = this.skorpion.build();
       this.mixer = null;
       this.skorpion.startFromSync(bossState.skorpion);
+
+      this.state = 'FIGHT';
+      if (this.nameplateEl) this.nameplateEl.style.display = 'flex';
+      if (this.overloadWrapEl) this.overloadWrapEl.style.display = 'none';
+      if (this.hpFillEl) this.hpFillEl.style.width = `${(this.hp / this.maxHp) * 100}%`;
+      if (this.hpTextEl) this.hpTextEl.textContent = `${this.hp} / ${this.maxHp}`;
+      return true;
+    }
+
+    if (def.mechanika === 'wilkolak') {
+      this.kowal = null;
+      this.blackjack = null;
+      this.skorpion = null;
+      this.wilkolak = new BossWilkolak(this);
+      this.model = this.wilkolak.build();
+      this.mixer = null;
+      this.wilkolak.startFromSync(bossState.wilkolak);
 
       this.state = 'FIGHT';
       if (this.nameplateEl) this.nameplateEl.style.display = 'flex';

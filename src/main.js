@@ -775,6 +775,28 @@ async function main() {
     });
   }
 
+  // Test: respi bezposrednio bossa tieru 5 (Wilkolak), niezaleznie od aktualnego
+  // tieru bankomatu - patrz spec-wilkolak.md "przycisk testowy".
+  const spawnWilkolakBtn = document.getElementById('btn-spawn-wilkolak');
+  if (spawnWilkolakBtn) {
+    spawnWilkolakBtn.addEventListener('click', () => {
+      if (!remote.czyAdmin()) return;
+      boss.start(5, { force: true });
+    });
+  }
+
+  // Test: ustaw HP Wilkolaka na 50 (prog Fazy 2 / Przejscia z ETAPU 2) - ulatwia
+  // testowanie punktu zaczepienia _wejdzWFaze2 bez przechodzenia calej Fazy 1.
+  const wilkolakFaza2Btn = document.getElementById('btn-wilkolak-faza2');
+  if (wilkolakFaza2Btn) {
+    wilkolakFaza2Btn.addEventListener('click', () => {
+      if (!remote.czyAdmin()) return;
+      if (boss.state === 'FIGHT' && boss.def && boss.def.mechanika === 'wilkolak' && boss.hp > 50) {
+        boss.damage(boss.hp - 50);
+      }
+    });
+  }
+
   // --- Panel eliminacji widza (właściciel) --------------------------------
   // Skutek identyczny jak trafienie rakietą bossa (patrz boss.killUserManual
   // w boss.js) - wywoływalny NIEZALEŻNIE od tego, czy trwa walka z bossem.
@@ -888,6 +910,9 @@ async function main() {
               // obiekt bez tego pola, wiec dopisujemy je tu (LeaderboardUI
               // czyta je wprost z wpisu rankingu, bez tej lokalnej latki).
               if (user && boss.skorpion) user.przedmiotSkorpion = boss.skorpion.getItemForUsername(user.username);
+              // Ikona bana Wilkolaka (tier 5, patrz src/boss-wilkolak.js) na
+              // plakietce nad postacia - ten sam wzorzec co ikona Skorpiona wyzej.
+              if (user) user.wilkolakBan = boss.isBanned(user.username);
               workerOverlays.updateWorkerUser(slot, user);
               if (user) {
                 await ensureWorkerType(slot, user.skin);
@@ -969,7 +994,9 @@ async function main() {
 
       // Omdlony przez bossa widz nie moze klikac - jego wiadomosc jest w calosci
       // ignorowana (bez kasy, bez licznika klikow, bez wplywu na prog tieru).
-      if (boss.isFainted(nick)) {
+      // Zbanowany przez Wilkolaka (Szal banowy, tier 5) - ta sama zasada,
+      // patrz src/boss-wilkolak.js isBanned (10s, ignorowane komendy poza ruchem).
+      if (boss.isFainted(nick) || boss.isBanned(nick)) {
         return;
       }
 
