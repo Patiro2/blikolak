@@ -616,6 +616,19 @@ async function main() {
     });
   }
 
+  // Natychmiastowe pokonanie aktualnego bossa (dowolny tier). Obrazenia rowne
+  // calemu HP ida zwykla sciezka boss.damage -> _onDefeatedBoss, wiec
+  // animacja smierci, awans tieru i synchronizacja do widzow dzialaja tak
+  // samo jak przy normalnym zwyciestwie. Poza walka (state !== 'FIGHT')
+  // damage() nic nie robi.
+  const instakillBossBtn = document.getElementById('btn-instakill-boss');
+  if (instakillBossBtn) {
+    instakillBossBtn.addEventListener('click', () => {
+      if (!remote.czyAdmin()) return;
+      boss.damage(boss.hp);
+    });
+  }
+
   // --- Panel eliminacji widza (właściciel) --------------------------------
   // Skutek identyczny jak trafienie rakietą bossa (patrz boss.killUserManual
   // w boss.js) - wywoływalny NIEZALEŻNIE od tego, czy trwa walka z bossem.

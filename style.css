@@ -946,7 +946,8 @@ html, body {
 
 /* ===== Boss "Kamil Kovalenko" ===== */
 
-#btn-spawn-boss {
+#btn-spawn-boss,
+#btn-instakill-boss {
   pointer-events: auto;
   background: linear-gradient(135deg, #1a0a24, #3a0f4e);
   border: 1px solid #b23dff;
@@ -970,8 +971,21 @@ html, body {
   transform: scale(1.03);
 }
 
-#btn-spawn-boss:active {
+#btn-spawn-boss:active,
+#btn-instakill-boss:active {
   transform: scale(0.97);
+}
+
+#btn-instakill-boss {
+  background: linear-gradient(135deg, #2a1400, #5a2a00);
+  border-color: #ff9a1f;
+  box-shadow: 0 2px 8px rgba(255, 154, 31, 0.4);
+}
+
+#btn-instakill-boss:hover {
+  background: #ff9a1f;
+  box-shadow: 0 0 14px #ff9a1f;
+  transform: scale(1.03);
 }
 
 /* ===== Panel eliminacji widza (właściciel) ===== */
@@ -1542,6 +1556,7 @@ html, body {
    jest wygoda, a nie zabezpieczeniem. */
 body.tryb-widza #btn-spawn-vanessa,
 body.tryb-widza #btn-spawn-boss,
+body.tryb-widza #btn-instakill-boss,
 body.tryb-widza #eliminacja-wrap,
 body.tryb-widza #reset-btn {
   display: none;
