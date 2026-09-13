@@ -161,6 +161,12 @@ export class KickChatClient {
     this._updateThrottleTimer = null;
     this._lastUpdateEmit = 0;
 
+    // Blokuje emisje onLeaderboardUpdate dopoki konstruktor nie skonczy -
+    // updateAssignments()/eliminateUser() ponizej moga synchronicznie
+    // wywolac _scheduleLeaderboardUpdate(), a wywolujacy jeszcze nie ma
+    // przypisanej zmiennej `const kickChat` (TDZ ReferenceError w main.js).
+    this._wKonstrukcji = true;
+
     this.leaderboard = this._loadLeaderboard();
     this.assignments = this._loadAssignments();
     this.updateAssignments();
@@ -183,6 +189,8 @@ export class KickChatClient {
     ])) {
       if (czyZablokowany(key)) this.eliminateUser(key);
     }
+
+    this._wKonstrukcji = false;
   }
 
   _loadLeaderboard() {
@@ -310,6 +318,7 @@ export class KickChatClient {
    * serii wiadomosci UI zawsze dogonilo ostatni stan.
    */
   _scheduleLeaderboardUpdate() {
+    if (this._wKonstrukcji) return;
     const now = Date.now();
     const elapsed = now - this._lastUpdateEmit;
     if (elapsed >= UPDATE_THROTTLE_MS) {
