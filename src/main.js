@@ -30,7 +30,7 @@ async function main() {
   }
 
   const canvas = document.getElementById('scene');
-  const { renderer, scene, camera, controls } = createScene(canvas);
+  const { renderer, scene, camera, controls, ustawNoc: ustawNocScena } = createScene(canvas);
 
   // Stan gry z serwera (Vercel KV) ma pierwszenstwo przed localStorage.
   // Economy i KickChatClient czytaja localStorage w konstruktorach, wiec
@@ -89,6 +89,42 @@ async function main() {
   // pozostaje bez zmian - miasto tylko dobudowuje otoczenie wokol niej.
   const city = new CityBackground();
   city.build(scene, renderer);
+
+  // Tryb nocy - CZYSTO LOKALNY dla tej karty/przegladarki (localStorage, klucz
+  // ponizej). Celowo NIE idzie przez zbierzStan()/realtime/KV: kazdy widz i
+  // wlasciciel maja wlaczac/wylaczac go u siebie, niezaleznie od reszty
+  // rozgrywki. Zastosowany od razu, PRZED pierwsza klatka (przed animate()
+  // nizej w tym pliku), zeby noc - gdy zapamietana - nie mignela dniem.
+  const NOC_KEY = 'bankomat-clicker-noc';
+  const btnNoc = document.getElementById('btn-noc');
+  let tryNoc = false;
+  try {
+    tryNoc = localStorage.getItem(NOC_KEY) === '1';
+  } catch (err) {
+    // localStorage moze byc niedostepny (np. tryb prywatny) - zostaje dzien
+  }
+  function zastosujTrybNocy(noc) {
+    const kolorMgly = ustawNocScena(noc);
+    city.ustawNoc(noc, kolorMgly);
+    if (btnNoc) {
+      btnNoc.textContent = noc ? '☀️ Dzień' : '🌙 Noc';
+      btnNoc.title = noc
+        ? 'Przelacz na tryb dnia (tylko u Ciebie, w tej przegladarce)'
+        : 'Przelacz tryb nocy (tylko u Ciebie, w tej przegladarce)';
+    }
+  }
+  zastosujTrybNocy(tryNoc);
+  if (btnNoc) {
+    btnNoc.addEventListener('click', () => {
+      tryNoc = !tryNoc;
+      zastosujTrybNocy(tryNoc);
+      try {
+        localStorage.setItem(NOC_KEY, tryNoc ? '1' : '0');
+      } catch (err) {
+        // localStorage moze byc niedostepny - stan przetrwa tylko do przeladowania
+      }
+    });
+  }
 
   const machine = new Machine(scene, camera, renderer.domElement);
   // Polityka uprawnien (kto smie klikac w bankomat myszka) zyje TU, nie w

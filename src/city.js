@@ -462,6 +462,7 @@ export class CityBackground {
   }
 
   build(scene, renderer) {
+    this.scene = scene; // potrzebne w ustawNoc (kolor mgly) po tym, jak build() sie skonczy
     // Kolor mgly = kolor horyzontu kopuly nieba (buildDaySkyDome w scene.js,
     // teraz przygaszony 0xaec4d6, nie 0xdcecf7) - musza sie zgadzac, inaczej
     // widac szew na styku odleglych budynkow i nieba.
@@ -479,6 +480,19 @@ export class CityBackground {
     this._buildForegroundProps(scene, renderer).catch((err) => {
       console.error('[city] Nie udalo sie zbudowac foregroundu (drzewa/budynki):', err);
     });
+  }
+
+  /**
+   * Tryb nocy (guzik HUD, patrz main.js): kolor mgly = horyzont nocnego nieba
+   * (scene.js ustawNoc zwraca ta wartosc), okna budynkow i klosze latarni
+   * dostaja mocniejsza emisje (zapalaja sie), dzien wraca do dotychczasowych
+   * 0.03 / 0.15. Geometria/pozycje/cienie zostaja bez zmian - to tylko
+   * przemalowanie juz istniejacych materialow.
+   */
+  ustawNoc(noc, kolorMgly) {
+    if (this.scene && this.scene.fog) this.scene.fog.color.setHex(kolorMgly);
+    if (this.buildingMesh) this.buildingMesh.material.emissiveIntensity = noc ? 0.6 : 0.03;
+    if (this.streetlampHeadMesh) this.streetlampHeadMesh.material.emissiveIntensity = noc ? 2 : 0.15;
   }
 
   // --- Zielony "apron" - lekko obnizone (o 0.005, zero Z-fightingu z placem)

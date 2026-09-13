@@ -24,22 +24,28 @@ const LOOK_TARGET = new THREE.Vector3(0, 0.65, 0.1);
  * Tanie w wykonaniu: jeden dodatkowy draw call, zero tekstur, prosty
  * MeshBasicMaterial (bez oswietlenia).
  */
-function buildDaySkyDome() {
-  const geo = new THREE.SphereGeometry(90, 24, 16);
-  const mat = new THREE.MeshBasicMaterial({ side: THREE.BackSide, vertexColors: true, fog: false, toneMapped: false });
+// Wydzielone z buildDaySkyDome (nizej), zeby tryb nocy (ustawNoc, patrz
+// createScene) mogl przemalowac te sama kopule na inna pare kolorow bez
+// duplikowania petli po wierzcholkach.
+function paintSkyDomeColors(geo, colorTop, colorHorizon) {
   const pos = geo.attributes.position;
-  const colors = new Float32Array(pos.count * 3);
-  const colorTop = new THREE.Color(0x3f6f9e); // przyciemniony blekit zenitu (toneMapped:false - ekspozycja go nie przygasza)
-  const colorHorizon = new THREE.Color(0xaec4d6); // przygaszony horyzont (lekko pochmurne popoludnie, nie biel)
+  const colorAttr = geo.attributes.color;
   const tmp = new THREE.Color();
   for (let i = 0; i < pos.count; i++) {
     const t = THREE.MathUtils.clamp((pos.getY(i) / 90 + 0.12) / 0.55, 0, 1);
     tmp.copy(colorHorizon).lerp(colorTop, t);
-    colors[i * 3] = tmp.r;
-    colors[i * 3 + 1] = tmp.g;
-    colors[i * 3 + 2] = tmp.b;
+    colorAttr.setXYZ(i, tmp.r, tmp.g, tmp.b);
   }
-  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  colorAttr.needsUpdate = true;
+}
+
+function buildDaySkyDome() {
+  const geo = new THREE.SphereGeometry(90, 24, 16);
+  const mat = new THREE.MeshBasicMaterial({ side: THREE.BackSide, vertexColors: true, fog: false, toneMapped: false });
+  geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(geo.attributes.position.count * 3), 3));
+  const colorTop = new THREE.Color(0x3f6f9e); // przyciemniony blekit zenitu (toneMapped:false - ekspozycja go nie przygasza)
+  const colorHorizon = new THREE.Color(0xaec4d6); // przygaszony horyzont (lekko pochmurne popoludnie, nie biel)
+  paintSkyDomeColors(geo, colorTop, colorHorizon);
   return new THREE.Mesh(geo, mat);
 }
 
@@ -84,7 +90,8 @@ export function createScene(canvas) {
   // (buildDaySkyDome, dodawana ponizej) z jakiegos powodu nie pokryla calego
   // kadru (np. pierwsza klatka przed jej dodaniem do sceny).
   scene.background = new THREE.Color(0xaec4d6); // zgodne z horyzontem kopuly ponizej - bez szwu
-  scene.add(buildDaySkyDome());
+  const skyDome = buildDaySkyDome();
+  scene.add(skyDome);
 
   // Environment map (IBL) - generowana RAZ, przy starcie (PMREMGenerator,
   // jednorazowy koszt rzedu ~20ms, zmierzone; zero kosztu per-klatke pozniej).
@@ -255,7 +262,53 @@ export function createScene(canvas) {
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
-  return { renderer, scene, camera, controls, spot, neon };
+  // Tryb nocy (guzik HUD, patrz main.js) - jedna funkcja przelacza CALY dzienny
+  // rig powyzej na chlodny, ksiezycowy odpowiednik: kazdy klucz w NIGHT ma
+  // dokladnie jeden odpowiednik w DAY, wiec wartosci dzienne (uzyte przy
+  // budowie sceny powyzej) i nocne zyja w jednym miejscu, zamiast osobnej
+  // galezi if/else przy kazdym swietle. Cienie (mapSize/bias/pozycje) NIE sa tu
+  // ruszane - tylko kolor/intensywnosc/ekspozycja/tlo.
+  const DAY = {
+    exposure: 0.7, envIntensity: 0.18, background: 0xaec4d6,
+    skyTop: 0x3f6f9e, skyHorizon: 0xaec4d6,
+    hemiSky: 0xbfe0ff, hemiGround: 0x8a7256, hemiIntensity: 0.35,
+    dirColor: 0xfff2d9, dirIntensity: 0.65,
+    dirWideColor: 0xfff2d9, dirWideIntensity: 1.2,
+    spotColor: 0xffd9a0, spotIntensity: 0.6,
+    neonIntensity: 0.5,
+  };
+  const NIGHT = {
+    // Ksiezyc zamiast slonca: chlodny, przygaszony rig (dir/dirWide zostaja
+    // GLOWNYM zrodlem cieni - tylko sa duzo slabsze i zimniejsze). Bankomat
+    // (spot) i neon Kicka staja sie glownymi, cieplymi akcentami sceny.
+    exposure: 0.55, envIntensity: 0.08, background: 0x18283c,
+    skyTop: 0x0a1220, skyHorizon: 0x18283c,
+    hemiSky: 0x2a3d5c, hemiGround: 0x120e0a, hemiIntensity: 0.18,
+    dirColor: 0xaac8ff, dirIntensity: 0.22,
+    dirWideColor: 0xaac8ff, dirWideIntensity: 0.4,
+    spotColor: 0xffb066, spotIntensity: 2.4,
+    neonIntensity: 1.6,
+  };
+  function ustawNoc(noc) {
+    const cfg = noc ? NIGHT : DAY;
+    renderer.toneMappingExposure = cfg.exposure;
+    scene.environmentIntensity = cfg.envIntensity;
+    scene.background.setHex(cfg.background);
+    paintSkyDomeColors(skyDome.geometry, new THREE.Color(cfg.skyTop), new THREE.Color(cfg.skyHorizon));
+    hemi.color.setHex(cfg.hemiSky);
+    hemi.groundColor.setHex(cfg.hemiGround);
+    hemi.intensity = cfg.hemiIntensity;
+    dir.color.setHex(cfg.dirColor);
+    dir.intensity = cfg.dirIntensity;
+    dirWide.color.setHex(cfg.dirWideColor);
+    dirWide.intensity = cfg.dirWideIntensity;
+    spot.color.setHex(cfg.spotColor);
+    spot.intensity = cfg.spotIntensity;
+    neon.intensity = cfg.neonIntensity;
+    return cfg.skyHorizon; // main.js przekazuje to jako kolor mgly do city.ustawNoc - bez szwu miedzy niebem a miastem
+  }
+
+  return { renderer, scene, camera, controls, spot, neon, ustawNoc };
 }
 
 /** Zwraca pierwszy THREE.Mesh znaleziony w scenie GLTF (fence.glb ma dokladnie jeden). */
