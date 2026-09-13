@@ -5,8 +5,7 @@ import { showBossNotification } from './ui.js';
 import { audio } from './audio.js';
 
 // Mechanika drugiego bossa (tier 2 bankomatu) - Kowal_88. Trzymana w OSOBNYM
-// pliku (patrz CLAUDE.md w bankomat-clicker/ - architektura zadania), zeby nie
-// dotykac zweryfikowanej logiki bossa 1 w boss.js. BossManager tworzy instancje
+// pliku, zeby nie dotykac zweryfikowanej logiki bossa 1 w boss.js. BossManager tworzy instancje
 // tej klasy w start() (gdy def.mechanika === 'kowal') i deleguje do niej start
 // walki, update() w stanie FIGHT, onChatMessage, sprzatanie i sync - HP, FSM
 // (IDLE/CUTSCENE/FIGHT/VICTORY), nakladki DOM i kamera zostaja w BossManager.

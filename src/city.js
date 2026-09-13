@@ -38,9 +38,7 @@ const PLAZA_HEIGHT = PLAZA_TOP_Y - CITY_GROUND_Y;
 // WYSOKIE elementy (drzewa/budynki) MUSZA staC poza tym promieniem, inaczej w
 // jakims kacie kamery znajda sie miedzy kamera a arena i zaslonia rozgrywke.
 const FOREGROUND_APRON_HALF = 19.3; // polowa boku zielonego "trawnika" rozszerzajacego plac
-const FOREGROUND_LOW_MIN = 6.7; // tuz za krawedzia oryginalnego placu (6.5) - nizej niz wysokosc kamery, bezpieczne przy kazdym maxDistance
 const FOREGROUND_LOW_MAX = 8.6; // niska zielen - bezpieczna wszedzie
-const FOREGROUND_TALL_MIN = 18.2; // margines bezpieczenstwa ponad teoretyczne 17.66
 const FOREGROUND_TALL_MAX = 19.1; // w granicach apronu (19.3)
 const FOREGROUND_SLOTS = 26; // rozstaw katowy - "skomponowane" sloty, nie czysty losowy rozrzut
 

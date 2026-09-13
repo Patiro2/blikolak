@@ -743,7 +743,7 @@ async function main() {
   }
 
   const kickUI = new KickUI();
-  const kickEmbedUI = new KickEmbedUI();
+  new KickEmbedUI();
   const leaderboardUI = new LeaderboardUI();
   const workerOverlays = new WorkerOverlayManager();
   let ui;

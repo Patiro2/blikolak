@@ -333,9 +333,8 @@ const KICK_EMBED_SRC = 'https://kick.com/popout/patiro/chat';
  * Wczesniej ta klasa obslugiwala caly osadzony panel z iframe (leniwe
  * ladowanie, zwijanie, przeciaganie) - wlasciciel uznal ramke za zbedna i
  * zostal tylko link/guzik w #hud (patrz index.html, #kick-chat-btn). Nazwa
- * klasy zostaje bez zmian, bo main.js (edytowany rownolegle przez inny
- * proces pracy) importuje ja jako KickEmbedUI i wola bezargumentowy
- * konstruktor - zmiana nazwy oznaczalaby konflikt z ta praca.
+ * klasy zostaje bez zmian, bo main.js importuje ja jako KickEmbedUI i wola
+ * bezargumentowy konstruktor.
  *
  * Element w HTML to <a href="..." target="kick-czat-patiro">, wiec dziala
  * sam z siebie (bez JS) i nazwane okno docelowe sprawia, ze kolejne

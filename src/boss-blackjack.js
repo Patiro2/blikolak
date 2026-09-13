@@ -5,8 +5,8 @@ import { showBossNotification } from './ui.js';
 import { audio } from './audio.js';
 
 // Mechanika trzeciego bossa (tier 3 bankomatu) - Dzordzo, "KROL BLACKJACKA".
-// Trzymana w OSOBNYM pliku (patrz CLAUDE.md w bankomat-clicker/ i wzorzec
-// src/boss-kowal.js), zeby nie dotykac zweryfikowanej logiki bossow 1 i 2.
+// Trzymana w OSOBNYM pliku (wzorzec src/boss-kowal.js), zeby nie dotykac
+// zweryfikowanej logiki bossow 1 i 2.
 // BossManager tworzy instancje tej klasy w start() (gdy def.mechanika ===
 // 'blackjack') i deleguje do niej: start walki, update() w CUTSCENE/FIGHT,
 // onChatMessage NIE jest uzywany tutaj (decyzje graczy ida przez POZYCJE

@@ -9,7 +9,7 @@
 // z instrukcja, gdzie go wkleic.
 //
 // Plik zaladowany osobnym <script type="module"> w index.html, celowo BEZ
-// importu w main.js (rownolegle edytowanym przez inny proces pracy).
+// importu w main.js.
 
 // Tresc skryptu jest wlasnoscia uzytkownika - zapisana znak w znak. Zeby
 // miec pewnosc identycznosci (skrypt zawiera template literaty z backtickami

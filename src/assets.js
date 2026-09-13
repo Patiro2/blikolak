@@ -21,14 +21,6 @@ export function setTextureQuality(renderer) {
 }
 const cache = new Map(); // path -> Promise<GLTF>
 
-export const CHARACTER_KEYS = [
-  'character-male-a', 'character-male-b', 'character-male-c',
-  'character-male-d', 'character-male-e', 'character-male-f',
-  'character-female-a', 'character-female-b', 'character-female-c',
-  'character-female-d', 'character-female-e', 'character-female-f',
-  'character-employee',
-];
-
 export const MACHINE_KEYS = [
   'gambling-machine', 'vending-machine', 'ticket-machine',
   'arcade-machine', 'claw-machine', 'dance-machine',
@@ -207,7 +199,3 @@ export async function preloadAll() {
   await loadDungeon('coin');
 }
 
-export function getCachedArcadeScene(name) {
-  const p = cache.get(`${ARCADE_PATH}${name}.glb`);
-  return p;
-}

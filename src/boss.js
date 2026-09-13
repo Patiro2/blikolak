@@ -119,10 +119,6 @@ const _osX = new THREE.Vector3(1, 0, 0);
 const _qRodzica = new THREE.Quaternion();
 const _qCel = new THREE.Quaternion();
 
-function randInt(min, max) {
-  return Math.floor(min + Math.random() * (max - min + 1));
-}
-
 function pick(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
 }

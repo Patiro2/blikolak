@@ -1,8 +1,6 @@
 // Samouczek dla nowych widzow strumienia. Modul samowystarczalny: sam buduje
-// swoj DOM, sam czyta/pisze localStorage, nie dotyka main.js ani style.css,
-// bo rownolegle inny agent pracuje nad boss.js/main.js/style.css i nie wolno
-// mi z nim kolidowac. Tutorial nie czyta stanu gry, wiec nie ma powodu, zeby
-// byl z nia spleciony.
+// swoj DOM, sam czyta/pisze localStorage, nie dotyka main.js ani style.css.
+// Tutorial nie czyta stanu gry, wiec nie ma powodu, zeby byl z nia spleciony.
 
 const STORAGE_KEY = 'bankomat-clicker-tutorial-widziany';
 

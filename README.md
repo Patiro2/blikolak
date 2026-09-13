@@ -33,10 +33,11 @@ Port można podać jako argument: `python serve.py 8080`.
   przez tę samą funkcję `obsluzAwansTieru()` w `main.js`, więc tak samo odpalają
   banery i walki z bossem. Uwaga: streamer może więc sam wyklikać awans i
   wywołać bossa bez udziału czatu.
-- **Złotówki wyłącznie z kliknięć** — w grze NIE MA żadnego dochodu
-  pasywnego. Bankomat sam z siebie nie produkuje nic; pula rośnie tylko
+- **Złotówki wyłącznie z kliknięć** — bankomat sam z siebie NIE MA żadnego
+  dochodu pasywnego, nic nie produkuje samoistnie; pula rośnie tylko
   wtedy, gdy ktoś naprawdę kliknie (komenda `klik` na czacie albo kliknięcie
-  streamera w model).
+  streamera w model). Jedyny wyjątek to nagroda za wygraną minigrę (bitwa o
+  flagi / bitwa tłumaczeń) — zwycięzca dostaje 2 zł/s przez 30 sekund.
 - **Pracownicy = awatary Top 10** — każdemu z 10 widzów w rankingu Top 10
   przypisany jest jeden z 10 modeli postaci w scenie. Awatar odgrywa animację
   uderzenia w bankomat dokładnie wtedy, gdy jego widz napisze `klik` — nigdy
@@ -97,6 +98,16 @@ Stan zapisuje się sam do `localStorage` co 5 s i przy zamykaniu karty.
 | `src/city.js` | proceduralne miasto w tle areny (budynki, ulice, jeżdżące samochody) |
 | `src/audio.js` | dźwięki gry - `AudioManager` na Web Audio API, mapa zdarzeń `SOUND_MAP`, limitowanie głosów, wyciszenie/głośność (patrz sekcja "Dźwięki" niżej) |
 | `src/realtime.js` | klient WebSocket przekaźnika - stała `URL_RELAYA`, auto-reconnect, cichy fallback (patrz "Synchronizacja w czasie rzeczywistym") |
+| `src/remote.js` | klient stanu zdalnego (Vercel KV) - logowanie admina, odczyt/zapis stanu, tryb offline lokalny |
+| `src/boss-kowal.js` | mechanika bossa tieru 2 "Kowal_88" - osobny plik, patrz sekcja "Boss" niżej |
+| `src/boss-blackjack.js` | mechanika bossa tieru 3 "Dżordżo" (blackjack) - osobny plik, patrz sekcja "Boss" niżej |
+| `src/flagbattle.js` | minigra "Bitwa o flagi" - losowanie kraju, dopasowanie odpowiedzi z czatu, korzysta z `countries.js` i `bojka.js` |
+| `src/countries.js` | słownictwo minigry "Bitwa o flagi" - lista krajów, kody ISO, akceptowane warianty nazw |
+| `src/bojka.js` | wspólna, czysto kosmetyczna animacja "bijatyki" (ciosy, kurz) używana przez obie minigry siatki (`flagbattle.js`, `tlumaczenia.js`) |
+| `src/gameover.js` | nakładka "game over" po przegranej rundzie blackjacka z bossem 3 |
+| `src/tutorial.js` | samouczek dla nowych widzów streama - samowystarczalny moduł, własny DOM i `localStorage` |
+| `src/wasd-guzik.js` | przycisk kopiujący do schowka gotowy skrypt WASD→czat (do wklejenia w konsoli okna czatu Kicka) |
+| `src/rng.js` | deterministyczny PRNG (`mulberry32`) dzielony przez wszystkie karty gry - patrz "Determinizm ze wspólnego ziarna" |
 | `server/server.js` | samodzielny serwer-przekaźnik (Node + `ws`) - NIE symuluje gry, tylko rozgłasza stan hosta widzom; własne `server/README.md` |
 
 Assety są skopiowane do `assets/arcade/` i `assets/dungeon/` — **osobno**, bo
@@ -120,14 +131,32 @@ Gra łączy się na żywo z czatem kanału **patiro** na Kick.com przez WebSocke
   - **Przegonienie**: kliknięcie na jej model/plakietkę (przez gracza) albo wpisanie jej sekretnego hasła na czacie (przez widza) każe jej uciekać w panice sprintem. W obu przypadkach do gry wraca **`max(10, połowa ukradzionej kwoty)` zł** - czyli zawsze co najmniej 10 zł, a jeśli połowa łupu przekracza 10 zł, wraca dokładnie połowa; reszta przepada bezpowrotnie razem z nią, więc nic nie jest dodrukowywane. Gdy przegania ją gracz (streamer), odzyskana kwota trafia do WSPÓLNEJ PULI CZATU; gdy przegania ją widz hasłem, odzyskana kwota trafia na jego konto w rankingu (jako odzyskana kwota, nie świeży zarobek).
   - Jeśli Vanessa nie zostanie przepędzona w porę, ucieka z całym łupem - ofiara traci go bezpowrotnie.
 
-## Boss: Kamil Kovalenko
+## Boss
 
-Przy KAŻDYM awansie tieru bankomatu wyskakuje boss - na razie zaimplementowany
-tylko pierwszy (`src/boss.js`, tablica `BOSS_DEFS` indeksowana numerem tieru,
-wypełniony tylko indeks 1 - kolejni bossowie to `null`, czyli awans na te
-tiery przebiega po staremu, bez walki). Boss to `wheelchair-deluxe` (Kenney
-mini-characters) + `character-male-f`, złożone w jedną grupę i wyskalowane
-×3 względem zwykłych postaci.
+Przy KAŻDYM awansie tieru bankomatu wyskakuje boss - `src/boss.js`, tablica
+`BOSS_DEFS` indeksowana numerem tieru, wypełnione indeksy 1-3 (tiery 4 i 5 to
+na razie `null`, czyli awans na te tiery przebiega po staremu, bez walki).
+Każdy boss ma własną mechanikę w osobnym pliku:
+
+- **Tier 1 - Kamil Kovalenko** (`src/boss.js`) - opisany szczegółowo niżej:
+  cutscenka, walka na działania matematyczne z czatu, ostrzał rakietowy i
+  ataki omdlające na pola siatki.
+- **Tier 2 - Kowal_88** (`src/boss-kowal.js`, mechanika `'kowal'`) - "przeciążony
+  kowal z huty" chodzi po siatce areny i okrąża bankomat; każda wiadomość na
+  czacie podbija pasek przeciążenia (opada sam, gdy czat milczy). Gdy pasek
+  jest pełny w chwili wejścia w fazę okrążania, boss traci HP, a każdy gracz
+  stojący wtedy na oznaczonym (niebieskim) polu dostaje nagrodę pieniężną.
+- **Tier 3 - Dżordżo, "KRÓL BLACKJACKA"** (`src/boss-blackjack.js`, mechanika
+  `'blackjack'`) - gracze stojący na wyznaczonych polach siatki grają z bossem
+  w blackjacka (decyzje DOBIERZ/PASUJ liczą się z pozycji na siatce, nie z
+  czatu); wygrana rozdania zadaje bossowi obrażenia, przegrana kosztuje
+  uczestnika część wspólnej puli wyłożonej jako "wpisowe" na czas walki.
+
+Boss tieru 1 to `wheelchair-deluxe` (Kenney mini-characters) +
+`character-male-f`, złożone w jedną grupę i wyskalowane ×3 względem zwykłych
+postaci.
+
+### Szczegóły bossa tieru 1 (Kamil Kovalenko)
 
 - **Trigger**: gdy czat wbije próg klików na kolejny tier i ten boss nie był
   jeszcze pokonany, zamiast natychmiastowego awansu odpala się `boss.start(tier)`.
@@ -309,7 +338,7 @@ widza. Kliknięcia streamera nie mają za sobą żadnej wiadomości czatu i tylk
 naprawdę wymagają rozesłania.
 
 Serwer **nie symuluje gry** - tylko przekazuje ramki i trzyma ostatni snapshot.
-Dzięki temu jest mały (~270 linii), nie duplikuje logiki i nie wymaga
+Dzięki temu jest mały (~300 linii), nie duplikuje logiki i nie wymaga
 przepisywania gry. Szczegóły uruchomienia i wdrożenia: `server/README.md`.
 
 - Rola `host` wymaga `HOST_TOKEN`; przy pustym tokenie rola jest **całkowicie
@@ -317,10 +346,10 @@ przepisywania gry. Szczegóły uruchomienia i wdrożenia: `server/README.md`.
 - Widz nie może niczego wstrzyknąć - ramki od widzów są ignorowane na wejściu.
 - Ostatni snapshot ląduje na dysku (`ostatni-stan.json`) i wraca po restarcie
   serwera, także po twardym ubiciu procesu.
-- Adres serwera to jedna stała `URL_RELAYA` na górze `src/realtime.js`.
-  **Pusty string całkowicie wyłącza tę warstwę** - gra działa wtedy dokładnie
-  jak wcześniej, bez żadnych błędów w konsoli (tak jest domyślnie i tak działa
-  lokalny `python serve.py`).
+- Adres serwera to jedna stała `URL_RELAYA` na górze `src/realtime.js`,
+  domyślnie ustawiona na `wss://bankomat-relay.onrender.com`. **Pusty string
+  całkowicie wyłącza tę warstwę** - gra działa wtedy dokładnie jak wcześniej,
+  bez żadnych błędów w konsoli.
 - Gdy relay działa, karty widzów **przestają odpytywać `/api/state`**; gdy
   padnie, odpytywanie wraca samo jako zapasowe. Zapis do KV co 5 s zostaje -
   to trwała pamięć i bootstrap, gdy przekaźnik jest pusty po restarcie.
