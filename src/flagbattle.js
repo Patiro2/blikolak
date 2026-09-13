@@ -214,10 +214,17 @@ function zaladujTeksturaFlagi(kod, renderer) {
 
 /**
  * Rysuje kilka wierszy tekstu na canvasie i zwraca CanvasTexture - uzywane do
- * komunikatu "czas minal" w miejscu flagi (patrz _pokazOdslonietaFlage).
- * W odroznieniu od zaladujTeksturaFlagi NIE cache'ujemy wyniku po kluczu -
- * to rzadkie zdarzenie (raz na uplyw limitu czasu flagi), rysowanie canvasu
- * tej wielkosci jest tanie.
+ * komunikatu "czas minal" w miejscu flagi (patrz _pokazOdslonietaFlage) oraz
+ * do kartki ze zwyciezca bitwy (patrz _pokazZwyciezce). W odroznieniu od
+ * zaladujTeksturaFlagi NIE cache'ujemy wyniku po kluczu - to rzadkie
+ * zdarzenie, rysowanie canvasu tej wielkosci jest tanie.
+ *
+ * Dopasowanie fontu: nick zwyciezcy w drugiej linii bywa dlugi i moglby
+ * wyjsc poza kartke - kazda linia dostaje WLASNY rozmiar fontu, zmierzony
+ * przez ctx.measureText i zmniejszany o 2px, dopoki tekst nie zmiesci sie w
+ * szerokosci kartki (z marginesem 20px z kazdej strony) albo nie osiagnie
+ * minimalnego czytelnego rozmiaru (18px) - ponizej tego progu wolimy tekst
+ * i tak lekko przycięty przez przegladarke niz nieczytelna miniature.
  */
 function renderujTekstNaCanvasie(linie) {
   const canvas = document.createElement('canvas');
@@ -227,12 +234,21 @@ function renderujTekstNaCanvasie(linie) {
   ctx.fillStyle = 'rgba(20, 20, 20, 0.85)';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.fillStyle = '#ffd700';
-  ctx.font = 'bold 40px sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   const odstep = 52;
+  const maxSzerokosc = canvas.width - 40;
+  const minRozmiarFontu = 18;
   const startY = canvas.height / 2 - ((linie.length - 1) * odstep) / 2;
-  linie.forEach((linia, i) => ctx.fillText(linia, canvas.width / 2, startY + i * odstep));
+  linie.forEach((linia, i) => {
+    let rozmiarFontu = 40;
+    ctx.font = `bold ${rozmiarFontu}px sans-serif`;
+    while (rozmiarFontu > minRozmiarFontu && ctx.measureText(linia).width > maxSzerokosc) {
+      rozmiarFontu -= 2;
+      ctx.font = `bold ${rozmiarFontu}px sans-serif`;
+    }
+    ctx.fillText(linia, canvas.width / 2, startY + i * odstep);
+  });
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
@@ -343,6 +359,11 @@ export class FlagBattleManager {
     this.revealSprite.position.y = 3.0;
     this.revealSprite.visible = false;
     this.scene.add(this.revealSprite);
+
+    // Tekstura kartki ze zwyciezca (patrz _pokazZwyciezce) - jednorazowa,
+    // NIE cache'owana po kluczu (nick jest unikalny per bitwa), wiec trzeba
+    // ja jawnie dispose'owac przy kazdej podmianie/sprzataniu (patrz reset()).
+    this._winnerTexture = null;
 
     this._flagReqId = 0; // chroni przed wyscigiem, gdy runda zmieni sie zanim async rasteryzacja skonczy
     this.isHost = false; // wlasciwa wartosc przychodzi z setContext/setHost - patrz nizej
@@ -820,6 +841,29 @@ export class FlagBattleManager {
   }
 
   /**
+   * Podmienia teksture GLOWNEJ kartki (flagSprite/flagMaterial) na kartke ze
+   * zwyciezca bitwy - kartka zostaje widoczna przez caly stan REWARD (w
+   * odroznieniu od dawnego zachowania, gdzie po prostu znikala), dzieki czemu
+   * zwyciezca jest widoczny dokladnie tam, gdzie w trakcie gry pokazywala sie
+   * flaga (ten sam sprawdzony pas kadru kamery). Wolane zarowno przez hosta
+   * (endBattle) jak i widza (applySync, strażnik wejscia w REWARD) - stad
+   * wspolna metoda, jak _stosujTeksturaFlagi/_pokazOdslonietaFlage.
+   *
+   * revealSprite chowamy jawnie - w BATTLE moze byc akurat widoczny
+   * ("czas minal" po ostatniej fladze przed zwycieska odpowiedzia), a obie
+   * kartki nie moga nachodzic sie na siebie.
+   */
+  _pokazZwyciezce(winnerPlayer) {
+    this._flagReqId += 1; // spozniona tekstura flagi nie nadpisze kartki zwyciezcy
+    if (this._winnerTexture) this._winnerTexture.dispose();
+    this._winnerTexture = renderujTekstNaCanvasie(['🎉 WYGRYWA', winnerPlayer.username]);
+    this.flagMaterial.map = this._winnerTexture;
+    this.flagMaterial.needsUpdate = true;
+    this.flagSprite.visible = true;
+    this._ukryjOdslonietaFlage();
+  }
+
+  /**
    * Wolane WYLACZNIE przez hosta z tick() (patrz LIMIT_CZASU_FLAGI_S), gdy
    * biezaca flaga nie zostala odgadnieta w limicie czasu. Blokuje spoznione
    * trafienie (currentFlag = null - onChatMessage juz nic z tym nie zrobi),
@@ -899,10 +943,12 @@ export class FlagBattleManager {
     this.rewardTimer = 0;
     this._lastRewardTime = 0;
     this.winner = winnerPlayer;
-    this.flagSprite.visible = false;
     this.odslonietaFlaga = null;
     this._loadedOdsloniecie = null;
-    this._ukryjOdslonietaFlage();
+    // Kartka flagi zostaje na scenie, ale z podmieniona tekstura zwyciezcy
+    // (patrz _pokazZwyciezce) - zadanie: zwyciezca ma byc widoczny w tym
+    // samym miejscu co flaga w trakcie gry, nie chowany.
+    this._pokazZwyciezce(winnerPlayer);
     // Gwiazdka za wygrana minigre (ranking + plakietka) - patrz kick.js.
     if (this.kickChat) this.kickChat.zapiszWygranaMinigry(winnerPlayer.username);
 
@@ -1098,6 +1144,14 @@ export class FlagBattleManager {
     // powtorzyl sie miedzy dwiema roznymi bitwami.
     this.highlightMesh.visible = false;
     this.flagSprite.visible = false;
+    // Kartka ze zwyciezca (patrz _pokazZwyciezce) znika razem z reszta
+    // planszy - tekstura jest jednorazowa (NIE z cacheTeksturFlag), wiec
+    // dispose'ujemy ja tutaj; sam flagMaterial zostaje (wspoldzielony,
+    // kolejna bitwa nadpisze jego .map nowa flaga/kartka).
+    if (this._winnerTexture) {
+      this._winnerTexture.dispose();
+      this._winnerTexture = null;
+    }
     // Przywracamy pelna jaskrawosc znacznika - koncowka REWARD moglo ja
     // zgasic do 0 (patrz tick), inaczej NASTEPNA bitwa zaczelaby sie od
     // niewidocznego/przygaszonego pola.
@@ -1196,7 +1250,17 @@ export class FlagBattleManager {
       this.highlightMesh.visible = true;
     }
 
-    if (this.state === 'BATTLE' && this.odslonietaFlaga) {
+    // Kartka ze zwyciezca (patrz _pokazZwyciezce) - pokazujemy ja WYLACZNIE w
+    // momencie WEJSCIA w REWARD (prevState !== 'REWARD'), nie przy kazdym
+    // snapshocie (applySync leci co ok. 2s przez cala nagrode - powtorne
+    // wywolanie zdejmowaloby stara teksture i rysowalo identyczna nowa, bez
+    // sensu). U widza, ktory dolaczyl juz W TRAKCIE REWARD, ten strażnik i
+    // tak zadziala raz - przy pierwszym snapshocie, ktory go zastaje w REWARD.
+    if (this.state === 'REWARD') {
+      if (prevState !== 'REWARD' && this.winner) {
+        this._pokazZwyciezce(this.winner);
+      }
+    } else if (this.state === 'BATTLE' && this.odslonietaFlaga) {
       // Timeout pojedynczej flagi (patrz LIMIT_CZASU_FLAGI_S) - host juz
       // policzyl to sam, widz tylko odtwarza gotowa decyzje z tego snapshotu.
       this.flagSprite.visible = false;
@@ -1212,8 +1276,9 @@ export class FlagBattleManager {
         this._stosujTeksturaFlagi(this.currentFlag);
       }
     } else {
-      // WAITING (jeszcze bez flagi), REWARD (flaga juz schowana u hosta) albo
-      // krotka przerwa miedzy odslonieciem a kolejna flaga.
+      // WAITING (jeszcze bez flagi) albo krotka przerwa miedzy odslonieciem a
+      // kolejna flaga. REWARD jest juz obsluzony osobno wyzej (kartka
+      // zwyciezcy zostaje widoczna, nie chowana tutaj).
       this.flagSprite.visible = false;
       this._loadedOdsloniecie = null;
       this._ukryjOdslonietaFlage();

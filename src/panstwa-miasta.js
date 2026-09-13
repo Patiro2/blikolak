@@ -142,6 +142,54 @@ function zaladujTeksturaLitery(litera, renderer) {
   return texture;
 }
 
+/**
+ * Rysuje kilka wierszy tekstu na canvasie karty litery (SZEROKOSC_KARTY x
+ * WYSOKOSC_KARTY) i zwraca CanvasTexture - uzywane do kartki ze zwyciezca
+ * bitwy (patrz _pokazZwyciezce nizej). Lokalny odpowiednik
+ * renderujTekstNaCanvasie z flagbattle.js - zgodnie z konwencja tego
+ * projektu duplikujemy wzorzec zamiast wyciagac go do wspolnego modulu
+ * (patrz obszerny komentarz na gorze tlumaczenia.js). NIE cache'owane po
+ * kluczu - nick zwyciezcy jest jednorazowy.
+ *
+ * Dopasowanie fontu: kazda linia dostaje WLASNY rozmiar, zmierzony przez
+ * ctx.measureText i zmniejszany o 2px, dopoki nie zmiesci sie w szerokosci
+ * karty (margines 20px z kazdej strony) albo nie osiagnie minimalnego
+ * czytelnego rozmiaru (16px) - identyczny wzorzec co w flagbattle.js.
+ */
+function renderujTekstNaCanvasie(linie) {
+  const canvas = document.createElement('canvas');
+  canvas.width = SZEROKOSC_KARTY;
+  canvas.height = WYSOKOSC_KARTY;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#2b1500';
+  ctx.fillRect(0, 0, SZEROKOSC_KARTY, WYSOKOSC_KARTY);
+  ctx.strokeStyle = '#ffbf5c';
+  ctx.lineWidth = 14;
+  ctx.strokeRect(7, 7, SZEROKOSC_KARTY - 14, WYSOKOSC_KARTY - 14);
+
+  ctx.fillStyle = '#ffd700';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const odstep = 40;
+  const maxSzerokosc = SZEROKOSC_KARTY - 40;
+  const minRozmiarFontu = 16;
+  const startY = WYSOKOSC_KARTY / 2 - ((linie.length - 1) * odstep) / 2;
+  linie.forEach((linia, i) => {
+    let rozmiarFontu = 32;
+    ctx.font = `bold ${rozmiarFontu}px sans-serif`;
+    while (rozmiarFontu > minRozmiarFontu && ctx.measureText(linia).width > maxSzerokosc) {
+      rozmiarFontu -= 2;
+      ctx.font = `bold ${rozmiarFontu}px sans-serif`;
+    }
+    ctx.fillText(linia, SZEROKOSC_KARTY / 2, startY + i * odstep);
+  });
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.needsUpdate = true;
+  return texture;
+}
+
 export class PanstwaMiastaManager {
   constructor(scene, renderer) {
     this.scene = scene;
@@ -229,6 +277,11 @@ export class PanstwaMiastaManager {
     // po jej koncu (patrz _zapewnijRubryki/_usunRubryki/_aktualizujRubryki
     // nizej) - identyczny wzorzec cyklu zycia co plotki (this.plotki wyzej).
     this.rubrykaSprites = [];
+
+    // Tekstura kartki ze zwyciezca (patrz _pokazZwyciezce) - jednorazowa, NIE
+    // cache'owana (nick jest unikalny per bitwa) - patrz identyczny
+    // komentarz w flagbattle.js przy tym samym polu.
+    this._winnerTexture = null;
 
     this.isHost = false;
 
@@ -568,6 +621,21 @@ export class PanstwaMiastaManager {
     this.nextRound();
   }
 
+  /**
+   * Podmienia teksture GLOWNEJ kartki (letterSprite/letterMaterial) na kartke
+   * ze zwyciezca bitwy - kartka zostaje widoczna przez caly stan REWARD, w
+   * tym samym miejscu co karta litery w trakcie gry (patrz identyczne
+   * uzasadnienie w flagbattle.js/_pokazZwyciezce). Wolane zarowno przez
+   * hosta (endBattle) jak i widza (applySync, strażnik wejscia w REWARD).
+   */
+  _pokazZwyciezce(winnerPlayer) {
+    if (this._winnerTexture) this._winnerTexture.dispose();
+    this._winnerTexture = renderujTekstNaCanvasie(['🎉 WYGRYWA', winnerPlayer.username]);
+    this.letterMaterial.map = this._winnerTexture;
+    this.letterMaterial.needsUpdate = true;
+    this.letterSprite.visible = true;
+  }
+
   onChatMessage(username, content) {
     if (!this.isHost) return;
     if (this.state !== 'BATTLE' || !this.litera) return;
@@ -616,7 +684,10 @@ export class PanstwaMiastaManager {
     this.rewardTimer = 0;
     this._lastRewardTime = 0;
     this.winner = winnerPlayer;
-    this.letterSprite.visible = false;
+    // Kartka litery zostaje na scenie, ale z podmieniona tekstura zwyciezcy
+    // (patrz _pokazZwyciezce) - zadanie: zwyciezca ma byc widoczny w tym
+    // samym miejscu co karta litery w trakcie gry, nie chowany.
+    this._pokazZwyciezce(winnerPlayer);
     // Gwiazdka za wygrana minigre (ranking + plakietka) - patrz kick.js.
     if (this.kickChat) this.kickChat.zapiszWygranaMinigry(winnerPlayer.username);
 
@@ -857,6 +928,13 @@ export class PanstwaMiastaManager {
     this._lastRewardTime = 0;
     this.highlightMesh.visible = false;
     this.letterSprite.visible = false;
+    // Kartka ze zwyciezca znika razem z reszta planszy - tekstura jest
+    // jednorazowa (NIE z cacheTeksturLiter), wiec dispose'ujemy ja tutaj;
+    // sam letterMaterial zostaje (wspoldzielony, kolejna bitwa nadpisze .map).
+    if (this._winnerTexture) {
+      this._winnerTexture.dispose();
+      this._winnerTexture = null;
+    }
     this.markerPierscien.material.opacity = 0.95;
     this.markerWypelnienie.material.opacity = 0.18;
     this._ostatniaSekundaDymka = null;
@@ -924,12 +1002,21 @@ export class PanstwaMiastaManager {
       this.highlightMesh.visible = true;
     }
 
-    if (this.state === 'BATTLE' && this.litera) {
+    // Kartka ze zwyciezca (patrz _pokazZwyciezce) - pokazujemy ja WYLACZNIE w
+    // momencie WEJSCIA w REWARD (prevState !== 'REWARD'), nie przy kazdym
+    // snapshocie - identyczny strażnik co w flagbattle.js/applySync.
+    if (this.state === 'REWARD') {
+      if (prevState !== 'REWARD' && this.winner) {
+        this._pokazZwyciezce(this.winner);
+      }
+    } else if (this.state === 'BATTLE' && this.litera) {
       if (this.litera !== this._loadedLitera) {
         this._loadedLitera = this.litera;
         this._stosujTeksturaLitery(this.litera);
       }
     } else {
+      // WAITING (jeszcze bez litery). REWARD jest juz obsluzony osobno wyzej
+      // (kartka zwyciezcy zostaje widoczna, nie chowana tutaj).
       this.letterSprite.visible = false;
     }
     // Rubryki: tworzone/sprzatane/przerysowywane w tick() -> _aktualizujRubryki(),

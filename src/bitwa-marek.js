@@ -251,8 +251,15 @@ function zaladujTeksturaLogo(slug, renderer) {
 /**
  * Rysuje kilka wierszy tekstu na KWADRATOWYM canvasie i zwraca CanvasTexture -
  * uzywane do komunikatu "czas minal" w miejscu logo (patrz
- * _pokazOdslonietaMarke). Odpowiednik renderujTekstNaCanvasie z
- * flagbattle.js, wymiary dopasowane do kwadratowej kartki logo.
+ * _pokazOdslonietaMarke) oraz do kartki ze zwyciezca bitwy (patrz
+ * _pokazZwyciezce). Odpowiednik renderujTekstNaCanvasie z flagbattle.js,
+ * wymiary dopasowane do kwadratowej kartki logo.
+ *
+ * Dopasowanie fontu: kazda linia dostaje WLASNY rozmiar, zmierzony przez
+ * ctx.measureText i zmniejszany o 2px, dopoki nie zmiesci sie w szerokosci
+ * kartki (margines 20px z kazdej strony) albo nie osiagnie minimalnego
+ * czytelnego rozmiaru (18px) - identyczny wzorzec co w flagbattle.js (nick
+ * zwyciezcy w drugiej linii bywa dlugi).
  */
 function renderujTekstNaCanvasie(linie) {
   const canvas = document.createElement('canvas');
@@ -262,12 +269,21 @@ function renderujTekstNaCanvasie(linie) {
   ctx.fillStyle = 'rgba(20, 20, 20, 0.85)';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.fillStyle = '#ffd700';
-  ctx.font = 'bold 40px sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   const odstep = 52;
+  const maxSzerokosc = canvas.width - 40;
+  const minRozmiarFontu = 18;
   const startY = canvas.height / 2 - ((linie.length - 1) * odstep) / 2;
-  linie.forEach((linia, i) => ctx.fillText(linia, canvas.width / 2, startY + i * odstep));
+  linie.forEach((linia, i) => {
+    let rozmiarFontu = 40;
+    ctx.font = `bold ${rozmiarFontu}px sans-serif`;
+    while (rozmiarFontu > minRozmiarFontu && ctx.measureText(linia).width > maxSzerokosc) {
+      rozmiarFontu -= 2;
+      ctx.font = `bold ${rozmiarFontu}px sans-serif`;
+    }
+    ctx.fillText(linia, canvas.width / 2, startY + i * odstep);
+  });
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
@@ -366,6 +382,11 @@ export class BitwaMarekManager {
     this.revealSprite.position.y = 2.05;
     this.revealSprite.visible = false;
     this.scene.add(this.revealSprite);
+
+    // Tekstura kartki ze zwyciezca (patrz _pokazZwyciezce) - jednorazowa, NIE
+    // cache'owana (nick jest unikalny per bitwa) - patrz identyczny
+    // komentarz w flagbattle.js przy tym samym polu.
+    this._winnerTexture = null;
 
     this._brandReqId = 0; // chroni przed wyscigiem, gdy runda zmieni sie zanim async rasteryzacja skonczy
     this.isHost = false;
@@ -704,6 +725,27 @@ export class BitwaMarekManager {
   }
 
   /**
+   * Podmienia teksture GLOWNEJ kartki (brandSprite/brandMaterial) na kartke
+   * ze zwyciezca bitwy - kartka zostaje widoczna przez caly stan REWARD, w
+   * tym samym miejscu co logo marki w trakcie gry (patrz identyczne
+   * uzasadnienie w flagbattle.js/_pokazZwyciezce). Wolane zarowno przez
+   * hosta (endBattle) jak i widza (applySync, strażnik wejscia w REWARD).
+   *
+   * revealSprite chowamy jawnie - w BATTLE moze byc akurat widoczny ("czas
+   * minal" po ostatniej marce przed zwycieska odpowiedzia), a obie kartki nie
+   * moga nachodzic sie na siebie.
+   */
+  _pokazZwyciezce(winnerPlayer) {
+    this._brandReqId += 1; // spozniona tekstura logo nie nadpisze kartki zwyciezcy
+    if (this._winnerTexture) this._winnerTexture.dispose();
+    this._winnerTexture = renderujTekstNaCanvasie(['🎉 WYGRYWA', winnerPlayer.username]);
+    this.brandMaterial.map = this._winnerTexture;
+    this.brandMaterial.needsUpdate = true;
+    this.brandSprite.visible = true;
+    this._ukryjOdslonietaMarke();
+  }
+
+  /**
    * Wolane WYLACZNIE przez hosta z tick() (patrz LIMIT_CZASU_MARKI_S), gdy
    * biezaca marka nie zostala odgadnieta w limicie czasu. Identyczny wzorzec
    * co _czasFlagiUplynal w flagbattle.js.
@@ -763,10 +805,12 @@ export class BitwaMarekManager {
     this.rewardTimer = 0;
     this._lastRewardTime = 0;
     this.winner = winnerPlayer;
-    this.brandSprite.visible = false;
     this.odslonietaMarka = null;
     this._loadedOdsloniecie = null;
-    this._ukryjOdslonietaMarke();
+    // Kartka logo zostaje na scenie, ale z podmieniona tekstura zwyciezcy
+    // (patrz _pokazZwyciezce) - zadanie: zwyciezca ma byc widoczny w tym
+    // samym miejscu co logo marki w trakcie gry, nie chowany.
+    this._pokazZwyciezce(winnerPlayer);
     if (this.kickChat) this.kickChat.zapiszWygranaMinigry(winnerPlayer.username);
 
     this.highlightMesh.visible = false;
@@ -929,6 +973,13 @@ export class BitwaMarekManager {
     // we flagbattle.js.
     this.highlightMesh.visible = false;
     this.brandSprite.visible = false;
+    // Kartka ze zwyciezca znika razem z reszta planszy - tekstura jest
+    // jednorazowa (NIE z cacheTeksturLogo), wiec dispose'ujemy ja tutaj; sam
+    // brandMaterial zostaje (wspoldzielony, kolejna bitwa nadpisze .map).
+    if (this._winnerTexture) {
+      this._winnerTexture.dispose();
+      this._winnerTexture = null;
+    }
     this.markerPierscien.material.opacity = 0.95;
     this.markerWypelnienie.material.opacity = 0.18;
     this._ostatniaSekundaDymka = null;
@@ -982,6 +1033,9 @@ export class BitwaMarekManager {
     // na bitwe po stronie widza.
     if (this.state === 'REWARD' && prevState !== 'REWARD' && this.winner) {
       this._pokazBanerZwyciezcy(this.winner);
+      // Kartka ze zwyciezca (patrz _pokazZwyciezce) - ten sam strażnik
+      // wejscia w REWARD co baner nad tym, zeby nie migac co snapshot.
+      this._pokazZwyciezce(this.winner);
     }
 
     if (this.state === 'BATTLE' && this.markiZgadniete > prevMarkiZgadniete) {
@@ -1006,7 +1060,10 @@ export class BitwaMarekManager {
       this.highlightMesh.visible = true;
     }
 
-    if (this.state === 'BATTLE' && this.odslonietaMarka) {
+    if (this.state === 'REWARD') {
+      // Kartka ze zwyciezca juz pokazana wyzej (strażnik wejscia w REWARD) -
+      // zostaje widoczna, wiec tutaj nic nie chowamy.
+    } else if (this.state === 'BATTLE' && this.odslonietaMarka) {
       this.brandSprite.visible = false;
       if (this.odslonietaMarka !== this._loadedOdsloniecie) {
         this._loadedOdsloniecie = this.odslonietaMarka;
@@ -1020,6 +1077,8 @@ export class BitwaMarekManager {
         this._stosujTeksturaLogo(this.currentMarka);
       }
     } else {
+      // WAITING (jeszcze bez marki) albo krotka przerwa miedzy odslonieciem
+      // a kolejna marka.
       this.brandSprite.visible = false;
       this._loadedOdsloniecie = null;
       this._ukryjOdslonietaMarke();

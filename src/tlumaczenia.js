@@ -160,6 +160,54 @@ function zaladujTeksturaSlowa(word, renderer) {
   return texture;
 }
 
+/**
+ * Rysuje kilka wierszy tekstu na canvasie karty slowa (SZEROKOSC_KARTY x
+ * WYSOKOSC_KARTY) i zwraca CanvasTexture - uzywane do kartki ze zwyciezca
+ * bitwy (patrz _pokazZwyciezce nizej). Lokalny odpowiednik
+ * renderujTekstNaCanvasie z flagbattle.js - zgodnie z konwencja tego
+ * projektu duplikujemy wzorzec zamiast wyciagac go do wspolnego modulu
+ * (patrz obszerny komentarz na gorze pliku). NIE cache'owane po kluczu -
+ * nick zwyciezcy jest jednorazowy.
+ *
+ * Dopasowanie fontu: kazda linia dostaje WLASNY rozmiar, zmierzony przez
+ * ctx.measureText i zmniejszany o 2px, dopoki nie zmiesci sie w szerokosci
+ * karty (margines 20px z kazdej strony) albo nie osiagnie minimalnego
+ * czytelnego rozmiaru (16px) - identyczny wzorzec co w flagbattle.js.
+ */
+function renderujTekstNaCanvasie(linie) {
+  const canvas = document.createElement('canvas');
+  canvas.width = SZEROKOSC_KARTY;
+  canvas.height = WYSOKOSC_KARTY;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#10142e';
+  ctx.fillRect(0, 0, SZEROKOSC_KARTY, WYSOKOSC_KARTY);
+  ctx.strokeStyle = '#8f6bff';
+  ctx.lineWidth = 14;
+  ctx.strokeRect(7, 7, SZEROKOSC_KARTY - 14, WYSOKOSC_KARTY - 14);
+
+  ctx.fillStyle = '#ffd700';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const odstep = 46;
+  const maxSzerokosc = SZEROKOSC_KARTY - 40;
+  const minRozmiarFontu = 16;
+  const startY = WYSOKOSC_KARTY / 2 - ((linie.length - 1) * odstep) / 2;
+  linie.forEach((linia, i) => {
+    let rozmiarFontu = 36;
+    ctx.font = `bold ${rozmiarFontu}px sans-serif`;
+    while (rozmiarFontu > minRozmiarFontu && ctx.measureText(linia).width > maxSzerokosc) {
+      rozmiarFontu -= 2;
+      ctx.font = `bold ${rozmiarFontu}px sans-serif`;
+    }
+    ctx.fillText(linia, SZEROKOSC_KARTY / 2, startY + i * odstep);
+  });
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.needsUpdate = true;
+  return texture;
+}
+
 export class TlumaczeniaManager {
   constructor(scene, renderer) {
     this.scene = scene;
@@ -226,6 +274,11 @@ export class TlumaczeniaManager {
     this.wordSprite.position.y = 3.0;
     this.wordSprite.visible = false;
     this.scene.add(this.wordSprite);
+
+    // Tekstura kartki ze zwyciezca (patrz _pokazZwyciezce) - jednorazowa, NIE
+    // cache'owana (nick jest unikalny per bitwa) - patrz identyczny
+    // komentarz w flagbattle.js przy tym samym polu.
+    this._winnerTexture = null;
 
     this.isHost = false;
 
@@ -553,6 +606,21 @@ export class TlumaczeniaManager {
     this.wordSprite.visible = true;
   }
 
+  /**
+   * Podmienia teksture GLOWNEJ kartki (wordSprite/wordMaterial) na kartke ze
+   * zwyciezca bitwy - kartka zostaje widoczna przez caly stan REWARD, w tym
+   * samym miejscu co karta slowa w trakcie gry (patrz identyczne uzasadnienie
+   * w flagbattle.js/_pokazZwyciezce). Wolane zarowno przez hosta (endBattle)
+   * jak i widza (applySync, strażnik wejscia w REWARD).
+   */
+  _pokazZwyciezce(winnerPlayer) {
+    if (this._winnerTexture) this._winnerTexture.dispose();
+    this._winnerTexture = renderujTekstNaCanvasie(['🎉 WYGRYWA', winnerPlayer.username]);
+    this.wordMaterial.map = this._winnerTexture;
+    this.wordMaterial.needsUpdate = true;
+    this.wordSprite.visible = true;
+  }
+
   onChatMessage(username, content) {
     if (!this.isHost) return;
     if (this.state !== 'BATTLE' || !this.currentWord) return;
@@ -588,7 +656,10 @@ export class TlumaczeniaManager {
     this.rewardTimer = 0;
     this._lastRewardTime = 0;
     this.winner = winnerPlayer;
-    this.wordSprite.visible = false;
+    // Kartka slowa zostaje na scenie, ale z podmieniona tekstura zwyciezcy
+    // (patrz _pokazZwyciezce) - zadanie: zwyciezca ma byc widoczny w tym
+    // samym miejscu co karta slowa w trakcie gry, nie chowany.
+    this._pokazZwyciezce(winnerPlayer);
     // Gwiazdka za wygrana minigre (ranking + plakietka) - patrz kick.js.
     if (this.kickChat) this.kickChat.zapiszWygranaMinigry(winnerPlayer.username);
 
@@ -726,6 +797,13 @@ export class TlumaczeniaManager {
     this._lastRewardTime = 0;
     this.highlightMesh.visible = false;
     this.wordSprite.visible = false;
+    // Kartka ze zwyciezca znika razem z reszta planszy - tekstura jest
+    // jednorazowa (NIE z cacheTeksturSlowek), wiec dispose'ujemy ja tutaj;
+    // sam wordMaterial zostaje (wspoldzielony, kolejna bitwa nadpisze .map).
+    if (this._winnerTexture) {
+      this._winnerTexture.dispose();
+      this._winnerTexture = null;
+    }
     this.markerPierscien.material.opacity = 0.95;
     this.markerWypelnienie.material.opacity = 0.18;
     this._ostatniaSekundaDymka = null;
@@ -792,12 +870,21 @@ export class TlumaczeniaManager {
       this.highlightMesh.visible = true;
     }
 
-    if (this.state === 'BATTLE' && this.currentWord) {
+    // Kartka ze zwyciezca (patrz _pokazZwyciezce) - pokazujemy ja WYLACZNIE w
+    // momencie WEJSCIA w REWARD (prevState !== 'REWARD'), nie przy kazdym
+    // snapshocie - identyczny strażnik co w flagbattle.js/applySync.
+    if (this.state === 'REWARD') {
+      if (prevState !== 'REWARD' && this.winner) {
+        this._pokazZwyciezce(this.winner);
+      }
+    } else if (this.state === 'BATTLE' && this.currentWord) {
       if (this.currentWord !== this._loadedWord) {
         this._loadedWord = this.currentWord;
         this._stosujTeksturaSlowa(this.currentWord);
       }
     } else {
+      // WAITING (jeszcze bez slowa). REWARD jest juz obsluzony osobno wyzej
+      // (kartka zwyciezcy zostaje widoczna, nie chowana tutaj).
       this.wordSprite.visible = false;
     }
   }
