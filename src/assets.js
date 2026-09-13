@@ -40,6 +40,9 @@ const FOREST_PATH = 'assets/forest/';
 const PIRATE_PATH = 'assets/pirate/';
 const ARENA_PATH = 'assets/arena/';
 const BLASTER_PATH = 'assets/blaster/';
+// kenney_cube-pets ma WLASNY Textures/colormap.png - osobny katalog assets/cubepets/.
+// Uzywane wylacznie do dekoracyjnego "placu zabaw" na przedpolu (patrz city.js).
+const CUBEPETS_PATH = 'assets/cubepets/';
 
 function fixMaterials(root) {
   root.traverse((node) => {
@@ -183,6 +186,10 @@ export function loadArena(name) {
 // Stad pochodzi wyrzutnik bossa i glowice rakiet (patrz boss.js).
 export function loadBlaster(name) {
   return loadGltf(`${BLASTER_PATH}${name}.glb`);
+}
+
+export function loadCubePets(name) {
+  return loadGltf(`${CUBEPETS_PATH}${name}.glb`);
 }
 
 /**

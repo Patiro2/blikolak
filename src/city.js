@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { loadForest, loadArcade, loadDungeon, loadPirate, loadArena } from './assets.js';
+import { loadForest, loadArcade, loadDungeon, loadPirate, loadArena, loadCubePets } from './assets.js';
 
 // Tlo gry: proceduralne miasto noca wokol i ponizej areny. Arena (pokoj 7x7
 // ze scianami, patrz scene.js) zostaje DOKLADNIE taka, jaka jest - stoi na
@@ -81,6 +81,33 @@ const FOG_FAR = 55;
 
 function randRange(min, max) {
   return min + Math.random() * (max - min);
+}
+
+// --- Seedowany PRNG (mulberry32) - uzywany WYLACZNIE przez rozmieszczenie
+// rekwizytow na przedpolu (_buildForegroundProps), zeby kazdy widz na streamie
+// widzial DOKLADNIE ten sam, powtarzalny "nasrany" ukladu scenki miedzy
+// przeladowaniami strony (patrz wymaganie #2 w zadaniu). Reszta miasta
+// (budynki daleko, samochody, latarnie) zostaje na Math.random() jak dotad -
+// nie musi byc identyczna klatka po klatce, nikt tego nie porownuje 1:1.
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function rng() {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function rrange(rng, min, max) {
+  return min + rng() * (max - min);
+}
+
+/** Losowy punkt blizej srodka zakresu niz plaski rozklad (dwa losowania, minimum) - daje "ciasne jadro, rzadszy ogon" gestosci w klastrach. */
+function biasedTowards(rng, min, max, toward) {
+  const u = Math.min(rng(), rng());
+  return toward === 'low' ? min + u * (max - min) : max - u * (max - min);
 }
 
 /**
@@ -309,11 +336,13 @@ function createPlazaGroundTexture() {
 
 /**
  * Generuje raz teksture "dzikiego" terenu na apronie (do FOREGROUND_APRON_HALF
- * = 19.3) - wielotonowa trawa, promieniste sciezki gruntowe od placu (6.5) do
- * kazdego skomponowanego zestawu rekwizytow (CLUSTER_RADIUS=7.65, katy 0/60/
- * .../300 - patrz _buildForegroundProps) i szeroka asfaltowa obwodnica z
- * pasami na promieniu 12.5 (bezpiecznie miedzy niska zielenia [do 8.6] a
- * wysoka zabudowa [od 18.2]).
+ * = 19.3) - wielotonowa trawa i szeroka asfaltowa obwodnica z pasami na
+ * promieniu 12.5 (dzieli teren na gesty pas scenek/rekwizytow blizej placu i
+ * rzadszy pas dalekiej zieleni/zabudowy na horyzoncie - patrz
+ * _buildForegroundProps dla konkretnych promieni i deterministycznego
+ * rozmieszczenia). Dawniej rysowala tu tez 6 sciezek pod stalymi katami do
+ * (wtedy stalych) pozycji klastrow - usuniete, bo klastry stoja teraz w
+ * losowych miejscach (patrz raport zadania - "koniec z symetria").
  */
 function createApronGroundTexture() {
   const size = 1536;
@@ -329,25 +358,13 @@ function createApronGroundTexture() {
   ctx.fillRect(0, 0, size, size);
   paintGrassBlobs(ctx, size, 260, ['61,97,54', '74,115,64', '44,69,39', '92,138,78', '58,90,52'], [45, 130]);
 
-  // Promieniste sciezki gruntowe od krawedzi placu (6.5) do kazdego zestawu
-  // rekwizytow (7.65) - lekko poszerzone poza sam promien clustra (do 8.4),
-  // zeby wygladaly jak wydeptana droga dojsciowa, nie kropka.
-  const clusterAngles = [0, 60, 120, 180, 240, 300].map((d) => (d * Math.PI) / 180);
-  ctx.save();
-  ctx.strokeStyle = 'rgba(140, 108, 72, 0.5)';
-  ctx.lineCap = 'round';
-  for (const angle of clusterAngles) {
-    const x0 = center + Math.sin(angle) * 6.4 * pxPerUnit;
-    const y0 = center + Math.cos(angle) * 6.4 * pxPerUnit;
-    const x1 = center + Math.sin(angle) * 8.4 * pxPerUnit;
-    const y1 = center + Math.cos(angle) * 8.4 * pxPerUnit;
-    ctx.lineWidth = 0.8 * pxPerUnit;
-    ctx.beginPath();
-    ctx.moveTo(x0, y0);
-    ctx.lineTo(x1, y1);
-    ctx.stroke();
-  }
-  ctx.restore();
+  // Dawniej: 6 promienistych sciezek gruntowych pod kazdym z 6 klastrow
+  // rozstawionych co 60 stopni. Klastry rekwizytow sa teraz rozrzucone
+  // NIEREGULARNIE (patrz _buildForegroundProps/CLUSTER_THEMES) - staly wzor
+  // 6 sciezek pod stalymi katami wygladalby jak szprychy kola pod scenka,
+  // ktora juz nie jest w tych miejscach. Same "wydeptane" plamy gruntu wokol
+  // realnych pozycji klastrow dokladaja modele Kenney (patch-dirt) w 3D -
+  // wystarczy, teren pod spodem zostaje po prostu wielotonowa trawa.
 
   // Szeroka obwodnica asfaltowa na promieniu 12.5 - pierscien z przerywana
   // linia jezdni i jasniejszym kraweznikiem po obu stronach.
@@ -602,8 +619,10 @@ export class CityBackground {
       pTower, pStructure, pPalmStraight, pPalmBend, pFlag, pBarrel, pCrate,
       aStatue, aBanner,
       mFruit, mCart, mBasket, mFreezer, mBottleReturn,
-      dWoodStruct, dWoodSupport, dBarrel, dTable,
+      dWoodStruct, dWoodSupport, dBarrel, dTable, dChair,
       patchGrass, patchDirt, pGrass, pGrassPlant, pGrassFoliage,
+      pDock, columnGltf,
+      petDog, petCat, petFox, petBunny, petBee, petChick, petPig,
     ] = await Promise.all([
       loadForest('tree'), loadForest('tree-high'), loadForest('plant'),
       loadForest('rocks-high'), loadForest('rocks-low'), loadForest('stones'),
@@ -613,21 +632,448 @@ export class CityBackground {
       loadArena('statue'), loadArena('banner'),
       loadArcade('display-fruit'), loadArcade('shopping-cart'), loadArcade('shopping-basket'),
       loadArcade('freezers-standing'), loadArcade('bottle-return'),
-      loadDungeon('wood-structure'), loadDungeon('wood-support'), loadDungeon('barrel'), loadDungeon('table'),
+      loadDungeon('wood-structure'), loadDungeon('wood-support'), loadDungeon('barrel'), loadDungeon('table'), loadDungeon('chair'),
       loadForest('patch-grass'), loadForest('patch-dirt'),
       loadPirate('grass'), loadPirate('grass-plant'), loadPirate('patch-grass-foliage'),
+      loadPirate('structure-platform-dock-small'), loadArcade('column'),
+      loadCubePets('animal-dog'), loadCubePets('animal-cat'), loadCubePets('animal-fox'),
+      loadCubePets('animal-bunny'), loadCubePets('animal-bee'), loadCubePets('animal-chick'), loadCubePets('animal-pig'),
     ]);
 
     const dummy = new THREE.Object3D();
 
-    /** Umieszcza pojedynczy InstancedMesh z podanej listy transformacji (pos/rot/scale). */
-    const makeInstanced = (gltf, placements) => {
+    // ========================================================================
+    // Nowy system rozmieszczenia przedpola (patrz raport zadania): zamiast
+    // pierscieni/stalych katow - garstka TEMATYCZNYCH "scenek" (kazda z
+    // nieregularnym, losowym srodkiem, ciasnym jadrem i rzadszym "ogonem"
+    // rekwizytow) + mnostwo pojedynczych obiektow rozrzuconych miedzy nimi +
+    // nieregularny pas dalekiej zieleni/zabudowy na horyzoncie. Calosc jest
+    // W PELNI deterministyczna (jeden seedowany PRNG, patrz mulberry32
+    // powyzej) i pilnuje siebie sama przez rejection sampling: kazda
+    // proponowana pozycja jest sprawdzana pod katem (1) areny+plotka,
+    // (2) placu, (3) asfaltowej obwodnicy, (4) krawedzi apronu, (5) kolizji z
+    // KAZDYM juz postawionym obiektem, (6) reguly wlasciciela "z>4 => tylko
+    // niskie" (patrz CAMERA_NEAR_Z/LOW_H nizej). Odrzucone proby licza sie do
+    // `rejections` (patrz raport w konsoli na koniec funkcji).
+    // ========================================================================
+    const rng = mulberry32(20260913); // staly seed = powtarzalny uklad dla kazdego widza/przeladowania
+
+    const ARENA_KEEP_R = 4.15; // arena + plotek graniczny (fenceEdge=3.8 w scene.js + margines)
+    const PLAZA_INNER_R = 6.6; // krawedz wlasciwego placu (PLAZA_HALF=6.5) + margines
+    const APRON_OUTER_R = 18.7; // margines przed krawedzia apronu (FOREGROUND_APRON_HALF=19.3)
+    const RING_R = 12.5, RING_HALF_W = 1.25; // asfaltowa obwodnica (patrz createApronGroundTexture)
+    const CAMERA_NEAR_Z = 4; // wymaganie #4 zadania: "strefa z>4 i przed kamera - tylko niskie obiekty"
+    const LOW_H = 0.6;
+    const MID_MIN_R = PLAZA_INNER_R;
+    const MID_MAX_R = RING_R - RING_HALF_W - 0.15; // pas glownej gestej scenografii, przed obwodnica
+    const FAR_MIN_R = RING_R + RING_HALF_W + 0.3; // pas dalekiej zieleni/zabudowy, za obwodnica
+    const FAR_MAX_R = APRON_OUTER_R;
+
+    const occupied = []; // {x,z,r} - kazdy juz postawiony POJEDYNCZY obiekt (nie caly klaster)
+    const clusterCenters = []; // {x,z,r} - tylko do rozstawiania srodkow scenek miedzy soba
+    let attempts = 0;
+    let rejections = 0;
+
+    const zoneBlocked = (x, z, r) => {
+      const d = Math.hypot(x, z);
+      if (d - r < ARENA_KEEP_R) return true;
+      if (d - r < PLAZA_INNER_R) return true;
+      if (d + r > APRON_OUTER_R) return true;
+      if (Math.abs(d - RING_R) < RING_HALF_W + r) return true;
+      return false;
+    };
+    const heightOkForZ = (z, height) => !(z > CAMERA_NEAR_Z && height > LOW_H);
+    const overlapsOccupied = (x, z, r) => occupied.some((o) => Math.hypot(x - o.x, z - o.z) < o.r + r + 0.06);
+
+    /** Losuje srodek scenki w podanym pasie promieni, z opcjonalnym pulapem Z (dla wysokich tematow - patrz heightOkForZ) i minimalnym odstepem od pozostalych srodkow. */
+    const pickClusterCenter = (rMin, rMax, spread, maxZ) => {
+      for (let i = 0; i < 100; i++) {
+        attempts++;
+        const angle = rng() * Math.PI * 2;
+        const radius = rrange(rng, rMin, rMax);
+        const x = Math.sin(angle) * radius;
+        const z = Math.cos(angle) * radius;
+        if (maxZ != null && z > maxZ) { rejections++; continue; }
+        if (zoneBlocked(x, z, spread * 0.7)) { rejections++; continue; }
+        if (clusterCenters.some((c) => Math.hypot(x - c.x, z - c.z) < c.r + spread + 0.6)) { rejections++; continue; }
+        clusterCenters.push({ x, z, r: spread });
+        return { x, z };
+      }
+      rejections++;
+      return null; // scenka pominieta - miejsce sie nie znalazlo (zliczone w raporcie)
+    };
+
+    /** Losuje wolne miejsce dla pojedynczego rekwizytu wokol centrum klastra (ciasne jadro, rzadszy ogon - patrz biasedTowards), sprawdzajac WSZYSTKIE globalne ograniczenia. */
+    const placeNear = (center, spread, footprintR, height, tries = 30) => {
+      for (let i = 0; i < tries; i++) {
+        attempts++;
+        const angle = rng() * Math.PI * 2;
+        const dist = biasedTowards(rng, 0, spread, 'low');
+        const x = center.x + Math.sin(angle) * dist;
+        const z = center.z + Math.cos(angle) * dist;
+        if (zoneBlocked(x, z, footprintR) || overlapsOccupied(x, z, footprintR) || !heightOkForZ(z, height)) {
+          rejections++;
+          continue;
+        }
+        occupied.push({ x, z, r: footprintR });
+        return { x, z };
+      }
+      rejections++;
+      return null;
+    };
+
+    /** Jak placeNear, ale niezalezne od zadnego centrum - dla pojedynczych rekwizytow rozrzuconych "miedzy" scenkami w calym pasie promieni. */
+    const placeLoose = (rMin, rMax, footprintR, height, maxZ, tries = 40) => {
+      for (let i = 0; i < tries; i++) {
+        attempts++;
+        const angle = rng() * Math.PI * 2;
+        const radius = rrange(rng, rMin, rMax);
+        const x = Math.sin(angle) * radius;
+        const z = Math.cos(angle) * radius;
+        if (maxZ != null && z > maxZ) { rejections++; continue; }
+        if (zoneBlocked(x, z, footprintR) || overlapsOccupied(x, z, footprintR) || !heightOkForZ(z, height)) {
+          rejections++;
+          continue;
+        }
+        occupied.push({ x, z, r: footprintR });
+        return { x, z };
+      }
+      rejections++;
+      return null;
+    };
+
+    /** Wymiary lokalne (przed skalowaniem) pierwszego mesha w GLTF - promien odciska (max szerokosc/glebokosc /2) i wysokosc, prosto z prawdziwej geometrii (patrz CLAUDE.md - accessor bbox). Liczone raz na model, cache'owane. */
+    const dimsCache = new Map();
+    const dims = (gltf) => {
+      if (dimsCache.has(gltf)) return dimsCache.get(gltf);
       const mesh = this._firstMesh(gltf);
-      const inst = new THREE.InstancedMesh(mesh.geometry, mesh.material, Math.max(1, placements.length));
-      inst.castShadow = true;
-      inst.receiveShadow = true;
+      mesh.geometry.computeBoundingBox();
+      const b = mesh.geometry.boundingBox;
+      const footprintR = Math.max(b.max.x - b.min.x, b.max.z - b.min.z) / 2;
+      const height = b.max.y - b.min.y;
+      const info = { mesh, footprintR, height };
+      dimsCache.set(gltf, info);
+      return info;
+    };
+
+    // Bucket per (model, castShadow) - kazdy wpis staje sie DOKLADNIE jednym
+    // InstancedMesh na koniec funkcji (jak dawniej - jeden typ = jeden draw call).
+    const buckets = new Map();
+    const bucket = (key, gltf, castShadow) => {
+      if (!buckets.has(key)) buckets.set(key, { gltf, castShadow, list: [] });
+      return buckets.get(key);
+    };
+    /** Umieszcza rekwizyt: dobiera pozycje (near/loose), liczy footprint/wysokosc ze skala, dorzuca do odpowiedniego kubelka. facing='arena' obraca w strone centrum areny (+jitter), facing=liczba to staly kierunek (+jitter), facing=null to czysto losowy obrot. */
+    const put = (key, gltf, castShadow, { center, spread, rMin, rMax, maxZ, scaleRange, facing = 'arena', jitter = 0.35, tilt = 0 }) => {
+      const { footprintR, height } = dims(gltf);
+      const scale = rrange(rng, scaleRange[0], scaleRange[1]);
+      const spot = center
+        ? placeNear(center, spread, footprintR * scale, height * scale)
+        : placeLoose(rMin, rMax, footprintR * scale, height * scale, maxZ);
+      if (!spot) return false;
+      let ry;
+      if (facing === 'arena') ry = Math.atan2(spot.x, spot.z) + Math.PI + rrange(rng, -jitter, jitter);
+      else if (typeof facing === 'number') ry = facing + rrange(rng, -jitter, jitter);
+      else ry = rng() * Math.PI * 2;
+      bucket(key, gltf, castShadow).list.push({ x: spot.x, z: spot.z, ry, scale, tilt });
+      return true;
+    };
+
+    // --- 1) Tematyczne scenki w gestym pasie MID (promien 6.6 do ~11.2), przed
+    // asfaltowa obwodnica - kazda z nieregularnym srodkiem, ciasnym jadrem i
+    // rzadszym "ogonem". Tematy z ciezszymi/wyzszymi elementami (targ, oboz,
+    // magazyn, plac zabaw, pomost, posag) MUSZA trzymac srodek w z<=2.5, zeby
+    // ich wysokie elementy nie wpadly w "strefe kamery" z>4 (patrz
+    // heightOkForZ) - w praktyce ląduja wiec glownie ZA arena (widoczne w
+    // kadrze kamery), a niskie tematy (ogrod/skalki/lawki) moga stanac
+    // gdziekolwiek, rowniez blisko domyslnej pozycji kamery. ---
+    let clustersPlaced = 0;
+    let clustersSkipped = 0;
+    const clusterLog = [];
+    const runCluster = (name, spread, maxZ, build) => {
+      const center = pickClusterCenter(MID_MIN_R, MID_MAX_R, spread, maxZ);
+      if (!center) { clustersSkipped++; return; }
+      const before = occupied.length;
+      build(center);
+      clustersPlaced++;
+      clusterLog.push({ name, center, count: occupied.length - before });
+    };
+
+    // Mini-targ ze straganami (dwa, rozny rozmiar)
+    runCluster('mini-targ (glowny)', 2.1, 2.5, (c) => {
+      put('mFreezer', mFreezer, true, { center: c, spread: 1.5, scaleRange: [0.95, 1.05] });
+      put('mFruit', mFruit, true, { center: c, spread: 1.5, scaleRange: [0.9, 1.1] });
+      put('mFruit', mFruit, true, { center: c, spread: 1.6, scaleRange: [0.9, 1.1] });
+      put('mBasket', mBasket, true, { center: c, spread: 1.6, scaleRange: [0.9, 1.15] });
+      put('mBasket', mBasket, true, { center: c, spread: 1.7, scaleRange: [0.9, 1.15] });
+      put('mCart', mCart, true, { center: c, spread: 1.6, scaleRange: [0.95, 1.05] });
+      put('mBottleReturn', mBottleReturn, true, { center: c, spread: 1.7, scaleRange: [0.95, 1.05] });
+    });
+    runCluster('mini-targ (maly)', 1.5, 2.5, (c) => {
+      put('mCart', mCart, true, { center: c, spread: 1.1, scaleRange: [0.95, 1.05] });
+      put('mBasket', mBasket, true, { center: c, spread: 1.1, scaleRange: [0.9, 1.1] });
+      put('mFruit', mFruit, true, { center: c, spread: 1.2, scaleRange: [0.9, 1.05] });
+    });
+
+    // Obozowisko (mini-dungeon)
+    runCluster('obozowisko', 2.3, 2.5, (c) => {
+      put('dWoodStruct', dWoodStruct, true, { center: c, spread: 1.4, scaleRange: [1.05, 1.2] });
+      put('dWoodSupport', dWoodSupport, true, { center: c, spread: 1.6, scaleRange: [1.05, 1.2], facing: rrange(rng, 0, Math.PI * 2), jitter: 0.6 });
+      put('dBarrel', dBarrel, true, { center: c, spread: 1.7, scaleRange: [1.1, 1.3] });
+      put('dBarrel', dBarrel, true, { center: c, spread: 1.9, scaleRange: [1.1, 1.3] });
+      put('dTable', dTable, true, { center: c, spread: 1.5, scaleRange: [1.1, 1.2] });
+      put('dChair', dChair, true, { center: c, spread: 1.4, scaleRange: [1.0, 1.15] });
+      put('dChair', dChair, true, { center: c, spread: 1.5, scaleRange: [1.0, 1.15] });
+    });
+
+    // Sterta skrzyn i beczek przy "magazynie" (chatka mini-forest + skrzynie/beczki pirate-kit)
+    runCluster('magazyn', 2.4, 2.0, (c) => {
+      // Wlasny bucket (hut-struct-near/hut-roof-near, castShadow=true) - ODDZIELNY
+      // od dalekiego pierscienia chatek (hut-struct/hut-roof, castShadow=false,
+      // patrz sekcja 4 nizej): ten domek stoi w pasie MID (r<=11.2, wewnatrz
+      // zasiegu dir/dirWide z cieniem, patrz scene.js) i MUSI rzucac cien, w
+      // odroznieniu od dalekich chatek na horyzoncie.
+      const hutScale = rrange(rng, 1.1, 1.4);
+      const hutRy = rng() * Math.PI * 2;
+      put('hut-struct-near', bStruct, true, { center: c, spread: 0.3, scaleRange: [hutScale, hutScale], facing: hutRy, jitter: 0 });
+      const hutList = buckets.get('hut-struct-near').list;
+      const hutSpot = hutList[hutList.length - 1];
+      bucket('hut-roof-near', bRoof, true).list.push({ x: hutSpot.x, y: 1.0 * hutScale, z: hutSpot.z, ry: hutRy, scale: hutScale });
+      for (let i = 0; i < 5; i++) put('pCrate', pCrate, true, { center: c, spread: 1.9, scaleRange: [0.55, 0.7], jitter: 0.5 });
+      for (let i = 0; i < 4; i++) put('pBarrel', pBarrel, true, { center: c, spread: 1.9, scaleRange: [0.5, 0.62] });
+      for (let i = 0; i < 2; i++) put('dBarrel', dBarrel, true, { center: c, spread: 2.0, scaleRange: [1.0, 1.2] });
+    });
+
+    // Plac zabaw ze zwierzakami (cube-pets) - male zwierzaki, skala w dol
+    // (pack ~1.5-2x wiekszy od siatki mini-* - patrz CLAUDE.md)
+    runCluster('plac zabaw ze zwierzakami', 2.1, 2.5, (c) => {
+      const pets = [
+        ['petDog', petDog], ['petCat', petCat], ['petFox', petFox], ['petBunny', petBunny],
+        ['petBee', petBee], ['petChick', petChick], ['petPig', petPig],
+      ];
+      for (const [key, gltf] of pets) {
+        put(key, gltf, true, { center: c, spread: 1.8, scaleRange: [0.4, 0.48], facing: null });
+      }
+      // Powtorka dwoch gatunkow, zeby plac zabaw wygladal "zaludniony"
+      put('petDog', petDog, true, { center: c, spread: 1.9, scaleRange: [0.38, 0.46], facing: null });
+      put('petChick', petChick, true, { center: c, spread: 1.6, scaleRange: [0.36, 0.44], facing: null });
+      put('petChick', petChick, true, { center: c, spread: 1.7, scaleRange: [0.36, 0.44], facing: null });
+    });
+
+    // Pomost przy "stawie" (mini-doki pirate-kit + beczki/skrzynie w cieniu pomostu)
+    runCluster('pomost', 2.2, 2.0, (c) => {
+      put('pDock', pDock, true, { center: c, spread: 0.5, scaleRange: [1.0, 1.1] });
+      put('pBarrel', pBarrel, true, { center: c, spread: 1.7, scaleRange: [0.5, 0.6] });
+      put('pCrate', pCrate, true, { center: c, spread: 1.7, scaleRange: [0.55, 0.65] });
+      put('pGrassPlant', pGrassPlant, true, { center: c, spread: 1.8, scaleRange: [0.35, 0.45], facing: null });
+      put('pGrassPlant', pGrassPlant, true, { center: c, spread: 1.9, scaleRange: [0.35, 0.45], facing: null });
+    });
+
+    // Placyk z lawkami (stol + krzesla mini-dungeon, zwrocone do srodka)
+    runCluster('placyk z lawkami', 1.5, null, (c) => {
+      put('dTable', dTable, true, { center: c, spread: 0.15, scaleRange: [1.05, 1.1] });
+      const seatAngles = [0, Math.PI / 2, Math.PI, -Math.PI / 2];
+      for (const a of seatAngles) {
+        const dist = 0.75;
+        const x = c.x + Math.sin(a) * dist;
+        const z = c.z + Math.cos(a) * dist;
+        const { footprintR, height } = dims(dChair);
+        const scale = rrange(rng, 1.0, 1.1);
+        if (zoneBlocked(x, z, footprintR * scale) || overlapsOccupied(x, z, footprintR * scale) || !heightOkForZ(z, height * scale)) continue;
+        occupied.push({ x, z, r: footprintR * scale });
+        bucket('dChair', dChair, true).list.push({ x, z, ry: a + Math.PI + rrange(rng, -0.1, 0.1), scale });
+      }
+    });
+
+    // Kacik ogrodnika (x2) - rosliny/kamienie/kepki, nisko, moze stanac wszedzie
+    for (const name of ['kacik ogrodnika A', 'kacik ogrodnika B']) {
+      runCluster(name, 1.7, null, (c) => {
+        for (let i = 0; i < 5; i++) put('plant', plant, true, { center: c, spread: 1.5, scaleRange: [0.9, 1.3], facing: null });
+        for (let i = 0; i < 3; i++) put('patchGrassMid', patchGrass, true, { center: c, spread: 1.6, scaleRange: [1.0, 1.4], facing: null });
+        for (let i = 0; i < 2; i++) put('stones', stones, true, { center: c, spread: 1.6, scaleRange: [0.8, 1.1], facing: null });
+      });
+    }
+
+    // Rumowisko skal (x2) - nisko, moze stanac wszedzie
+    for (const name of ['rumowisko skal A', 'rumowisko skal B']) {
+      runCluster(name, 1.9, null, (c) => {
+        for (let i = 0; i < 4; i++) put('rocksHighMid', rocksHigh, true, { center: c, spread: 1.7, scaleRange: [0.7, 1.0], facing: null });
+        for (let i = 0; i < 5; i++) put('rocksLowMid', rocksLow, true, { center: c, spread: 1.8, scaleRange: [0.7, 1.05], facing: null });
+        for (let i = 0; i < 4; i++) put('stones', stones, true, { center: c, spread: 1.8, scaleRange: [0.8, 1.15], facing: null });
+      });
+    }
+
+    // Pomnik/sztandar (mini-arena) - akcent, tylko jeden
+    runCluster('pomnik', 1.4, 2.5, (c) => {
+      put('aStatue', aStatue, true, { center: c, spread: 0.2, scaleRange: [1.0, 1.0] });
+      put('aBanner', aBanner, true, { center: c, spread: 0.9, scaleRange: [0.95, 1.05] });
+    });
+
+    // --- 2) Pojedyncze rekwizyty rozrzucone MIEDZY scenkami w tym samym pasie
+    // MID (6.6-11.2) - wypelniaja puste trawniki, ktore scenki zostawily. ---
+    const MID_SINGLES = [
+      { key: 'plant', gltf: plant, count: 40, scaleRange: [0.75, 1.25] },
+      { key: 'rocksLowMid', gltf: rocksLow, count: 20, scaleRange: [0.7, 1.05] },
+      { key: 'rocksHighMid', gltf: rocksHigh, count: 16, scaleRange: [0.7, 1.0] },
+      { key: 'stones', gltf: stones, count: 20, scaleRange: [0.8, 1.2] },
+      { key: 'patchGrassMid', gltf: patchGrass, count: 36, scaleRange: [0.85, 1.3] },
+      { key: 'patchDirtMid', gltf: patchDirt, count: 20, scaleRange: [0.9, 1.3] },
+      { key: 'pGrass', gltf: pGrass, count: 70, scaleRange: [0.35, 0.55] },
+      { key: 'pGrassPlant', gltf: pGrassPlant, count: 22, scaleRange: [0.3, 0.42] },
+      { key: 'pGrassFoliage', gltf: pGrassFoliage, count: 14, scaleRange: [0.16, 0.22] },
+      { key: 'dBarrel', gltf: dBarrel, count: 9, scaleRange: [1.0, 1.2] },
+      { key: 'pCrate', gltf: pCrate, count: 9, scaleRange: [0.5, 0.62] },
+      { key: 'fenceMid', gltf: fence, count: 7, scaleRange: [0.9, 1.05] },
+    ];
+    let singlesPlaced = 0;
+    for (const def of MID_SINGLES) {
+      for (let i = 0; i < def.count; i++) {
+        if (put(def.key, def.gltf, true, { rMin: MID_MIN_R, rMax: MID_MAX_R, scaleRange: def.scaleRange, facing: null })) singlesPlaced++;
+      }
+    }
+
+    // --- 3) Kepki trawy/gruntu wprost na placu (za plotkiem areny, przed
+    // kamiennymi sciezkami) - ta sama logika co dawniej (4 kamienne sciezki
+    // biegna pod katami 0/90/180/270 - omijamy je +-18 stopni), tylko na
+    // seedowanym PRNG zamiast Math.random(), zeby CALE przedpole bylo
+    // powtarzalne. ---
+    const plazaClutterDefs = [
+      { key: 'patchGrassPlaza', gltf: patchGrass, count: 26, scaleRange: [0.8, 1.2], radius: [4.4, 6.2], nearPaths: false },
+      { key: 'patchDirtPlaza', gltf: patchDirt, count: 14, scaleRange: [0.9, 1.3], radius: [4.5, 6.0], nearPaths: true },
+    ];
+    for (const def of plazaClutterDefs) {
+      const { footprintR, height } = dims(def.gltf);
+      let placed = 0;
+      let guard = 0;
+      while (placed < def.count && guard < def.count * 25) {
+        guard++;
+        attempts++;
+        const angle = rng() * Math.PI * 2;
+        const deg = (angle * 180) / Math.PI;
+        const angDist = (a) => Math.abs(((deg - a + 540) % 360) - 180);
+        const nearAxis = [0, 90, 180, 270].some((a) => angDist(a) <= 18);
+        if (def.nearPaths !== nearAxis) { rejections++; continue; }
+        const radius = rrange(rng, def.radius[0], def.radius[1]);
+        const scale = rrange(rng, def.scaleRange[0], def.scaleRange[1]);
+        const x = Math.sin(angle) * radius;
+        const z = Math.cos(angle) * radius;
+        const r = footprintR * scale;
+        if (overlapsOccupied(x, z, r) || !heightOkForZ(z, height * scale)) { rejections++; continue; }
+        occupied.push({ x, z, r });
+        bucket(def.key, def.gltf, true).list.push({ x, z, ry: rng() * Math.PI * 2, scale });
+        placed++;
+      }
+    }
+
+    // --- 4) Daleki pas (13.7 do 18.7, za obwodnica): nieregularnie rozrzucona
+    // zielen/zabudowa (dawniej: idealny pierscien slotow co 360/26 stopni) +
+    // rzadkie pojedyncze skalki/krzaki. castShadow=false na calym pasie - poza
+    // zasiegiem swiatel z cieniem (patrz uzasadnienie przy TALL_TYPES nizej w
+    // oryginalnym kodzie / raport zadania), a jednoczesnie ZAWSZE z<=4 nie
+    // jest wymagane tutaj (te obiekty sa daleko od domyslnej pozycji kamery,
+    // nawet gdy z>4 - patrz uzasadnienie CAMERA_NEAR_Z powyzej), wiec ida
+    // przez wlasna, prostsza funkcje rejection-samplingu bez ograniczenia z. */
+    const farOccupied = []; // oddzielna lista - pas daleki nie koliduje z pasem MID (dzieli je cala obwodnica)
+    const placeFar = (footprintR, tries = 40) => {
+      for (let i = 0; i < tries; i++) {
+        attempts++;
+        const angle = rng() * Math.PI * 2;
+        const radius = rrange(rng, FAR_MIN_R, FAR_MAX_R);
+        const x = Math.sin(angle) * radius;
+        const z = Math.cos(angle) * radius;
+        if (farOccupied.some((o) => Math.hypot(x - o.x, z - o.z) < o.r + footprintR + 0.06)) { rejections++; continue; }
+        farOccupied.push({ x, z, r: footprintR });
+        return { x, z };
+      }
+      rejections++;
+      return null;
+    };
+    const putFar = (key, gltf, { scaleRange, extraY = 0 }) => {
+      const { footprintR, height } = dims(gltf);
+      const scale = rrange(rng, scaleRange[0], scaleRange[1]);
+      const spot = placeFar(footprintR * scale);
+      if (!spot) return null;
+      const ry = rng() * Math.PI * 2;
+      bucket(key, gltf, false).list.push({ x: spot.x, y: extraY * scale, z: spot.z, ry, scale });
+      return spot;
+    };
+    const FAR_TYPES = [
+      ['tree', tree, [0.85, 1.25], 11],
+      ['treeHigh', treeHigh, [0.85, 1.2], 7],
+      ['tower', pTower, [0.85, 1.05], 7],
+      ['structure', pStructure, [1.0, 1.3], 7],
+      ['palmStraight', pPalmStraight, [0.5, 0.65], 6],
+      ['palmBend', pPalmBend, [0.5, 0.62], 5],
+      ['flag', pFlag, [0.6, 0.7], 3],
+    ];
+    for (const [key, gltf, scaleRange, count] of FAR_TYPES) {
+      for (let i = 0; i < count; i++) putFar(key, gltf, { scaleRange });
+    }
+    const FAR_HUT_COUNT = 7;
+    for (let i = 0; i < FAR_HUT_COUNT; i++) {
+      const scale = rrange(rng, 1.0, 1.6);
+      const spot = placeFar(dims(bStruct).footprintR * scale);
+      if (!spot) continue;
+      const ry = rng() * Math.PI * 2;
+      bucket('hut-struct', bStruct, false).list.push({ x: spot.x, z: spot.z, ry, scale });
+      bucket('hut-roof', bRoof, false).list.push({ x: spot.x, y: 1.0 * scale, z: spot.z, ry, scale });
+    }
+    const FAR_SINGLES = [
+      ['rocksHighFar', rocksHigh, [0.7, 1.0], 14],
+      ['rocksLowFar', rocksLow, [0.7, 1.05], 14],
+      ['stonesFar', stones, [0.8, 1.2], 14],
+      ['pGrassPlantFar', pGrassPlant, [0.3, 0.45], 18],
+      ['pGrassFoliageFar', pGrassFoliage, [0.16, 0.24], 10],
+    ];
+    for (const [key, gltf, scaleRange, count] of FAR_SINGLES) {
+      for (let i = 0; i < count; i++) putFar(key, gltf, { scaleRange });
+    }
+
+    // --- 5) Ozdobny plotek na krawedzi placu (promien 8.75) - zostaje PELNYM
+    // pierscieniem (to fizyczna granica/ogrodzenie miedzy plazą a dzikszym
+    // terenem apronu, nie "rozrzucony rekwizyt" - patrz raport zadania). ---
+    {
+      const { footprintR, height } = dims(fence);
+      const list = [];
+      for (let i = 0; i < FOREGROUND_SLOTS; i++) {
+        const angle = (i / FOREGROUND_SLOTS) * Math.PI * 2;
+        const radius = FOREGROUND_LOW_MAX + 0.15;
+        const x = Math.sin(angle) * radius;
+        const z = Math.cos(angle) * radius;
+        list.push({ x, z, ry: angle, scale: rrange(rng, 0.95, 1.05) });
+        occupied.push({ x, z, r: footprintR });
+      }
+      bucket('fenceRing', fence, true).list.push(...list);
+    }
+
+    // --- 6) Kolumny z mini-arcade jako pilastry przy kilku dalekich "domkach" ---
+    {
+      const columnCount = 6;
+      const list = [];
+      for (let i = 0; i < columnCount; i++) {
+        const angle = rrange(rng, 0, Math.PI * 2);
+        const radius = rrange(rng, FAR_MIN_R + 0.1, FAR_MIN_R + 1.2);
+        const x = Math.sin(angle) * radius;
+        const z = Math.cos(angle) * radius;
+        const perp = angle + Math.PI / 2;
+        for (const sign of [-1, 1]) {
+          list.push({ x: x + Math.sin(perp) * 0.55 * sign, z: z + Math.cos(perp) * 0.55 * sign, ry: angle, scale: 1 });
+        }
+      }
+      bucket('column', columnGltf, false).list.push(...list);
+    }
+
+    // --- Materializacja: kazdy kubelek -> jeden InstancedMesh (jeden draw call
+    // niezaleznie od liczby instancji w nim). ---
+    const meshes = [];
+    for (const [, { gltf, castShadow, list }] of buckets) {
+      if (list.length === 0) continue;
+      const mesh = this._firstMesh(gltf);
+      const inst = new THREE.InstancedMesh(mesh.geometry, mesh.material, list.length);
+      inst.castShadow = castShadow;
+      inst.receiveShadow = castShadow;
       inst.frustumCulled = false;
-      placements.forEach((p, i) => {
+      list.forEach((p, i) => {
         dummy.position.set(p.x, p.y || 0, p.z);
         dummy.rotation.set(0, p.ry || 0, 0);
         dummy.scale.setScalar(p.scale != null ? p.scale : 1);
@@ -636,328 +1082,18 @@ export class CityBackground {
       });
       inst.instanceMatrix.needsUpdate = true;
       scene.add(inst);
-      return inst;
-    };
-
-    /** Zwraca (x,z) na okregu wokol anchor (angle,radius) przesuniete lokalnie
-     * o offsetRadial (wzdluz promienia, od centrum areny) i offsetTangent
-     * (stycznie, wzdluz okregu) - pozwala ulozyc kilka rekwizytow obok siebie
-     * jako spojny "zestaw" (np. stragan + wozek + skrzynie), zamiast czysto
-     * losowego rozrzutu. */
-    const clusterXZ = (angle, radius, offsetRadial = 0, offsetTangent = 0) => ({
-      x: Math.sin(angle) * radius + Math.sin(angle) * offsetRadial + Math.cos(angle) * offsetTangent,
-      z: Math.cos(angle) * radius + Math.cos(angle) * offsetRadial - Math.sin(angle) * offsetTangent,
-    });
-
-    // --- Niska zielen (promien 6.7-8.6): rosliny, kamienie, ogrodzenia ---
-    // Uwaga: plotek w tym pierscieniu (promien 8.75) to OZDOBNE ogrodzenie
-    // oddzielajace plac (do 6.5) od dzikszego terenu apronu - stoi ~5 j. dalej
-    // niz wlasciwa granica areny (fenceEdge=3.8 w scene.js) i nie dubluje jej.
-    const lowDefs = [
-      { gltf: plant, count: 22, scaleRange: [0.8, 1.3] },
-      { gltf: rocksLow, count: 10, scaleRange: [0.7, 1.1] },
-      { gltf: rocksHigh, count: 8, scaleRange: [0.7, 1.0] },
-      { gltf: stones, count: 10, scaleRange: [0.8, 1.2] },
-      { gltf: fence, count: FOREGROUND_SLOTS, scaleRange: [0.95, 1.05], tangential: true },
-    ];
-    for (const def of lowDefs) {
-      const mesh = this._firstMesh(def.gltf);
-      const inst = new THREE.InstancedMesh(mesh.geometry, mesh.material, def.count);
-      inst.castShadow = true;
-      inst.receiveShadow = true;
-      inst.frustumCulled = false;
-      for (let i = 0; i < def.count; i++) {
-        const angle = def.tangential
-          ? (i / def.count) * Math.PI * 2
-          : randRange(0, Math.PI * 2);
-        const radius = def.tangential
-          ? FOREGROUND_LOW_MAX + 0.15
-          : randRange(FOREGROUND_LOW_MIN, FOREGROUND_LOW_MAX);
-        const x = Math.sin(angle) * radius;
-        const z = Math.cos(angle) * radius;
-        const s = randRange(def.scaleRange[0], def.scaleRange[1]);
-        dummy.position.set(x, 0, z);
-        dummy.rotation.set(0, def.tangential ? angle : randRange(0, Math.PI * 2), 0);
-        dummy.scale.setScalar(s);
-        dummy.updateMatrix();
-        inst.setMatrixAt(i, dummy.matrix);
-      }
-      inst.instanceMatrix.needsUpdate = true;
-      scene.add(inst);
+      meshes.push(inst);
     }
+    this.foregroundMeshes = meshes;
 
-    // --- Drobny "zywy" runiec terenu: kepki trawy/gruntu wprost na placu (za
-    // plotkiem granicy areny, przed kamiennymi sciezkami) i na apronie (miedzy
-    // plotkiem ozdobnym 8.75 a droga 12.5) - patrz createPlazaGroundTexture /
-    // createApronGroundTexture powyzej dla samego podloza; to jest jego 3D
-    // uzupelnienie modelami Kenney. Wszystkie ponizej 0.6 j. wysokosci (patrz
-    // twarde ograniczenie kamery w opisie zadania), pozycjonowane na y=0 -
-    // ten sam prosty poziom, ktorego juz uzywa lowDefs powyzej dla reszty
-    // rekwizytow na tym samym terenie (bez nowego poziomu Y do pilnowania).
-    const groundClutterDefs = [
-      // Kepki trawy mini-forest wprost na placu, w 4 "wycinkach" miedzy
-      // kamiennymi sciezkami (unikamy katow 0/90/180/270 +-18st, gdzie biegna
-      // sciezki), promien 4.4-6.2 (za plotkiem areny, przed krawedzia placu).
-      {
-        gltf: patchGrass, count: 26, scaleRange: [0.8, 1.2],
-        radius: [4.4, 6.2], plazaRing: true,
-      },
-      // Przetarte kepki gruntu przy samych sciezkach placu (blisko katow
-      // 0/90/180/270), jakby ziemia byla wydeptana tuz obok kamieni.
-      {
-        gltf: patchDirt, count: 14, scaleRange: [0.9, 1.3],
-        radius: [4.5, 6.0], plazaRing: true, nearPaths: true,
-      },
-      // Kepki trawy pirate-kit (skalowane w dol, pirate-kit ~1.5-2x wiekszy
-      // od siatki mini-* - patrz CLAUDE.md) rozrzucone na apronie miedzy
-      // plazą a droga.
-      { gltf: pGrass, count: 46, scaleRange: [0.35, 0.55], radius: [6.9, 11.6] },
-      // Rzadsze, wieksze kepy/krzaki (grass-plant) - jako akcenty.
-      { gltf: pGrassPlant, count: 16, scaleRange: [0.3, 0.42], radius: [6.9, 11.6] },
-      // Duze plaskie "placki" zarosniete (patch-grass-foliage) - lokalnie
-      // gestsza roslinnosc, mocno pomniejszone (oryginal ~5.27 x 4.1 j.).
-      { gltf: pGrassFoliage, count: 10, scaleRange: [0.16, 0.22], radius: [7.2, 11.4] },
-    ];
-    for (const def of groundClutterDefs) {
-      const mesh = this._firstMesh(def.gltf);
-      const inst = new THREE.InstancedMesh(mesh.geometry, mesh.material, def.count);
-      // W dziennej wersji sceny (patrz raport zadania) wlasciciel wprost
-      // zazyczyl sobie cieni na WSZYSTKICH obiektach blisko areny, kepki
-      // trawy/gruntu wlacznie (byly jedynym wyjatkiem z castShadow=false w
-      // poprzedniej, nocnej wersji tego pliku - tam cien byl pomijalny
-      // wizualnie przy niskim, kontrastowym oswietleniu). W dzien, przy
-      // ostrym kierunkowym sloncu, nawet niska roslinnosc rzuca wyrazny,
-      // czytelny cien na trawie/sciezkach - included w promieniu dirWide
-      // (r<=13, patrz scene.js).
-      inst.castShadow = true;
-      inst.receiveShadow = true;
-      inst.frustumCulled = false;
-      let placed = 0;
-      let guard = 0;
-      while (placed < def.count && guard < def.count * 20) {
-        guard++;
-        let angle = randRange(0, Math.PI * 2);
-        if (def.plazaRing) {
-          // Omijaj +-18st wokol kazdej z 4 kamiennych sciezek (0/90/180/270st)
-          const deg = (angle * 180) / Math.PI;
-          const angDist = (a) => Math.abs(((deg - a + 540) % 360) - 180);
-          const nearAxis = [0, 90, 180, 270].some((a) => angDist(a) <= 18);
-          if (def.nearPaths !== nearAxis) continue;
-        }
-        const radius = randRange(def.radius[0], def.radius[1]);
-        const x = Math.sin(angle) * radius;
-        const z = Math.cos(angle) * radius;
-        const s = randRange(def.scaleRange[0], def.scaleRange[1]);
-        dummy.position.set(x, 0, z);
-        dummy.rotation.set(0, randRange(0, Math.PI * 2), 0);
-        dummy.scale.setScalar(s);
-        dummy.updateMatrix();
-        inst.setMatrixAt(placed, dummy.matrix);
-        placed++;
-      }
-      // Gdyby (teoretycznie) zabraklo prob trafienia w wymagany "wycinek" -
-      // pozostale, niewykorzystane sloty chowamy poza scena (skala 0), zeby
-      // nie zostawic domyslnej macierzy jednostkowej (obiekt w (0,0,0)).
-      for (let i = placed; i < def.count; i++) {
-        dummy.position.set(0, -1000, 0);
-        dummy.scale.setScalar(0.0001);
-        dummy.updateMatrix();
-        inst.setMatrixAt(i, dummy.matrix);
-      }
-      inst.instanceMatrix.needsUpdate = true;
-      scene.add(inst);
-    }
-
-    // --- Wysoka zielen/zabudowa (promien 18.2-19.1): drzewa mini-forest + wieze,
-    // budynki i palmy z pirate-kit. Zastepuje dawne proceduralne bryly
-    // (BoxGeometry + vertexColors) prawdziwymi modelami Kenney - patrz CLAUDE.md,
-    // pirate-kit jest ~1.5-2x wiekszy od siatki mini-*, wiec kazdy typ dostaje
-    // wlasny wspolczynnik skali dobrany tak, zeby sylwetka pasowala do reszty
-    // pierscienia (drzewa ~1.7-2.3 j., wieze/budynki ~2.2-3.1 j. - patrz komentarz
-    // przy TALL_TYPES nizej z konkretnymi wysokosciami zmierzonymi z bbox GLB).
-    const TALL_TYPES = [
-      { key: 'tree', gltf: tree, count: 5, scaleRange: [0.85, 1.25] }, // h ~1.4-2.1
-      { key: 'treeHigh', gltf: treeHigh, count: 3, scaleRange: [0.85, 1.2] }, // h ~1.9-2.7
-      { key: 'tower', gltf: pTower, count: 4, scaleRange: [0.85, 1.05] }, // h (2.785 lokalnie) ~2.4-2.9
-      { key: 'structure', gltf: pStructure, count: 4, scaleRange: [1.0, 1.3] }, // h (2.2 lokalnie) ~2.2-2.9
-      { key: 'palmStraight', gltf: pPalmStraight, count: 3, scaleRange: [0.5, 0.65] }, // h (4.21 lokalnie) ~2.1-2.7
-      { key: 'palmBend', gltf: pPalmBend, count: 2, scaleRange: [0.5, 0.62] }, // h (4.25 lokalnie) ~2.1-2.6
-      { key: 'flag', gltf: pFlag, count: 1, scaleRange: [0.6, 0.7] }, // h (3.6 lokalnie) ~2.2-2.5
-    ];
-    const HUT_COUNT = 4; // "domki" mini-forest (struktura+dach) licza sie osobno - stackowana para
-
-    // Wysoka zielen/zabudowa (promien 18.2-19.1) - POZA zasiegiem obu swiatel
-    // kierunkowych z cieniem (dir/dirWide w scene.js siegaja do r<=13.5,
-    // patrz uzasadnienie tam) - wlasciciel wprost zazyczyl sobie, zeby
-    // wysoka zabudowa/zielen daleko od areny NIE rzucala cienia (castShadow
-    // = false), w odroznieniu od niskiego pierscienia/klastrow blizej areny
-    // ponizej. receiveShadow tez false - nic w promieniu dirWide nie siega
-    // az tutaj, wiec probkowanie mapy cienia na tych powierzchniach byloby
-    // czystym kosztem bez zadnego widocznego efektu.
-    for (const t of TALL_TYPES) {
-      t.mesh = this._firstMesh(t.gltf);
-      t.inst = new THREE.InstancedMesh(t.mesh.geometry, t.mesh.material, t.count);
-      t.inst.castShadow = false; t.inst.receiveShadow = false; t.inst.frustumCulled = false;
-      t.idx = 0;
-    }
-    const structMesh = this._firstMesh(bStruct);
-    const roofMesh = this._firstMesh(bRoof);
-    const structInst = new THREE.InstancedMesh(structMesh.geometry, structMesh.material, HUT_COUNT);
-    const roofInst = new THREE.InstancedMesh(roofMesh.geometry, roofMesh.material, HUT_COUNT);
-    structInst.castShadow = false; structInst.receiveShadow = false; structInst.frustumCulled = false;
-    roofInst.castShadow = false; roofInst.receiveShadow = false; roofInst.frustumCulled = false;
-
-    // Kolejka slotow: kazdy typ tyle razy, ile ma "count" (+ HUT_COUNT domkow),
-    // przetasowana (Fisher-Yates) - kazdy z 26 slotow katowych dostaje losowy,
-    // ale z gory ustalony w proporcjach typ. Dzieki temu zabudowa czyta sie jako
-    // swiadomie skomponowany, zroznicowany pierscien (a nie czysty przypadek),
-    // a jednoczesnie zaden typ nie grupuje sie przypadkiem w jednym miejscu.
-    const slotQueue = [];
-    for (const t of TALL_TYPES) for (let i = 0; i < t.count; i++) slotQueue.push(t.key);
-    for (let i = 0; i < HUT_COUNT; i++) slotQueue.push('hut');
-    for (let i = slotQueue.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [slotQueue[i], slotQueue[j]] = [slotQueue[j], slotQueue[i]];
-    }
-
-    let hi = 0;
-    for (let slot = 0; slot < slotQueue.length; slot++) {
-      const angle = (slot / slotQueue.length) * Math.PI * 2 + randRange(-0.06, 0.06);
-      const radius = randRange(FOREGROUND_TALL_MIN, FOREGROUND_TALL_MAX);
-      const x = Math.sin(angle) * radius;
-      const z = Math.cos(angle) * radius;
-      const key = slotQueue[slot];
-
-      if (key === 'hut') {
-        const s = randRange(1.0, 1.6);
-        const ry = randRange(0, Math.PI * 2);
-        dummy.position.set(x, 0, z);
-        dummy.rotation.set(0, ry, 0);
-        dummy.scale.setScalar(s);
-        dummy.updateMatrix();
-        structInst.setMatrixAt(hi, dummy.matrix);
-        dummy.position.set(x, 1.0 * s, z);
-        dummy.updateMatrix();
-        roofInst.setMatrixAt(hi, dummy.matrix);
-        hi++;
-        continue;
-      }
-      const t = TALL_TYPES.find((tt) => tt.key === key);
-      const s = randRange(t.scaleRange[0], t.scaleRange[1]);
-      dummy.position.set(x, 0, z);
-      dummy.rotation.set(0, randRange(0, Math.PI * 2), 0);
-      dummy.scale.setScalar(s);
-      dummy.updateMatrix();
-      t.inst.setMatrixAt(t.idx++, dummy.matrix);
-    }
-
-    for (const t of TALL_TYPES) t.inst.instanceMatrix.needsUpdate = true;
-    structInst.instanceMatrix.needsUpdate = true;
-    roofInst.instanceMatrix.needsUpdate = true;
-    scene.add(...TALL_TYPES.map((t) => t.inst), structInst, roofInst);
-
-    // --- Skomponowane zestawy przy niskim pierscieniu (promien 6.7-8.6):
-    // stragan targowy (mini-market), oboz z mini-dungeon, pomnik z mini-areny,
-    // rekwizyty portowe z pirate-kit - kazdy zestaw stoi w jednym miejscu jako
-    // spojna scenka, nie rozrzucony losowo (patrz clusterXZ powyzej). Rozstawione
-    // co 45 stopni, na przemian z "zielona" obreczą roslin/kamieni z lowDefs
-    // powyzej - z kazdej strony areny jest wiec na co popatrzec. ---
-    const CLUSTER_RADIUS = (FOREGROUND_LOW_MIN + FOREGROUND_LOW_MAX) / 2; // 7.65
-    const deg = (d) => (d * Math.PI) / 180;
-
-    const clusterPlacements = {}; // key -> [{x,y,z,ry,scale}]
-    const addToCluster = (key, gltf, p) => {
-      if (!clusterPlacements[key]) clusterPlacements[key] = { gltf, list: [] };
-      clusterPlacements[key].list.push(p);
-    };
-
-    // Stragan targowy (glowny, 0 stopni) - piec rekwizytow mini-market obok siebie
-    {
-      const a = deg(0);
-      const facing = a + Math.PI;
-      addToCluster('mFreezer', mFreezer, { ...clusterXZ(a, CLUSTER_RADIUS, 0, -0.9), ry: facing, scale: 1 });
-      addToCluster('mFruit', mFruit, { ...clusterXZ(a, CLUSTER_RADIUS, 0.1, -0.3), ry: facing, scale: 1 });
-      addToCluster('mBasket', mBasket, { ...clusterXZ(a, CLUSTER_RADIUS, 0.35, 0.15), ry: facing + 0.4, scale: 1 });
-      addToCluster('mCart', mCart, { ...clusterXZ(a, CLUSTER_RADIUS, 0.15, 0.6), ry: facing - 0.5, scale: 1 });
-      addToCluster('mBottleReturn', mBottleReturn, { ...clusterXZ(a, CLUSTER_RADIUS, -0.1, 1.0), ry: facing, scale: 1 });
-    }
-    // Stragan targowy (drugi, 180 stopni) - mniejszy wariant
-    {
-      const a = deg(180);
-      const facing = a + Math.PI;
-      addToCluster('mCart', mCart, { ...clusterXZ(a, CLUSTER_RADIUS, 0, -0.35), ry: facing, scale: 1 });
-      addToCluster('mBasket', mBasket, { ...clusterXZ(a, CLUSTER_RADIUS, 0.2, 0.25), ry: facing + 0.3, scale: 1 });
-      addToCluster('mFruit', mFruit, { ...clusterXZ(a, CLUSTER_RADIUS, -0.2, 0.15), ry: facing, scale: 1 });
-    }
-    // Oboz z mini-dungeon (glowny, 60 stopni)
-    {
-      const a = deg(60);
-      const facing = a + Math.PI;
-      addToCluster('dWoodStruct', dWoodStruct, { ...clusterXZ(a, CLUSTER_RADIUS, 0, -0.6), ry: facing, scale: 1.1 });
-      addToCluster('dWoodSupport', dWoodSupport, { ...clusterXZ(a, CLUSTER_RADIUS, 0.6, -0.6), ry: facing + 1.6, scale: 1.1 });
-      addToCluster('dBarrel', dBarrel, { ...clusterXZ(a, CLUSTER_RADIUS, 0.3, 0.4), ry: facing, scale: 1.2 });
-      addToCluster('dTable', dTable, { ...clusterXZ(a, CLUSTER_RADIUS, -0.3, 0.5), ry: facing + 0.7, scale: 1.15 });
-    }
-    // Oboz z mini-dungeon (drugi, 300 stopni)
-    {
-      const a = deg(300);
-      const facing = a + Math.PI;
-      addToCluster('dTable', dTable, { ...clusterXZ(a, CLUSTER_RADIUS, 0, 0), ry: facing, scale: 1.15 });
-      addToCluster('dBarrel', dBarrel, { ...clusterXZ(a, CLUSTER_RADIUS, 0.35, 0.35), ry: facing, scale: 1.2 });
-    }
-    // Pomnik z mini-areny (120 stopni) - posag + sztandar obok
-    {
-      const a = deg(120);
-      const facing = a + Math.PI;
-      addToCluster('aStatue', aStatue, { ...clusterXZ(a, CLUSTER_RADIUS, 0, 0), ry: facing, scale: 1.0 });
-      addToCluster('aBanner', aBanner, { ...clusterXZ(a, CLUSTER_RADIUS, -0.1, 0.75), ry: facing, scale: 1.0 });
-    }
-    // Rekwizyty portowe z pirate-kit (240 stopni) - beczki i skrzynie, w skali
-    // obnizonej wzgledem oryginalu (pirate-kit jest ~2x wiekszy - patrz CLAUDE.md)
-    {
-      const a = deg(240);
-      const facing = a + Math.PI;
-      addToCluster('pBarrel', pBarrel, { ...clusterXZ(a, CLUSTER_RADIUS, 0, -0.35), ry: facing, scale: 0.5 });
-      addToCluster('pBarrel', pBarrel, { ...clusterXZ(a, CLUSTER_RADIUS, 0.35, 0.25), ry: facing + 0.9, scale: 0.48 });
-      addToCluster('pCrate', pCrate, { ...clusterXZ(a, CLUSTER_RADIUS, -0.3, 0.3), ry: facing, scale: 0.55 });
-      addToCluster('pCrate', pCrate, { ...clusterXZ(a, CLUSTER_RADIUS, -0.15, 0.75), ry: facing + 0.4, scale: 0.52 });
-    }
-
-    const clusterMeshes = [];
-    for (const { gltf, list } of Object.values(clusterPlacements)) {
-      clusterMeshes.push(makeInstanced(gltf, list));
-    }
-
-    // --- Kilka kolumn z mini-arcade jako ozdobne pilastry przy co trzecim domku ---
-    const columnGltf = await loadArcade('column');
-    const columnMesh = this._firstMesh(columnGltf);
-    const columnCount = 6;
-    const columnInst = new THREE.InstancedMesh(columnMesh.geometry, columnMesh.material, columnCount * 2);
-    // Kolumny stoja przy wysokiej zabudowie (promien FOREGROUND_TALL_MIN+0.1
-    // ~18.3) - poza zasiegiem cienia (patrz TALL_TYPES powyzej), ten sam brak
-    // castShadow/receiveShadow.
-    columnInst.castShadow = false; columnInst.receiveShadow = false; columnInst.frustumCulled = false;
-    let ci = 0;
-    for (let i = 0; i < columnCount; i++) {
-      const angle = (i / columnCount) * Math.PI * 2 + 0.3;
-      const radius = FOREGROUND_TALL_MIN + 0.1;
-      const x = Math.sin(angle) * radius;
-      const z = Math.cos(angle) * radius;
-      const perp = angle + Math.PI / 2;
-      for (const sign of [-1, 1]) {
-        const ox = x + Math.sin(perp) * 0.55 * sign;
-        const oz = z + Math.cos(perp) * 0.55 * sign;
-        dummy.position.set(ox, 0, oz);
-        dummy.rotation.set(0, angle, 0);
-        dummy.scale.setScalar(1);
-        dummy.updateMatrix();
-        columnInst.setMatrixAt(ci++, dummy.matrix);
-      }
-    }
-    columnInst.instanceMatrix.needsUpdate = true;
-    scene.add(columnInst);
-
-    this.foregroundMeshes = [...TALL_TYPES.map((t) => t.inst), structInst, roofInst, ...clusterMeshes, columnInst];
+    const totalInstances = [...buckets.values()].reduce((n, b) => n + b.list.length, 0);
+    console.info(
+      `[city] Przedpole: ${clustersPlaced} scenek (${clustersSkipped} pominietych - brak miejsca), `
+      + `${singlesPlaced}/${MID_SINGLES.reduce((n, d) => n + d.count, 0)} pojedynczych rekwizytow w pasie glownym, `
+      + `${totalInstances} instancji lacznie w ${buckets.size} draw callach, `
+      + `${attempts} prob losowania pozycji (${rejections} odrzuconych, ${((rejections / Math.max(1, attempts)) * 100).toFixed(0)}%).`,
+    );
+    this._foregroundClusterLog = clusterLog;
   }
 
   // --- Plac pod arena - jedna bryla betonu (cokol), wierzch na y=PLAZA_TOP_Y
