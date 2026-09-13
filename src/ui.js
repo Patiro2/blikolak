@@ -438,32 +438,13 @@ export class LeaderboardUI {
         left.appendChild(przedmiotSpan);
       }
 
-      // Etykieta przypisanego pracownika
-      if (kickClient) {
-        const workerSlot = kickClient.getWorkerForUser(user.username);
-        if (workerSlot !== null) {
-          const roleName = getWorkerNameForIndex(workerSlot);
-          if (roleName) {
-            const roleTag = document.createElement('span');
-            roleTag.className = 'worker-tag';
-            roleTag.textContent = roleName;
-            left.appendChild(roleTag);
-          }
-        }
-      }
-
       const right = document.createElement('div');
       right.className = 'right';
-
-      const clicksSpan = document.createElement('span');
-      clicksSpan.className = 'leaderboard-clicks';
-      clicksSpan.textContent = `${user.clicks || 0} klików`;
 
       const moneySpan = document.createElement('span');
       moneySpan.className = 'leaderboard-money';
       moneySpan.textContent = `+${fmt(user.totalEarned)} zł`;
 
-      right.appendChild(clicksSpan);
       right.appendChild(moneySpan);
 
       row.appendChild(left);
