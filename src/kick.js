@@ -300,7 +300,23 @@ export class KickChatClient {
       username: data.username,
       color: data.color || '#53fc18',
       rank: rankIndex >= 0 ? rankIndex + 1 : null,
+      wygraneMinigry: this.leaderboard[cleanUser]?.wygraneMinigry || 0,
     };
+  }
+
+  /**
+   * Zwyciestwo w minigrze (flagbattle/tlumaczenia) - dolicza gwiazdke do
+   * wpisu rankingu zwyciezcy. Zwyciezca zawsze ma juz wpis (jest w Top 10),
+   * wiec brak wpisu nic nie robi (nie tworzymy "sierocego" wpisu).
+   */
+  zapiszWygranaMinigry(username) {
+    if (!username) return;
+    const key = normalizeNick(username);
+    const entry = this.leaderboard[key];
+    if (!entry) return;
+    entry.wygraneMinigry = (entry.wygraneMinigry || 0) + 1;
+    this._saveLeaderboard();
+    this._scheduleLeaderboardUpdate();
   }
 
   getWorkerForUser(username) {

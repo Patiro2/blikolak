@@ -575,6 +575,8 @@ export class TlumaczeniaManager {
     this._lastRewardTime = 0;
     this.winner = winnerPlayer;
     this.wordSprite.visible = false;
+    // Gwiazdka za wygrana minigre (ranking + plakietka) - patrz kick.js.
+    if (this.kickChat) this.kickChat.zapiszWygranaMinigry(winnerPlayer.username);
 
     this.highlightMesh.visible = false;
     this._usunPlotki();

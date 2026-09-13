@@ -347,6 +347,14 @@ html, body {
   white-space: nowrap;
 }
 
+/* Gwiazdka z liczba wygranych minigier - ranking i plakietka nad postacia */
+.gwiazdki-wygranych {
+  font-size: 10px;
+  font-weight: 700;
+  color: #ffd700;
+  margin-left: 2px;
+}
+
 .leaderboard-row .worker-tag {
   font-size: 10px;
   color: #8fa0b0;

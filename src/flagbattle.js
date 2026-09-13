@@ -767,6 +767,8 @@ export class FlagBattleManager {
     this._lastRewardTime = 0;
     this.winner = winnerPlayer;
     this.flagSprite.visible = false;
+    // Gwiazdka za wygrana minigre (ranking + plakietka) - patrz kick.js.
+    if (this.kickChat) this.kickChat.zapiszWygranaMinigry(winnerPlayer.username);
 
     // Zadanie: oznaczenie pola (pierscien, wypelnienie, podswiecenie i
     // plotki) ma zniknac CALKOWICIE w chwili wygranej, nie dopiero po 30 s

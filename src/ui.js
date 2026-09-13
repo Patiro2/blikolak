@@ -419,6 +419,14 @@ export class LeaderboardUI {
       nickSpan.textContent = user.username;
       left.appendChild(nickSpan);
 
+      // Gwiazdka z liczba wygranych minigier - tylko gdy > 0.
+      if (user.wygraneMinigry > 0) {
+        const starySpan = document.createElement('span');
+        starySpan.className = 'gwiazdki-wygranych';
+        starySpan.textContent = `⭐${user.wygraneMinigry}`;
+        left.appendChild(starySpan);
+      }
+
       // Etykieta przypisanego pracownika
       if (kickClient) {
         const workerSlot = kickClient.getWorkerForUser(user.username);
@@ -495,6 +503,14 @@ export class WorkerOverlayManager {
     userSpan.className = 'np-user';
     nameplateEl.appendChild(userSpan);
 
+    // Gwiazdka z liczba wygranych minigier - utworzona raz tutaj, zeby
+    // updateWorkerUser (wolane przy kazdej wiadomosci na czacie) tylko
+    // aktualizowal jej tresc zamiast dokladac kolejne spany.
+    const starySpan = document.createElement('span');
+    starySpan.className = 'gwiazdki-wygranych';
+    starySpan.style.display = 'none';
+    nameplateEl.appendChild(starySpan);
+
     const bubbleEl = document.createElement('div');
     bubbleEl.className = 'worker-bubble';
     bubbleEl.style.display = 'none';
@@ -512,6 +528,7 @@ export class WorkerOverlayManager {
       nameplateEl,
       rankSpan,
       userSpan,
+      starySpan,
       bubbleEl,
       connectorEl,
       timer: null,
@@ -557,6 +574,9 @@ export class WorkerOverlayManager {
     item.savedRank = rankLabel;
     item.userSpan.textContent = userData.username;
     item.userSpan.style.color = userData.color || '#53fc18';
+    const wygrane = userData.wygraneMinigry || 0;
+    item.starySpan.textContent = wygrane > 0 ? `⭐${wygrane}` : '';
+    item.starySpan.style.display = wygrane > 0 ? '' : 'none';
     item.nameplateEl.className = `worker-nameplate ${rank === 1 ? 'rank-1' : ''}`;
     // Kazdy sync rankingu (np. po zwyklym "kliku" z czatu) nadpisuje className
     // i tresc rankSpan - bez tego znacznik omdlenia (boss.js) gasnie po ulamku
