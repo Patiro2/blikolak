@@ -5,6 +5,8 @@
  * Dla kanału 'patiro' ID pokoju czatu (chatroom_id) to 37663.
  */
 
+import { showTopAnnouncement } from './vanessa.js';
+
 const PUSHER_APP_KEY = '32cbd69e4b950bf97679';
 const PUSHER_CLUSTER = 'us2';
 const DEFAULT_CHATROOM_ID = 37663; // chatroom_id dla kanalu patiro
@@ -108,6 +110,21 @@ export function usunTagiEmotek(tresc) {
     .replace(/\[emote:(\d+):([^\]]*)\]/g, ' ')
     .replace(/\s{2,}/g, ' ')
     .trim();
+}
+
+/**
+ * Kody czatu w stylu GTA: widz pisze slowo-klucz (opcjonalnie z "!" na
+ * poczatku), a jego wpis w rankingu dostaje trwaly efekt. Kazdy kod to jedna
+ * funkcja modyfikujaca wpis rankingu (entry) - dopisanie kolejnego kodu to
+ * jedna linijka nizej. Dopasowanie jest niewrazliwe na wielkosc liter i biale
+ * znaki (patrz normalizeKodCzatu).
+ */
+const KODY = {
+  aezakmi: (entry) => { entry.teczowyNick = true; },
+};
+
+function normalizeKodCzatu(content) {
+  return String(content || '').trim().toLowerCase().replace(/^!/, '').trim();
 }
 
 export class KickChatClient {
@@ -301,6 +318,7 @@ export class KickChatClient {
       color: data.color || '#53fc18',
       rank: rankIndex >= 0 ? rankIndex + 1 : null,
       wygraneMinigry: this.leaderboard[cleanUser]?.wygraneMinigry || 0,
+      teczowyNick: !!this.leaderboard[cleanUser]?.teczowyNick,
     };
   }
 
@@ -659,6 +677,24 @@ export class KickChatClient {
         this.onKlik(sender, chatItem);
       } catch (err) {
         console.error('[KickChat] Blad w onKlik:', err);
+      }
+
+      // Kody czatu (patrz KODY) - dopasowanie PO onKlik, bo onKlik (przez
+      // recordEarned w main.js) tworzy wpis w rankingu jesli widz go jeszcze
+      // nie mial. Idempotentne - kolejne wpisanie tego samego kodu nic nie zmienia.
+      const kod = KODY[normalizeKodCzatu(content)];
+      if (kod) {
+        const entry = this.leaderboard[normalizeNick(username)];
+        if (entry) {
+          kod(entry);
+          chatItem.teczowyNick = !!entry.teczowyNick;
+          this._saveLeaderboard();
+          try {
+            showTopAnnouncement('Kod aktywowany!', `${username} odblokował tęczowy nick`);
+          } catch (err) {
+            console.error('[KickChat] Blad w showTopAnnouncement:', err);
+          }
+        }
       }
     }
 
