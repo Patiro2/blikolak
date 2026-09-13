@@ -48,7 +48,7 @@ const PUNKTY_DO_WYGRANEJ = 5;
 // nextRound()). Po uplywie: host odslania nazwe marki (_czasMarkiUplynal),
 // po ODSLONIECIE_CZAS_S losuje kolejna. Identyczny wzorzec co
 // LIMIT_CZASU_FLAGI_S w flagbattle.js.
-const LIMIT_CZASU_MARKI_S = 60;
+const LIMIT_CZASU_MARKI_S = 15;
 const ODSLONIECIE_CZAS_S = 3;
 
 // Wysokosc znacznika kontestowanego pola. Zajete poziomy w projekcie: 0.025
