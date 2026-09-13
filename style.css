@@ -214,10 +214,30 @@ html, body {
   backdrop-filter: blur(6px);
   transition: transform 0.2s ease, max-height 0.2s ease;
   z-index: 10;
+  /* Zmiana rozmiaru widza za natywny uchwyt w rogu (dziala razem z
+     overflow: hidden powyzej) - min/max rozsadne wzgledem ekranu. */
+  resize: both;
+  min-width: 240px;
+  min-height: 120px;
+  max-width: 96vw;
+  max-height: 90vh;
 }
 
 #leaderboard-panel.collapsed #leaderboard-body {
   display: none;
+}
+
+/* Zwiniete okno wraca do wysokosci samego naglowka i nie da sie go wtedy
+   ciagnac za wysokosc - !important bije zapisany inline style.height z
+   makeDraggable/ResizeObserver (src/ui.js), ktory wraca po rozwinieciu. */
+#leaderboard-panel.collapsed,
+#kick-panel.collapsed {
+  resize: none;
+  height: auto !important;
+  /* min-height: 120px (dla resize wyzej) inaczej trzymalby zwiniety panel
+     szerszy niz sam naglowek - zwiniecie ma wracac do wyglada sprzed
+     wprowadzenia resize. */
+  min-height: 0 !important;
 }
 
 .floating-header {
@@ -280,18 +300,47 @@ html, body {
 }
 
 #leaderboard-body {
+  /* Kontener dla cqw w liscie ponizej (cqw na samym kontenerze liczy sie od
+     okna przegladarki, nie od szerokosci panelu). */
+  container-type: inline-size;
   display: flex;
   flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 #leaderboard-list {
-  max-height: 190px;
+  /* flex:1 zeby lista wypelniala wysokosc okna, gdy widz naciagnie panel
+     wyzej za rog (bez ustawionej wysokosci panelu dziala jak dawniej -
+     max-height 190px jako limit). 3.15cqw przy domyslnych 380px = 12px. */
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 6px;
+  gap: 0.33em;
+  padding: 0.5em;
+  font-size: clamp(10px, 3.15cqw, 20px);
 }
+
+/* Domyslny wyglad (bez recznej zmiany rozmiaru okna) zostaje ograniczony do
+   dzisiejszej wysokosci - max-height znika, gdy okno ma juz jawna wysokosc
+   (uchwyt "resize" w rogu i przywracanie zapisanego rozmiaru w src/ui.js oba
+   ustawiaja inline style.height), zeby flex: 1 1 auto wyzej mogl wypelnic
+   cala wysokosc powiekszonego okna zamiast dalej sie obcinac. */
+#leaderboard-panel:not([style*="height"]) #leaderboard-list {
+  max-height: 190px;
+}
+
+/* Elementy wewnatrz wierszy rankingu skaluja sie razem z tekstem (em wzgledem
+   font-size #leaderboard-list ustawionego clampem wyzej) - nie dotyka to
+   tych samych klas uzywanych w plakietkach nad postaciami (worker-nameplate),
+   bo selektor tu jest zawezony do #leaderboard-list. */
+#leaderboard-list .leaderboard-row { font-size: 1em; }
+#leaderboard-list .rank { font-size: 1em; width: 1.67em; }
+#leaderboard-list .gwiazdki-wygranych { font-size: 0.83em; }
+#leaderboard-list .przedmiot-skorpiona { font-size: 1em; }
+#leaderboard-list .worker-tag { font-size: 0.83em; }
 
 .leaderboard-empty {
   text-align: center;
@@ -707,6 +756,11 @@ html, body {
   backdrop-filter: blur(6px);
   transition: transform 0.2s ease, max-height 0.2s ease;
   z-index: 10;
+  resize: both;
+  min-width: 240px;
+  min-height: 120px;
+  max-width: 96vw;
+  max-height: 90vh;
 }
 
 #kick-panel.collapsed #kick-body {
@@ -816,18 +870,60 @@ html, body {
 #kick-body {
   display: flex;
   flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* Kontenerem dla cqw musi byc RODZIC - cqw na samym kontenerze liczy sie od
+   okna przegladarki, nie od szerokosci panelu. */
+#kick-body {
+  container-type: inline-size;
 }
 
 #kick-messages {
-  max-height: 200px;
+  position: relative; /* kotwica dla .kick-new-messages-btn (position: absolute) */
+  flex: 1 1 auto;
   min-height: 90px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 5px;
-  padding: 8px 10px;
-  font-size: 12px;
-  scroll-behavior: smooth;
+  gap: 0.42em;
+  padding: 0.67em 0.83em;
+  /* 3.75cqw przy domyslnych 320px = 12px, jak przed zmiana rozmiaru okien.
+     Bez scroll-behavior: smooth - animowane przewijanie sprawialo, ze kolejna
+     wiadomosc zastawala widok "w polowie drogi" i wlaczala blokade. */
+  font-size: clamp(10px, 3.75cqw, 18px);
+}
+
+/* Jak przy rankingu wyzej - max-height domyslny znika, gdy panel dostal juz
+   jawna wysokosc (resize albo przywrocony zapisany rozmiar). */
+#kick-panel:not([style*="height"]) #kick-messages {
+  max-height: 200px;
+}
+
+/* Przycisk "Nowe wiadomosci" - position: absolute wzgledem #kick-messages
+   (position: relative wyzej), wiec "bottom" trzyma sie widocznej krawedzi
+   okna przewijania niezaleznie od scrollTop, a bycie poza normalnym flow
+   flexa nie psuje kolejnosci wiadomosci dopisywanych przez KickUI.addMessage. */
+.kick-new-messages-btn {
+  position: absolute;
+  left: 50%;
+  bottom: 8px;
+  transform: translateX(-50%);
+  background: rgba(83, 252, 24, 0.92);
+  color: #0a1a06;
+  border: none;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 0.92em;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+  z-index: 5;
+}
+
+.kick-new-messages-btn:hover {
+  background: #53fc18;
 }
 
 .kick-msg {
@@ -843,7 +939,7 @@ html, body {
 
 .kick-msg .user {
   font-weight: 700;
-  margin-right: 4px;
+  margin-right: 0.33em;
 }
 
 .kick-msg .kick-emote {
@@ -879,28 +975,40 @@ html, body {
   #income { font-size: 12px; }
   #combo { font-size: 11px; }
 
+  /* Recznie ustawiony rozmiar (desktop) nie ma prawa glosu na waskim ekranie -
+     left+right+width:auto ukladaja panel na cala szerokosc, wiec resize (ktory
+     ustawia explicit inline width/height) jest tu wylaczony, zeby nie psul
+     tego ukladu. */
   #leaderboard-panel {
     top: 70px;
     left: 8px;
     right: 8px;
-    width: auto;
+    width: auto !important;
+    height: auto !important;
     max-height: 22vh;
+    resize: none;
   }
 
   #leaderboard-list {
-    max-height: 16vh;
+    /* !important: bije #leaderboard-panel:not([style*="height"]) #leaderboard-list
+       (wyzsza swoistosc) - na waskim ekranie limit ma byc zawsze wzgledem
+       ekranu, niezaleznie od tego, czy panel ma inline style.height z
+       poprzedniej sesji na desktopie. */
+    max-height: 16vh !important;
   }
 
   #kick-panel {
     bottom: 8px;
     left: 8px;
     right: 8px;
-    width: auto;
+    width: auto !important;
+    height: auto !important;
     max-height: 26vh;
+    resize: none;
   }
 
   #kick-messages {
-    max-height: 14vh;
+    max-height: 14vh !important; /* patrz komentarz przy #leaderboard-list wyzej */
     min-height: 50px;
   }
 }

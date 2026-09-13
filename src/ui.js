@@ -103,12 +103,14 @@ export function makeDraggable(panelEl, handleEl, storageKey = null) {
 
   handleEl.classList.add('floating-header');
 
-  // Przywrócenie zapisanej pozycji
+  // Przywrócenie zapisanej pozycji i rozmiaru (w/h - patrz uchwyt resize w
+  // style.css, "resize: both" na panelu). Zapisywane razem w jednym wpisie
+  // localStorage per panel.
   if (storageKey) {
     try {
       const saved = localStorage.getItem(storageKey);
       if (saved) {
-        let { x, y } = JSON.parse(saved);
+        let { x, y, w, h } = JSON.parse(saved);
         if (typeof x === 'number' && typeof y === 'number') {
           // Zabezpieczenie przed nakładaniem się rankingu na przyciski HUD w lewym górnym rogu
           if (storageKey === 'bankomat-clicker-leaderboard-pos' && x < 340 && y < 145) {
@@ -121,8 +123,36 @@ export function makeDraggable(panelEl, handleEl, storageKey = null) {
           panelEl.style.right = 'auto';
           panelEl.style.bottom = 'auto';
         }
+        if (typeof w === 'number' && w > 0) {
+          panelEl.style.width = `${Math.min(w, window.innerWidth - 20)}px`;
+        }
+        if (typeof h === 'number' && h > 0) {
+          panelEl.style.height = `${Math.min(h, window.innerHeight - 20)}px`;
+        }
       }
     } catch (_) {}
+  }
+
+  // Zapis rozmiaru po zmianie za natywny uchwyt (CSS "resize: both") -
+  // ResizeObserver to jedyny sposob wykrycia tej zmiany (nie ma zdarzenia
+  // "resize" na elemencie). Pomijamy zapis, gdy panel jest zwiniety, bo
+  // wtedy CSS wymusza height:auto i offsetHeight nie odzwierciedla
+  // zapamietanej wysokosci (patrz #leaderboard-panel.collapsed w style.css).
+  if (storageKey && typeof ResizeObserver !== 'undefined') {
+    let saveTimer = null;
+    const ro = new ResizeObserver(() => {
+      if (panelEl.classList.contains('collapsed')) return;
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(() => {
+        try {
+          const prev = JSON.parse(localStorage.getItem(storageKey) || '{}');
+          prev.w = panelEl.offsetWidth;
+          prev.h = panelEl.offsetHeight;
+          localStorage.setItem(storageKey, JSON.stringify(prev));
+        } catch (_) {}
+      }, 300);
+    });
+    ro.observe(panelEl);
   }
 
   let isDragging = false;
@@ -221,6 +251,17 @@ export function makeDraggable(panelEl, handleEl, storageKey = null) {
   // ma czego tu bronic przed wyjsciem poza ekran - jego pozycje kontroluje
   // kto inny (domyslny CSS albo, dla rankingu, tutorial.js).
   window.addEventListener('resize', () => {
+    // Rozmiar recznie ustawiony przez widza (resize uchwytem) tez trzeba
+    // przyciac, gdy okno przegladarki sie skurczy - niezaleznie od tego, czy
+    // panel byl kiedys przeciagniety (warunek na pozycje ponizej dotyczy
+    // tylko left/top).
+    if (!panelEl.classList.contains('collapsed')) {
+      const maxW = Math.max(240, window.innerWidth - 20);
+      const maxH = Math.max(120, window.innerHeight - 20);
+      if (panelEl.offsetWidth > maxW) panelEl.style.width = `${maxW}px`;
+      if (panelEl.offsetHeight > maxH) panelEl.style.height = `${maxH}px`;
+    }
+
     if (storageKey) {
       try {
         if (!localStorage.getItem(storageKey)) return;
@@ -263,7 +304,10 @@ export class KickUI {
     this.toggleBtn = document.getElementById('kick-toggle-btn');
 
     this._maxMessages = 45;
+    this._pendingNewMessages = 0;
+    this._newMsgBtn = null;
     this._bindEvents();
+    this._bindScrollLock();
     collapseHudPanelsOnNarrowScreen();
 
     if (this.panel && this.header) {
@@ -271,12 +315,66 @@ export class KickUI {
     }
   }
 
+  /** Tolerancja w px - "przy dole" nie musi znaczyc scrollTop dokladnie na maksimum. */
+  static _SCROLL_BOTTOM_TOLERANCE = 30;
+
+  _isScrolledToBottom() {
+    const el = this.messagesEl;
+    if (!el) return true;
+    return el.scrollHeight - el.scrollTop - el.clientHeight <= KickUI._SCROLL_BOTTOM_TOLERANCE;
+  }
+
+  /** Widz recznie zjechal na dol - znosi blokade przewijania sam z siebie. */
+  _bindScrollLock() {
+    if (!this.messagesEl) return;
+    this.messagesEl.addEventListener('scroll', () => {
+      if (this._isScrolledToBottom()) this._hideNewMessagesBtn();
+    });
+  }
+
+  _ensureNewMessagesBtn() {
+    if (this._newMsgBtn || !this.messagesEl) return this._newMsgBtn;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'kick-new-messages-btn';
+    btn.hidden = true;
+    btn.addEventListener('click', () => {
+      this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+      this._hideNewMessagesBtn();
+    });
+    this.messagesEl.appendChild(btn);
+    this._newMsgBtn = btn;
+    return btn;
+  }
+
+  _showNewMessagesBtn() {
+    const btn = this._ensureNewMessagesBtn();
+    if (!btn) return;
+    btn.hidden = false;
+    btn.textContent = `⬇ Nowe wiadomości (${this._pendingNewMessages})`;
+  }
+
+  _hideNewMessagesBtn() {
+    this._pendingNewMessages = 0;
+    if (this._newMsgBtn) this._newMsgBtn.hidden = true;
+  }
+
   _bindEvents() {
     if (this.toggleBtn && this.panel) {
       this.toggleBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         this.panel.classList.toggle('collapsed');
-        this.toggleBtn.textContent = this.panel.classList.contains('collapsed') ? '+' : '–';
+        const collapsed = this.panel.classList.contains('collapsed');
+        this.toggleBtn.textContent = collapsed ? '+' : '–';
+        // Gdy panel jest zwiniety (display:none), #kick-messages ma
+        // clientHeight/scrollHeight = 0 - addMessage w tym czasie liczy
+        // "przy dole" na tych zerowych wartosciach, wiec po rozwinieciu stan
+        // bywa nieaktualny. Rozwiniecie zawsze wraca na sam dol i chowa
+        // przycisk "Nowe wiadomosci", tak jak dawniej (przed blokada scrolla).
+        if (!collapsed && this.messagesEl) {
+          this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+          this._hideNewMessagesBtn();
+        }
       });
     }
   }
@@ -297,6 +395,10 @@ export class KickUI {
 
   addMessage(msg) {
     if (!this.messagesEl) return;
+    // Zapamietane PRZED dopisaniem nowej wiadomosci - czy widz w tej chwili
+    // czyta starsze wpisy (przewiniety wyzej) czy stoi przy dole czatu.
+    const wasAtBottom = this._isScrolledToBottom();
+
     const div = document.createElement('div');
     div.className = 'kick-msg';
 
@@ -317,11 +419,32 @@ export class KickUI {
 
     this.messagesEl.appendChild(div);
 
-    while (this.messagesEl.children.length > this._maxMessages) {
-      this.messagesEl.removeChild(this.messagesEl.firstChild);
+    // Limit wiadomosci - usuwamy najstarsze z gory. Licza sie tylko wpisy
+    // czatu (kick-msg), nie przycisk "Nowe wiadomosci" (absolute, poza
+    // limitem konceptualnie, ale i tak nigdy nie jest "firstChild" o ile
+    // przewinal go dalej niz kick-msg... dla pewnosci liczymy po klasie).
+    let removedHeight = 0;
+    let msgCount = this.messagesEl.querySelectorAll('.kick-msg').length;
+    while (msgCount > this._maxMessages) {
+      const oldest = this.messagesEl.querySelector('.kick-msg');
+      if (!oldest) break;
+      removedHeight += oldest.offsetHeight;
+      oldest.remove();
+      msgCount--;
     }
 
-    this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+    if (wasAtBottom) {
+      this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+      this._hideNewMessagesBtn();
+    } else {
+      // Widz czyta wyzej - nie przewijamy. Usuniecie najstarszych wiadomosci
+      // z gory przesuwa cala tresc do gory o ich wysokosc, wiec korygujemy
+      // scrollTop o tyle samo, zeby czytany fragment zostal w tym samym
+      // miejscu na ekranie.
+      if (removedHeight > 0) this.messagesEl.scrollTop -= removedHeight;
+      this._pendingNewMessages++;
+      this._showNewMessagesBtn();
+    }
   }
 }
 
