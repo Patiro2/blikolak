@@ -30,13 +30,22 @@ const RESPAWN_OPOZNIENIE = 6; // sekund od zuzycia do ponownego spawnu danego ty
 const BUTELKA_START = 4; // sekunda walki, w ktorej moze pojawic sie pierwsza butelka
 const SRODEK_START = 9; // sekunda walki, w ktorej moze pojawic sie pierwszy srodek
 
-// Skala kraba (animal-crab.glb, kenney_cube-pets) - zmierzony natywny bbox
-// (Box3 z accessorow POSITION wszystkich mesh-y, wliczajac transformacje
-// wezlow): 2.336 x 1.431 x 1.347 (szer x wys x glab). Zeby "wyraznie
-// widoczny, ale miescil sie ok. w jednym polu 1x1" (zadanie), skala jest
-// dobrana tak, zeby najszerszy wymiar (2.336) zmiescil sie z zapasem w
-// jednym kafelku siatki (1.0 jednostki): 2.336*0.36 = 0.841.
-const CRAB_SCALE = 0.36;
+// Skala kraba (animal-crab.glb, kenney_cube-pets) - cel: wysokosc samego
+// kraba (bez ogona) = 1.5x wysokosci awatara gracza. Zmierzone w dzialajacej
+// grze (Box3.setFromObject): awatar gracza = 0.726 wys.; krab przy
+// CRAB_SCALE=0.36 = 0.841 x 0.515 x 0.485 (szer x wys x glab), wiec wysokosc
+// natywna (nieskalowana) = 0.515/0.36 = 1.4306. Docelowa wysokosc kraba =
+// 1.5*0.726 = 1.089 -> CRAB_SCALE = 1.089/1.4306 = 0.76. Szerokosc wyjdzie
+// ~1.8 (wieksza niz pole 1x1) - zaakceptowane w zadaniu. Ogon jest dzieckiem
+// wezla 'body' kraba (patrz _zbudujOgon), wiec skaluje sie automatycznie
+// razem z crab.scale - nie trzeba go przeliczac osobno.
+const CRAB_SCALE = 0.76;
+// Stosunek nowej do starej skali - do proporcjonalnego przeliczenia stalych
+// zaleznych od rozmiaru bossa (wysokosci tekstu/plakietek nad modelem).
+const CRAB_SCALE_FACTOR = CRAB_SCALE / 0.36; // ~2.111
+
+const NEON_BUTELKA = 0x00f0ff;
+const NEON_SRODEK = 0xff2bd6;
 
 // Przyblizony kolor skorupy kraba/skorpiona dla proceduralnego ogona - ogon
 // jest czysto kosmetycznym dodatkiem (w zadnej paczce Kenneya nie ma modelu
@@ -97,6 +106,10 @@ export class BossSkorpion {
     this._openHoles = new Map(); // "x,z" -> THREE.Group
     this._itemMeshButelka = null;
     this._itemMeshSrodek = null;
+    this._itemRingButelka = null; // pierscien neonowy na podlodze pod przedmiotem
+    this._itemRingSrodek = null;
+    this._itemOutlineButelka = null; // "inverted hull" obrys - dziecko itemMesh*
+    this._itemOutlineSrodek = null;
   }
 
   // ================= BUDOWA MODELU =================
@@ -566,7 +579,10 @@ export class BossSkorpion {
       this.ekwipunki.delete(key);
       audio.play('skorpion-trucizna');
       if (this.boss.projectAndFloat) {
-        this.boss.projectAndFloat(new THREE.Vector3(this.x, 1.4, this.z), `☠️ -${TRUCIZNA_DMG} HP`, { crit: true });
+        // Wysokosc tekstu nad modelem - przeliczona proporcjonalnie do
+        // wiekszej skali bossa (patrz CRAB_SCALE_FACTOR), zeby nie wchodzic
+        // w powiekszony model/ogon (dawna wartosc 1.4 przy CRAB_SCALE=0.36).
+        this.boss.projectAndFloat(new THREE.Vector3(this.x, 1.4 * CRAB_SCALE_FACTOR, this.z), `☠️ -${TRUCIZNA_DMG} HP`, { crit: true });
       }
       showBossNotification(
         'hit',
@@ -697,6 +713,60 @@ export class BossSkorpion {
     return mesh;
   }
 
+  /**
+   * "Inverted hull" obrys - kopia geometrii przedmiotu (dziecko meshu, wiec
+   * dziedziczy obrot/unoszenie), lekko powiekszona, wnetrze BackSide zeby
+   * widac bylo tylko rabek na krawedziach. Geometrie sa WSPOLDZIELONE z
+   * template (mesh.clone(true) nie klonuje geometrii/materialow) - NIE
+   * dispose'owac ich, tylko nowo utworzone materialy ponizej.
+   */
+  _makeOutline(mesh, color) {
+    const outline = mesh.clone(true);
+    outline.traverse((n) => {
+      if (n.isMesh) {
+        n.castShadow = false;
+        n.material = new THREE.MeshBasicMaterial({
+          color,
+          side: THREE.BackSide,
+          transparent: true,
+          depthWrite: false,
+          opacity: 0.85,
+        });
+      }
+    });
+    outline.scale.setScalar(1.15);
+    mesh.add(outline);
+    return outline;
+  }
+
+  _disposeOutline(outline) {
+    if (!outline) return;
+    outline.traverse((n) => { if (n.isMesh && n.material) n.material.dispose(); });
+  }
+
+  _makeItemRing(color) {
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.32, 0.42, 32),
+      new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity: 0.7,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      }),
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.02;
+    return ring;
+  }
+
+  _disposeItemRing(ring) {
+    if (!ring) return;
+    ring.geometry.dispose();
+    ring.material.dispose();
+  }
+
   _renderPrzedmiotyNaMapie(delta) {
     this._ogonT += delta;
     if (this._ogonBaza) this._ogonBaza.rotation.z = Math.sin(this._ogonT * 1.6) * 0.12;
@@ -705,7 +775,12 @@ export class BossSkorpion {
     if (this.itemButelka) {
       if (!this._itemMeshButelka) {
         this._itemMeshButelka = this._makeItemMesh(this.boss.bottleTemplate);
-        if (this._itemMeshButelka) this.boss.scene.add(this._itemMeshButelka);
+        if (this._itemMeshButelka) {
+          this.boss.scene.add(this._itemMeshButelka);
+          this._itemOutlineButelka = this._makeOutline(this._itemMeshButelka, NEON_BUTELKA);
+          this._itemRingButelka = this._makeItemRing(NEON_BUTELKA);
+          this.boss.scene.add(this._itemRingButelka);
+        }
       }
       if (this._itemMeshButelka) {
         this._itemMeshButelka.position.set(
@@ -714,17 +789,37 @@ export class BossSkorpion {
           this.itemButelka.z,
         );
         this._itemMeshButelka.rotation.y += delta * 1.4;
+        const puls = 0.5 + Math.sin(this._ogonT * 2.4) * 0.25;
+        if (this._itemOutlineButelka) {
+          this._itemOutlineButelka.traverse((n) => { if (n.isMesh) n.material.opacity = 0.6 + puls * 0.3; });
+        }
+        if (this._itemRingButelka) {
+          this._itemRingButelka.position.set(this.itemButelka.x, 0.02, this.itemButelka.z);
+          this._itemRingButelka.material.opacity = puls;
+        }
       }
     } else if (this._itemMeshButelka) {
       this.boss.scene.remove(this._itemMeshButelka);
+      this._disposeOutline(this._itemOutlineButelka);
+      this._itemOutlineButelka = null;
       this._itemMeshButelka = null;
+      if (this._itemRingButelka) {
+        this.boss.scene.remove(this._itemRingButelka);
+        this._disposeItemRing(this._itemRingButelka);
+        this._itemRingButelka = null;
+      }
     }
 
     // Srodek
     if (this.itemSrodek) {
       if (!this._itemMeshSrodek) {
         this._itemMeshSrodek = this._makeItemMesh(this.boss.potionTemplate);
-        if (this._itemMeshSrodek) this.boss.scene.add(this._itemMeshSrodek);
+        if (this._itemMeshSrodek) {
+          this.boss.scene.add(this._itemMeshSrodek);
+          this._itemOutlineSrodek = this._makeOutline(this._itemMeshSrodek, NEON_SRODEK);
+          this._itemRingSrodek = this._makeItemRing(NEON_SRODEK);
+          this.boss.scene.add(this._itemRingSrodek);
+        }
       }
       if (this._itemMeshSrodek) {
         this._itemMeshSrodek.position.set(
@@ -733,10 +828,25 @@ export class BossSkorpion {
           this.itemSrodek.z,
         );
         this._itemMeshSrodek.rotation.y += delta * 1.4;
+        const puls = 0.5 + Math.sin(this._ogonT * 2.4 + 1.6) * 0.25;
+        if (this._itemOutlineSrodek) {
+          this._itemOutlineSrodek.traverse((n) => { if (n.isMesh) n.material.opacity = 0.6 + puls * 0.3; });
+        }
+        if (this._itemRingSrodek) {
+          this._itemRingSrodek.position.set(this.itemSrodek.x, 0.02, this.itemSrodek.z);
+          this._itemRingSrodek.material.opacity = puls;
+        }
       }
     } else if (this._itemMeshSrodek) {
       this.boss.scene.remove(this._itemMeshSrodek);
+      this._disposeOutline(this._itemOutlineSrodek);
+      this._itemOutlineSrodek = null;
       this._itemMeshSrodek = null;
+      if (this._itemRingSrodek) {
+        this.boss.scene.remove(this._itemRingSrodek);
+        this._disposeItemRing(this._itemRingSrodek);
+        this._itemRingSrodek = null;
+      }
     }
   }
 
@@ -816,8 +926,28 @@ export class BossSkorpion {
       grupa.traverse((n) => { if (n.isMesh) { n.geometry.dispose(); n.material.dispose(); } });
     }
     this._openHoles.clear();
-    if (this._itemMeshButelka) { this.boss.scene.remove(this._itemMeshButelka); this._itemMeshButelka = null; }
-    if (this._itemMeshSrodek) { this.boss.scene.remove(this._itemMeshSrodek); this._itemMeshSrodek = null; }
+    if (this._itemMeshButelka) {
+      this.boss.scene.remove(this._itemMeshButelka);
+      this._disposeOutline(this._itemOutlineButelka);
+      this._itemOutlineButelka = null;
+      this._itemMeshButelka = null;
+    }
+    if (this._itemMeshSrodek) {
+      this.boss.scene.remove(this._itemMeshSrodek);
+      this._disposeOutline(this._itemOutlineSrodek);
+      this._itemOutlineSrodek = null;
+      this._itemMeshSrodek = null;
+    }
+    if (this._itemRingButelka) {
+      this.boss.scene.remove(this._itemRingButelka);
+      this._disposeItemRing(this._itemRingButelka);
+      this._itemRingButelka = null;
+    }
+    if (this._itemRingSrodek) {
+      this.boss.scene.remove(this._itemRingSrodek);
+      this._disposeItemRing(this._itemRingSrodek);
+      this._itemRingSrodek = null;
+    }
 
     // Wyczysc ikony ekwipunku z rankingu.
     const kickChat = this.boss.kickChat;
