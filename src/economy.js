@@ -20,7 +20,7 @@ export const MACHINE_TIERS = [
 // automatu (indeks = tier, tier 0 jest odblokowany od razu). Awans jest
 // automatyczny - gdy suma klikniec z czatu przekroczy prog, bankomat sam
 // podmienia model i pokazuje baner na gorze ekranu (patrz main.js).
-export const MACHINE_TIER_CLICK_THRESHOLDS = [0, 100, 500, 2000, 6000, 12000];
+export const MACHINE_TIER_CLICK_THRESHOLDS = [0, 500, 1000, 2000, 4000, 8000];
 
 // 10 stalych "rol" pracownikow - kazda przypisana do jednego miejsca w Top 10
 // rankingu widzow (patrz kick.js updateAssignments). Nikt ich nie kupuje -
