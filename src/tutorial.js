@@ -33,30 +33,17 @@ const SEKCJE = [
   {
     tytul: 'Klikanie',
     akapity: [
-      'Każda wiadomość na czacie Kicka to kliknięcie w bankomat - nieważne co napiszesz.',
+      'Każda wiadomość na czacie Kicka - obojętnie jaka - to jedno kliknięcie w bankomat. Nie musisz pisać "klik".',
       'Jedno kliknięcie to na start <b>1 zł</b> - kwota rośnie wraz z ulepszaniem bankomatu.',
       '<b>5%</b> szans na trafienie krytyczne, które daje <b>3x</b> więcej.',
-      '<b>Kombo</b>: kliknięcia z czatu w odstępie do 0,7 s nabijają mnożnik - +4% za stopień, maksymalnie +100%.',
+      '<b>Kombo</b>: wiadomości w odstępie do 0,7 s nabijają wspólny mnożnik - +4% za stopień, maksymalnie +100%.',
+      'Komendy ruchu i odpowiedzi w minigrach też liczą się jako kliknięcie.',
     ],
   },
   {
     tytul: 'Bankomat',
     akapity: [
       'Im więcej kliknięć uzbiera cały czat, tym bankomat awansuje na lepszy model, a każde kolejne kliknięcie jest warte więcej.',
-    ],
-  },
-  {
-    tytul: 'Złota moneta',
-    akapity: [
-      'Co jakiś czas na losowym polu areny pojawia się złota moneta warta <b>25 zł</b>.',
-      'Zgarnia ją pierwsza postać z Top 10, która do niej dobiegnie.',
-    ],
-  },
-  {
-    tytul: 'Poruszanie się',
-    akapity: [
-      'Tylko gracze z <b>Top 10</b> mają swoją postać na arenie i tylko oni mogą nią ruszać.',
-      'Ruch o jedno pole komenda na czacie: <code>w</code>/<code>a</code>/<code>s</code>/<code>d</code>, <code>gora</code>/<code>dol</code>/<code>lewo</code>/<code>prawo</code>, <code>up</code>/<code>down</code>/<code>left</code>/<code>right</code>, <code>przod</code>/<code>tyl</code>, a także dłuższe formy jak "w lewo" czy "krok w gore".',
     ],
   },
   {
@@ -67,10 +54,50 @@ const SEKCJE = [
     ],
   },
   {
+    tytul: 'Poruszanie się',
+    akapity: [
+      'Tylko gracze z <b>Top 10</b> mają swoją postać na arenie i tylko oni mogą nią ruszać.',
+      'Ruch o jedno pole komenda na czacie: <code>w</code>/<code>a</code>/<code>s</code>/<code>d</code>, <code>gora</code>/<code>dol</code>/<code>lewo</code>/<code>prawo</code>, <code>up</code>/<code>down</code>/<code>left</code>/<code>right</code>, <code>przod</code>/<code>tyl</code>, a także dłuższe formy jak "w lewo" czy "krok w gore".',
+      'Kierunki liczą się względem tego, gdzie postać patrzy: przód to krok do przodu, lewo/prawo to obrót i krok, tył to obrót i krok w przeciwną stronę.',
+      'Kilka postaci może stać na jednym polu.',
+    ],
+  },
+  {
+    tytul: 'Złota moneta',
+    akapity: [
+      'Co jakiś czas na losowym polu areny pojawia się złota moneta warta <b>25 zł</b>.',
+      'Zgarnia ją pierwsza postać z Top 10, która na nie wejdzie.',
+    ],
+  },
+  {
+    tytul: 'Bitwa o flagi',
+    akapity: [
+      'Co jakiś czas na arenie pojawia się podświetlone pole otoczone płotkami.',
+      'Gdy wejdą na nie dwie postacie z Top 10, zaczyna się bitwa - nad polem pojawia się flaga.',
+      'Obaj walczący wpisują na czacie nazwę państwa (po polsku albo po angielsku - dopiski typu "xd" nie przeszkadzają). Liczy się tylko odpowiedź tych dwóch graczy.',
+      'Kto pierwszy zdobędzie <b>3 punkty</b>, wygrywa. W trakcie bitwy obaj stoją w miejscu, a nikt inny nie może wejść na pole.',
+      'Zwycięzca dostaje <b>2 zł</b> na sekundę przez 30 sekund, przegrany zostaje wyrzucony na sąsiednie pole.',
+    ],
+  },
+  {
+    tytul: 'Bitwa tłumaczeń',
+    akapity: [
+      'Działa jak bitwa o flagi - pole, dwie postacie z Top 10, ta sama nagroda - ale nad polem pojawia się angielskie słowo, a walczący wpisują jego polskie tłumaczenie.',
+      'Wygrywa ten, kto pierwszy zdobędzie <b>5 punktów</b>.',
+      'Pojawia się dopiero na dalszym etapie gry.',
+    ],
+  },
+  {
     tytul: 'Vanessa',
     akapity: [
       'Czasem na arenę zakrada się złodziejka i podkrada złotówki jednemu z graczy z Top 10.',
       'Nad ekranem widać wtedy hasło - kto pierwszy napisze je na czacie, przegania ją i dostaje nagrodę. Może to zrobić każdy z czatu, nie tylko gracze z Top 10.',
+    ],
+  },
+  {
+    tytul: 'Tryb nocny',
+    akapity: [
+      'Przycisk <b>🌙 Noc</b> w lewym górnym rogu włącza tryb nocny - tylko u Ciebie, w Twojej przeglądarce.',
     ],
   },
 ];
