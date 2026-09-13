@@ -4,8 +4,9 @@
     {
       "name": "bankomat-clicker",
       "runtimeExecutable": "python",
-      "runtimeArgs": ["-m", "http.server", "8099"],
-      "port": 8099
+      "runtimeArgs": ["serve.py", "8123"],
+      "port": 8123,
+      "autoPort": false
     }
   ]
 }
