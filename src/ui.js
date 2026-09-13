@@ -844,22 +844,9 @@ export function showBossNotification(type, title, bodyText, durationMs = DEFAULT
   }, durationMs);
 }
 
-// Krotkie streszczenie komend czatu dla widzow - NIE zawiera zadnych sekretnych
-// kodow (patrz KODY w kick.js, np. "aezakmi" - to celowa niespodzianka do
-// odkrycia, ma zostac poza legenda). Tresc jest krotszym powtorzeniem tego,
-// co jest w panelu "Jak grac?" (patrz src/tutorial.js, ktorego nie wolno tu
-// ruszac) - zduplikowana, nie zaimportowana, bo tamten plik nic nie eksportuje.
+// Panel "Skiny" - tylko komenda zmiany skina i lista nazw (reszta komend jest
+// w panelu "Jak grac?", patrz src/tutorial.js).
 const LEGENDA_KOMENDY = [
-  { tytul: 'Klikanie', opis: 'Kazda wiadomosc na czacie to jedno klikniecie w bankomat - nie trzeba pisac "klik".' },
-  {
-    tytul: 'Ruch (tylko Top 10)',
-    opis: 'Jedno pole: <code>w</code>/<code>a</code>/<code>s</code>/<code>d</code>, <code>gora</code>/<code>dol</code>/<code>lewo</code>/<code>prawo</code>, <code>up</code>/<code>down</code>/<code>left</code>/<code>right</code>. Skos bez obrotu: <code>q</code>/<code>e</code>/<code>z</code>/<code>c</code>. Kombinacje do 5 liter, np. <code>wwd</code>.',
-  },
-  {
-    tytul: 'Minigry na arenie',
-    opis: 'Bitwa o flagi, bitwa tlumaczen, panstwa-miasta, bitwa o marki: dwie postacie z Top 10 wchodza na oznaczone pole i wpisuja odpowiedz (panstwo/tlumaczenie/marka) na czacie - kto pierwszy zdobedzie 5 punktow, wygrywa.',
-  },
-  { tytul: 'Vanessa', opis: 'Gdy zlodziejka podkradnie zlotowki, kazdy na czacie moze ja przegonic haslem widocznym nad ekranem.' },
   { tytul: 'Zmiana skina', opis: 'Komenda <code>!skin nazwa</code> (dziala tez bez "!") zmienia wyglad Twojej postaci w Top 10 - lista nazw ponizej. <code>!skin reset</code> wraca do domyslnego modelu.' },
 ];
 
@@ -870,7 +857,7 @@ function zbudujPanelLegendy() {
 
   const header = document.createElement('div');
   header.id = 'legenda-header';
-  header.innerHTML = '<span>📖 Legenda</span>';
+  header.innerHTML = '<span>🎭 Skiny</span>';
 
   const closeBtn = document.createElement('button');
   closeBtn.id = 'legenda-close-btn';

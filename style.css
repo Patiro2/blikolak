@@ -1950,6 +1950,11 @@ body.tryb-widza #widz-plakietka {
   color: #eee;
 }
 
+/* display:flex wyzej nadpisuje atrybut hidden - bez tego panel sie nie chowa. */
+#legenda-panel[hidden] {
+  display: none;
+}
+
 #legenda-header {
   display: flex;
   align-items: center;
