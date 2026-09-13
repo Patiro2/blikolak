@@ -241,9 +241,12 @@ export class Economy {
 
   /**
    * Wykonuje klikniecie w automat: liczy kombo calego czatu, losuje krytyka,
-   * dolicza kase do wspolnej puli. `isChatClick` = true dla klikniec widzow
-   * (napedzaja awans tieru automatu), false dla reczengo klikniecia streamera
-   * w model 3D (dolicza kase, ale NIE liczy sie do progu awansu tieru).
+   * dolicza kase do wspolnej puli. `isChatClick` = true oznacza, ze klikniecie
+   * liczy sie do progu awansu tieru automatu. Wolaja z `true` OBIE sciezki:
+   * komendy widzow z czatu ORAZ klikniecia wlasciciela myszka w model 3D
+   * (patrz machine.onClickHit w main.js) - decyzja z commita "1 klikniecie =
+   * 1 zl na kazdym tierze bankomatu". Domyslne `false` zostaje dla wywolan,
+   * ktore maja tylko doliczyc kase, bez ruszania licznika awansu.
    *
    * `msgId` to id wiadomosci czatu Kicka, ktora wywolala to klikniecie (patrz
    * chatItem.id w src/kick.js) - trafienie krytyczne jest zakotwiczone w tym
