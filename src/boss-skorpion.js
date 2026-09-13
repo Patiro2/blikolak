@@ -64,6 +64,7 @@ export class BossSkorpion {
 
     this.fazaWejscia = false;
     this._wejscieT = 0;
+    this._startWalki = null; // ustawiane w _updateEntrance, w chwili konca cutscenki
 
     // --- Pozycja i ruch na siatce (patrz naglowek pliku - liczone bez bramki hosta) ---
     this.x = 0;
@@ -227,6 +228,7 @@ export class BossSkorpion {
     }
     this.fazaWejscia = true;
     this._wejscieT = 0;
+    this._startWalki = null;
     audio.play('boss-wejscie');
     this.playAction('idle', { hard: true });
     if (this.boss.stealRowEl) this.boss.stealRowEl.style.display = 'none';
@@ -242,15 +244,19 @@ export class BossSkorpion {
     this._wejscieT += delta;
     if (this._wejscieT >= CZAS_WEJSCIA) {
       this.fazaWejscia = false;
+      // Zegar walki startuje TU, nie w boss.startWalki (ktory obejmuje cutscene
+      // wejscia - patrz naglowek sekcji ZEGAR WALKI). Date.now() jest wspolny
+      // dla hosta i widzow, wiec obaj licza od tej samej chwili po sync.
+      this._startWalki = Date.now();
       this._wybierzKrok();
     }
   }
 
-  // ================= ZEGAR WALKI (wspolna oś czasu - boss.startWalki) =================
+  // ================= ZEGAR WALKI (wlasny znacznik - NIE boss.startWalki, ktory obejmuje cutscene) =================
 
   _fightSec() {
-    if (!this.boss.startWalki) return 0;
-    return Math.max(0, (Date.now() - this.boss.startWalki) / 1000);
+    if (!this._startWalki) return 0;
+    return Math.max(0, (Date.now() - this._startWalki) / 1000);
   }
 
   // ================= RUCH / UCIECZKA (bez bramki hosta - patrz naglowek) =================
@@ -430,10 +436,35 @@ export class BossSkorpion {
     this.boss._log('info', `Skorpion: spawn przedmiotu "${typ}" na polu [${pole.x}, ${pole.z}]`);
   }
 
+  /** Czy ktos aktualnie trzyma dany typ w ekwipunku (trucizna sie nie liczy - patrz zadanie). */
+  _ktosTrzyma(typ) {
+    for (const v of this.ekwipunki.values()) {
+      if (v.typ === typ) return true;
+    }
+    return false;
+  }
+
   _aktualizujSpawnPrzedmiotow() {
     const fightSec = this._fightSec();
-    if (!this.itemButelka && fightSec >= this._nextButelkaAt) this._zespawnujPrzedmiot('butelka');
-    if (!this.itemSrodek && fightSec >= this._nextSrodekAt) this._zespawnujPrzedmiot('srodek');
+    if (!this.itemButelka && !this._ktosTrzyma('butelka') && fightSec >= this._nextButelkaAt) this._zespawnujPrzedmiot('butelka');
+    if (!this.itemSrodek && !this._ktosTrzyma('srodek') && fightSec >= this._nextSrodekAt) this._zespawnujPrzedmiot('srodek');
+  }
+
+  /**
+   * Sprzatanie ekwipunkow graczy, ktorzy wypadli z Top 10 w inny sposob niz
+   * smierc na zapadnietym polu (to obsluguje juz _sprawdzSmierciNaZapadnietych) -
+   * np. zostali wyeliminowani/zastapieni w rankingu. Bez tego przedmiot
+   * zostalby zablokowany na zawsze (patrz zadanie, blad 1).
+   */
+  _wyczyscEkwipunkiWypadnietych() {
+    if (!this.boss.kickChat) return;
+    for (const [key, v] of [...this.ekwipunki]) {
+      if (this.boss.kickChat.getWorkerForUser(v.username) !== null) continue;
+      this.ekwipunki.delete(key);
+      const fightSec = this._fightSec();
+      if (v.typ === 'butelka') this._nextButelkaAt = fightSec + RESPAWN_OPOZNIENIE;
+      else if (v.typ === 'srodek') this._nextSrodekAt = fightSec + RESPAWN_OPOZNIENIE;
+    }
   }
 
   /** Przedmiot lezacy na polu, ktore wlasnie sie zapadlo - przenosimy go gdzie indziej. */
@@ -761,6 +792,7 @@ export class BossSkorpion {
     const jestemHostem = !this.boss.czyNaliczanieDozwolone || this.boss.czyNaliczanieDozwolone();
     if (jestemHostem) {
       this._przeniesPrzedmiotyZeZapadnietegoPola();
+      this._wyczyscEkwipunkiWypadnietych();
       this._aktualizujSpawnPrzedmiotow();
       this._sprawdzSmierciNaZapadnietych();
       this._sprawdzZbieranie();
@@ -808,6 +840,7 @@ export class BossSkorpion {
 
   getSyncState() {
     return {
+      startWalki: this._startWalki,
       x: this.x,
       z: this.z,
       startX: this.startX,
@@ -828,6 +861,7 @@ export class BossSkorpion {
   /** Widz WYLACZNIE wyswietla zsynchronizowany stan - host jest zrodlem prawdy dla decyzji. */
   applySync(state) {
     if (!state) return;
+    if (typeof state.startWalki === 'number' || state.startWalki === null) this._startWalki = state.startWalki;
     if (typeof state.x === 'number') this.x = state.x;
     if (typeof state.z === 'number') this.z = state.z;
     if (typeof state.startX === 'number') this.startX = state.startX;
