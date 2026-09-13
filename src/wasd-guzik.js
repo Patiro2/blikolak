@@ -77,6 +77,7 @@ function zbudujOknoInstrukcji() {
         <li>Wklej skrypt (<strong>Ctrl+V</strong>) i naciśnij Enter.</li>
         <li>Trzymaj <strong>Lewy Shift</strong> i naciskaj W/A/S/D. Każdy klawisz wysyła literę na czat.</li>
       </ol>
+      <p id="wasd-instrukcja-kombinacje">Kombinacje działają też z ręcznie wpisanych liter: <code>ww</code> = 2 pola do przodu, <code>wd</code> = przód i w prawo, maks. 5 liter na wiadomość.</p>
       <p id="wasd-ostrzezenie">⚠️ Wklejaj do konsoli tylko ten kod z tej strony — nigdy kodu od obcych, bo w ten sposób kradnie się konta.</p>
       <textarea id="wasd-reczna-kopia" readonly hidden></textarea>
       <div id="wasd-dialog-akcje">

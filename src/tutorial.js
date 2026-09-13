@@ -57,6 +57,7 @@ const SEKCJE = [
       'Tylko gracze z <b>Top 10</b> mają swoją postać na arenie i tylko oni mogą nią ruszać.',
       'Ruch o jedno pole komenda na czacie: <code>w</code>/<code>a</code>/<code>s</code>/<code>d</code>, <code>gora</code>/<code>dol</code>/<code>lewo</code>/<code>prawo</code>, <code>up</code>/<code>down</code>/<code>left</code>/<code>right</code>, <code>przod</code>/<code>tyl</code>, a także dłuższe formy jak "w lewo" czy "krok w gore".',
       'Kierunki liczą się względem tego, gdzie postać patrzy: przód to krok do przodu, lewo/prawo to obrót i krok, tył to obrót i krok w przeciwną stronę.',
+      'Kombinacje: <code>ww</code> = 2 pola do przodu, <code>wd</code> = przód i w prawo, dowolne złożenie <code>w</code>/<code>a</code>/<code>s</code>/<code>d</code>, maks. 5 liter.',
       'Kilka postaci może stać na jednym polu.',
     ],
   },

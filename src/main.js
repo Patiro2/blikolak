@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { createScene, buildRoom } from './scene.js';
 import { preloadAll, setTextureQuality } from './assets.js';
 import { Machine } from './machine.js';
-import { WorkerManager, parseMovementDirection } from './workers.js';
+import { WorkerManager, parseMovementCombo } from './workers.js';
 import { CoinPool } from './coins.js';
 import { GoldenCoinManager } from './goldcoin.js';
 import { FlagBattleManager } from './flagbattle.js';
@@ -817,21 +817,25 @@ async function main() {
       // Odpowiedzi do bitwy tlumaczen
       tlumaczenia.onChatMessage(msg.username, msg.content);
       // Chodzenie po siatce 2D areny - tylko dla aktywnych graczy w grze (Top 10)
-      const moveDir = parseMovementDirection(msg.content);
-      if (moveDir) {
+      // Pojedyncza komenda albo kombinacja (np. "wwd", max 5 znakow) - patrz
+      // parseMovementCombo w workers.js. Nowa kombinacja od tego samego widza
+      // zastepuje reszte jego poprzedniej kolejki (queueMoves).
+      const moveCombo = parseMovementCombo(msg.content);
+      if (moveCombo) {
         const slot = kickChat.getWorkerForUser(msg.username);
         if (
           slot !== null &&
           (!boss.isFainted || !boss.isFainted(msg.username)) &&
           (!vanessa.isStealingFrom || !vanessa.isStealingFrom(msg.username))
         ) {
-          workerManager.moveWorker(slot, moveDir);
+          workerManager.queueMoves(slot, moveCombo);
         }
       }
     },
     onTopWorkerChat: ({ workerIndex, content }) => {
-      // Komendy ruchu nie powinny wyzwalać animacji uderzenia w bankomat ani dymków
-      if (parseMovementDirection(content)) return;
+      // Komendy ruchu (pojedyncze i kombinacje) nie powinny wyzwalać animacji
+      // uderzenia w bankomat ani dymków
+      if (parseMovementCombo(content)) return;
 
       const clean = (content || '').trim();
       if (!clean) return;

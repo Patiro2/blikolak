@@ -94,6 +94,30 @@ export function parseMovementDirection(text) {
 }
 
 /**
+ * Rozpoznaje kombinację ruchów z treści wiadomości czatu: pojedynczą komendę
+ * (jak parseMovementDirection, zwrócona jako tablica 1-elementowa) albo krótki
+ * ciąg liter w/a/s/d (2-5 znaków, po tej samej normalizacji - trim, lowercase,
+ * prefiks !//, końcowa interpunkcja), np. "wd" -> ['up','right']. Dłuższe
+ * ciągi (>5) to zwykła wiadomość, nic się nie dzieje - zwraca null.
+ */
+export function parseMovementCombo(text) {
+  const single = parseMovementDirection(text);
+  if (single) return [single];
+
+  if (!text || typeof text !== 'string') return null;
+  const clean = text
+    .replace(/(?:^|\s)[!/]*klik+[!.,?*~]*(?=\s|$)/gi, ' ')
+    .replace(/(?:^|\s)[!/]*click+[!.,?*~]*(?=\s|$)/gi, ' ')
+    .trim();
+  const t = clean.toLowerCase().replace(/^[!/]+/, '').replace(/[!.,?*~]+$/, '').trim();
+
+  if (!/^[wasd]{2,5}$/.test(t)) return null;
+
+  const map = { w: 'up', s: 'down', a: 'left', d: 'right' };
+  return t.split('').map((c) => map[c]);
+}
+
+/**
  * Bezpieczny powrot dowolnej akcji do animacji spoczynku.
  *
  * crossFadeTo() TYLKO rozpisuje rampy wag - NIE uruchamia akcji docelowej.
@@ -277,6 +301,7 @@ export class WorkerManager {
         gridZ: initGridZ,
         facingAngle: initFacing,
         isMoving: false,
+        moveQueue: [], // pozostałe kierunki kombinacji czatu (np. "wwd") - patrz queueMoves/_advanceQueue
         moveProgress: 0,
         moveDuration: 0.32,
         startPos: new THREE.Vector3(initGridX, 0, initGridZ),
@@ -408,6 +433,7 @@ export class WorkerManager {
     entry.isFainted = !!fainted;
     if (fainted) {
       entry.isMoving = false;
+      entry.moveQueue.length = 0;
       if (entry.walkAction) entry.walkAction.stop();
       if (entry.obj) entry.obj.position.y = 0;
       this.playDeath(typeIndex);
@@ -562,6 +588,35 @@ export class WorkerManager {
   }
 
   /**
+   * Kolejkuje ciąg kroków (kombinacja z czatu, np. "wwd" -> ['up','up','right'])
+   * dla jednej postaci. Nowa wiadomość ruchu od tego samego widza ZASTĘPUJE
+   * resztę jego poprzedniej kolejki (widz "poprawia się" na czacie). Pierwszy
+   * krok startuje od razu (jeśli postać stoi), reszta rusza z update() krok po
+   * kroku, w miarę jak isMoving wraca na false - patrz _advanceQueue.
+   */
+  queueMoves(typeIndex, dirs) {
+    typeIndex = Number(typeIndex);
+    const entry = this.getWorkerType(typeIndex);
+    if (!entry || !Array.isArray(dirs) || dirs.length === 0) return;
+    entry.moveQueue = dirs.slice();
+    this._advanceQueue(entry);
+  }
+
+  /** Startuje kolejny krok z entry.moveQueue, jeśli postać aktualnie stoi. */
+  _advanceQueue(entry) {
+    if (!entry || entry.isMoving) return;
+    if (!entry.moveQueue || entry.moveQueue.length === 0) return;
+    const dir = entry.moveQueue.shift();
+    const ok = this.moveWorker(entry.typeIndex, dir);
+    if (!ok) {
+      // Krok odrzucony (omdlenie/blokada minigry/kradzież) - reszta kombinacji
+      // i tak nie ma szans przejść, więc czyścimy kolejkę zamiast dobijać się
+      // do kolejnych kroków co klatkę.
+      entry.moveQueue.length = 0;
+    }
+  }
+
+  /**
    * Odgrywa klip "die" pracownika (np. gdy boss go powala lub zabija).
    * LoopOnce + clampWhenFinished - awatar zostaje leżący na ostatniej klatce,
    * dopóki nie zostanie odratowany lub usunięty.
@@ -629,6 +684,8 @@ export class WorkerManager {
           if (entry.walkAction && entry.idleAction && !entry.isFainted) {
             wrocDoIdle(entry, entry.walkAction, 0.16);
           }
+
+          this._advanceQueue(entry);
         }
       }
     }
@@ -667,7 +724,9 @@ export class WorkerManager {
       const slot = Number(wpis.slot);
       const entry = this.getWorkerType(slot);
       if (!entry || !entry.obj) continue;
-      if (entry.isMoving) continue; // dokoncz biezacy krok, korekta przy kolejnym snapshocie
+      // dokoncz biezacy krok (lub kombinacje w toku - kolejka niepusta miedzy
+      // krokami liczy sie jak ruch), korekta przy kolejnym snapshocie
+      if (entry.isMoving || (entry.moveQueue && entry.moveQueue.length > 0)) continue;
 
       const gridX = Number(wpis.gridX);
       const gridZ = Number(wpis.gridZ);

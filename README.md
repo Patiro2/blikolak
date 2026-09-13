@@ -61,7 +61,11 @@ Port można podać jako argument: `python serve.py 8080`.
   "w lewo", "do przodu"). Kierunki są WZGLĘDEM tego, gdzie postać aktualnie
   patrzy (jak sterowanie "zza pleców postaci"), nie względem osi świata -
   `left`/`right` obracają postać o 90° i robią krok, `up`/`down` to krok do
-  przodu/tyłu względem aktualnego zwrotu. Postać nie wychodzi poza arenę 7×7
+  przodu/tyłu względem aktualnego zwrotu. Widz może też napisać kombinację 2-5
+  liter `w`/`a`/`s`/`d` w jednej wiadomości (np. `ww` = 2 pola do przodu, `wd` =
+  przód i w prawo) - postać wykonuje kroki po kolei, jeden po zakończeniu
+  poprzedniego; nowa kombinacja od tego samego widza zastępuje resztę
+  poprzedniej kolejki. Postać nie wychodzi poza arenę 7×7
   ani nie wchodzi na pole bankomatu (0,0) - w takich przypadkach tylko się
   obraca w tę stronę. **Kolizje między postaciami są wyłączone**: kilku widzów
   może stać na tym samym polu i przechodzić przez siebie, więc nikt nikomu nie
