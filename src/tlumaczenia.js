@@ -10,6 +10,7 @@ import { usunTagiEmotek } from './kick.js';
 import { loadForest } from './assets.js';
 import { strumien, losujInt, pozycjaBezPowtorek } from './rng.js';
 import { Bojka } from './bojka.js';
+import { arenaHalf } from './arena.js';
 
 
 // Minimalny odstep miedzy polami minigier areny (odleglosc "krolem": max z |dx|,|dz|).
@@ -474,11 +475,12 @@ export class TlumaczeniaManager {
     const klucz = `${this.economy.state.seedGry}:tlumaczenia-pole:${this.economy.state.licznikSlowek}:${this.battleId}`;
     const rng = strumien(klucz);
 
+    const half = arenaHalf(this.economy); // rozmiar CZYTANY W MOMENCIE UZYCIA - patrz arena.js
     let rx = null;
     let rz = null;
     for (let proba = 0; proba < TlumaczeniaManager.MAX_PROB_LOSOWANIA_POLA; proba++) {
-      const kx = losujInt(rng, -3, 3);
-      const kz = losujInt(rng, -3, 3);
+      const kx = losujInt(rng, -half, half);
+      const kz = losujInt(rng, -half, half);
       if (kx === 0 && kz === 0) continue; // bankomat
       if (zaBliskoMinigry(kx, kz, zajeteFlag)) continue; // pole flag
       if (zaBliskoMinigry(kx, kz, zajetePanstwaMiasta)) continue; // pole panstw-miast
@@ -489,10 +491,10 @@ export class TlumaczeniaManager {
     }
     if (rx === null) {
       // Awaryjny deterministyczny skan siatki (praktycznie nieosiagalne -
-      // siatka ma 48 wolnych pol poza bankomatem, z czego najwyzej jedno-dwa
+      // siatka ma 48/80 wolnych pol poza bankomatem, z czego najwyzej jedno-dwa
       // zajete przez pozostale minigry) - ale petla wyzej MUSI miec koniec.
-      szukanie: for (let x = -3; x <= 3; x++) {
-        for (let z = -3; z <= 3; z++) {
+      szukanie: for (let x = -half; x <= half; x++) {
+        for (let z = -half; z <= half; z++) {
           if (x === 0 && z === 0) continue;
           if (zaBliskoMinigry(x, z, zajeteFlag)) continue;
           if (zaBliskoMinigry(x, z, zajetePanstwaMiasta)) continue;
@@ -685,12 +687,13 @@ export class TlumaczeniaManager {
     if (loser) {
       const lw = this.workerManager.getWorkerType(loser.typeIndex);
       if (lw) {
+        const kickHalf = arenaHalf(this.economy);
         let kickX = this.tile.x + (Math.random() > 0.5 ? 1 : -1);
         let kickZ = this.tile.z + (Math.random() > 0.5 ? 1 : -1);
-        if (kickX < -3) kickX = -2;
-        if (kickX > 3) kickX = 2;
-        if (kickZ < -3) kickZ = -2;
-        if (kickZ > 3) kickZ = 2;
+        if (kickX < -kickHalf) kickX = -kickHalf + 1;
+        if (kickX > kickHalf) kickX = kickHalf - 1;
+        if (kickZ < -kickHalf) kickZ = -kickHalf + 1;
+        if (kickZ > kickHalf) kickZ = kickHalf - 1;
         if (kickX === 0 && kickZ === 0) kickX = 1;
 
         lw.gridX = kickX;

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { createScene, buildRoom } from './scene.js';
+import { createScene, buildRoom, setCameraArenaHalf } from './scene.js';
 import { preloadAll, setTextureQuality } from './assets.js';
 import { Machine } from './machine.js';
 import { WorkerManager, parseMovementCombo } from './workers.js';
@@ -23,6 +23,7 @@ import { fmtShort } from './format.js';
 import { CityBackground } from './city.js';
 import { audio } from './audio.js';
 import { pokazGameOver } from './gameover.js';
+import * as arena from './arena.js';
 
 async function main() {
   // Sprzatanie po usunietym panelu logu Vanessy - osierocony klucz pozycji
@@ -84,8 +85,15 @@ async function main() {
   // fixMaterials nadaje anizotropie w chwili ladowania (patrz assets.js).
   setTextureQuality(renderer);
 
+  arena.init({ scene, camera, controls, economy });
+
   await preloadAll();
-  await buildRoom(scene);
+  await buildRoom(scene, economy);
+  // Kadrowanie kamery (i controls.maxDistance) dostrojone pod AKTUALNY
+  // rozmiar areny (7x7/9x9) - patrz GROWN_POS/GROWN_MAX_DISTANCE w scene.js.
+  // Bez tego strona wczytana z juz pokonanym Skorpionem (arena 9x9 od razu)
+  // zostalaby z kadrowaniem 7x7.
+  setCameraArenaHalf(camera, controls, arena.arenaHalf(economy));
 
   // Miasto w tle - wokol i ponizej areny (patrz src/city.js). Zbudowane
   // WYLACZNIE z prymitywow Three.js (InstancedMesh), bo zaden z pakietow
@@ -333,6 +341,11 @@ async function main() {
     vanessa.reset();
     boss.reset();
     goldCoin.reset();
+    // Reset kasuje bossesDefeated -> arena.arenaHalf(economy) znowu zwraca 3.
+    // Bez tego arena zostalaby na 9x9 (albo jakimkolwiek rozmiarze sprzed
+    // resetu), bo buildRoom() sam z siebie nie jest wolany co klatke.
+    await buildRoom(scene, economy);
+    setCameraArenaHalf(camera, controls, arena.arenaHalf(economy));
     await machine.setTier(0);
     try {
       await syncLeaderboardAndOverlays();
@@ -367,6 +380,13 @@ async function main() {
   // Ostatnia epoka zobaczona na serwerze. Sluzy do wykrycia resetu: economy.reset()
   // generuje nowe seedGry i epokaStartu, wiec zmiana epoki = wlasciciel zresetowal gre.
   let ostatniaEpokaSerwera = stanZdalny && stanZdalny.economy ? stanZdalny.economy.epokaStartu : null;
+
+  // Widz: czy Skorpion byl juz pokonany PRZY OSTATNIM sprawdzeniu - patrz
+  // krok 'economy' w zastosujStanZSerwera nizej. Inicjalizowane z TEGO, co juz
+  // jest w economy.state (wczytane z localStorage/KV PRZED tym momentem) -
+  // wiec strona wczytana z juz pokonanym Skorpionem startuje z true i NIGDY
+  // nie odpala cutscenki (widziana jest tylko PRAWDZIWA zmiana false->true).
+  let widzMialSkorpiona = economy.state.bossesDefeated.includes(arena.SKORPION_TIER);
 
   /**
    * Wspolna sciezka stosowania stanu prowadzonego przez wlasciciela - uzywana
@@ -415,6 +435,19 @@ async function main() {
 
     await krokStanu('economy', () => {
       if (stan.economy) Object.assign(economy.state, stan.economy);
+      // Widz: wykrycie PRZEJSCIA "nie mial Skorpiona pokonanego" -> "ma" (nie
+      // samego faktu bycia pokonanym - inaczej kazdy kolejny snapshot po
+      // zwyciestwie probowalby odpalic cutscenke od nowa). Host NIGDY tego
+      // nie robi - u niego cutscenke odpala onDefeated (patrz boss.setContext
+      // nizej), zaraz po dopisaniu tieru do bossesDefeated.
+      if (!remote.czyAdmin()) {
+        const maSkorpiona = economy.state.bossesDefeated.includes(arena.SKORPION_TIER);
+        if (maSkorpiona && !widzMialSkorpiona) {
+          arena.growWithCutscene(economy).catch((err) =>
+            console.error('[arena] Blad cutscenki powiekszenia (widz):', err));
+        }
+        widzMialSkorpiona = maSkorpiona;
+      }
     });
     await krokStanu('leaderboard+assignments', () => {
       if (stan.leaderboard) kickChat.leaderboard = stan.leaderboard;
@@ -992,8 +1025,8 @@ async function main() {
   // wszystkich minigier na siatce - isPlayerLocked/isTileLocked dla bitwy o
   // flagi, bitwy tlumaczen, panstw-miast ORAZ bitwy o marki (patrz
   // moveWorker() w workers.js).
-  workerManager.setContext({ boss, vanessa, flagBattle, tlumaczenia, panstwaMiasta, bitwaMarek });
-  jetpack.setContext({ workerManager, flagBattle, tlumaczenia, panstwaMiasta, bitwaMarek });
+  workerManager.setContext({ boss, vanessa, flagBattle, tlumaczenia, panstwaMiasta, bitwaMarek, economy });
+  jetpack.setContext({ workerManager, flagBattle, tlumaczenia, panstwaMiasta, bitwaMarek, economy });
   vanessa.setContext({ workerManager, kickChat });
   // Ta sama polityka co machine.czyKlikaniaDozwolone powyzej - patrz komentarz
   // tam. Obejmuje wszystkie 3 sciezki klikania myszka w Vanesse (model,
@@ -1019,6 +1052,16 @@ async function main() {
       );
       if (!economy.state.bossesDefeated.includes(tier)) {
         economy.state.bossesDefeated.push(tier);
+      }
+      // Powiekszenie areny (7x7 -> 9x9) WYLACZNIE po Skorpionie (tier 4), PO
+      // dopisaniu do bossesDefeated (arenaHalf juz widzi nowy rozmiar) i PO
+      // banerze zwyciestwa powyzej - kolejnosc z zadania: "najpierw
+      // zwyciestwo/awans bankomatu, potem powiekszenie". _finishVictory w
+      // boss.js juz odblokowala kamere (patrz _teardown) zanim ten callback
+      // w ogole sie odpala, wiec blokada kamery cutscenki nie koliduje z
+      // blokada kamery bossa.
+      if (tier === arena.SKORPION_TIER) {
+        await arena.growWithCutscene(economy);
       }
       save();
     },
@@ -1246,6 +1289,7 @@ async function main() {
   // Ekspozycja do debugowania/weryfikacji w konsoli przeglądarki.
   window.__game = {
     audio,
+    arena,
     economy,
     machine,
     workerManager,
@@ -1284,9 +1328,10 @@ async function main() {
     // controls.update() nadpisalby recznie ustawiona pozycje (OrbitControls
     // zawsze przelicza kamere z wewnetrznego stanu sferycznego, ignorujac
     // reczne zmiany camera.position).
-    if (!boss.isCameraLocked()) {
+    if (!boss.isCameraLocked() && !arena.isCameraLocked()) {
       controls.update();
     }
+    arena.update(delta);
     vanessa.paused = boss.isActive();
     machine.update(delta);
     workerManager.update(delta);

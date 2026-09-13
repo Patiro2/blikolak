@@ -3,6 +3,7 @@ import { strumien, losujInt } from './rng.js';
 import { showBossNotification } from './ui.js';
 import { normalizeNick } from './kick.js';
 import { audio } from './audio.js';
+import { arenaHalf } from './arena.js';
 
 // Mechanika czwartego bossa (tier 4 bankomatu) - Skorpion. Trzymana w OSOBNYM
 // pliku (wzorzec src/boss-kowal.js, src/boss-blackjack.js), zeby nie dotykac
@@ -300,13 +301,14 @@ export class BossSkorpion {
    */
   _wybierzKrok() {
     this.krok += 1;
+    const half = arenaHalf(this.boss.economy); // rozmiar CZYTANY W MOMENCIE UZYCIA - patrz arena.js
     const kandydaci = [];
     for (let dx = -1; dx <= 1; dx++) {
       for (let dz = -1; dz <= 1; dz++) {
         if (dx === 0 && dz === 0) continue;
         const x = this.x + dx;
         const z = this.z + dz;
-        if (Math.abs(x) > 3 || Math.abs(z) > 3) continue;
+        if (Math.abs(x) > half || Math.abs(z) > half) continue;
         if (x === 0 && z === 0) continue;
         if (this._jestZapadniete(x, z)) continue;
         kandydaci.push({ x, z });
@@ -420,9 +422,10 @@ export class BossSkorpion {
 
   _wybierzWolnePole() {
     const zajete = this._zajetePola();
+    const half = arenaHalf(this.boss.economy); // rozmiar CZYTANY W MOMENCIE UZYCIA - patrz arena.js
     const wolne = [];
-    for (let x = -3; x <= 3; x++) {
-      for (let z = -3; z <= 3; z++) {
+    for (let x = -half; x <= half; x++) {
+      for (let z = -half; z <= half; z++) {
         const k = `${x},${z}`;
         if (!zajete.has(k)) wolne.push({ x, z });
       }

@@ -3,6 +3,7 @@ import { loadDungeon } from './assets.js';
 import { showTopAnnouncement } from './vanessa.js';
 import { audio } from './audio.js';
 import { strumien, losujInt } from './rng.js';
+import { arenaHalf } from './arena.js';
 
 const SPAWN_INTERVAL = 10; // dlugosc jednego cyklu (sekundy) - patrz komentarz przy update()/_pominSpawnWCyklu
 const SPAWN_INTERVAL_MS = SPAWN_INTERVAL * 1000;
@@ -22,7 +23,8 @@ const ARC_REBUILD_INTERVAL = 0.1;
 
 /**
  * Złota moneta na planszy gry:
- * - Pojawia się co 10 sekund na losowym, wolnym polu siatki areny (x: -3..3, z: -3..3).
+ * - Pojawia się co 10 sekund na losowym, wolnym polu siatki areny (rozmiar
+ *   dynamiczny - patrz arena.js: -3..3 domyslnie, -4..4 po pokonaniu Skorpiona).
  * - Nie jest klikana myszką - pierwsza postać gracza z Top 10, która do niej dobiegnie, zgarnia 25 zł.
  * - Po zebraniu moneta natychmiast znika, a za 10 sekund pojawia się kolejna.
  */
@@ -84,9 +86,10 @@ export class GoldenCoinManager {
       }
     }
 
+    const half = this.economy ? arenaHalf(this.economy) : 3; // rozmiar CZYTANY W MOMENCIE UZYCIA - patrz arena.js
     const available = [];
-    for (let x = -3; x <= 3; x++) {
-      for (let z = -3; z <= 3; z++) {
+    for (let x = -half; x <= half; x++) {
+      for (let z = -half; z <= half; z++) {
         const key = `${x},${z}`;
         if (!occupied.has(key)) {
           available.push({ x, z });

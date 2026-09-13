@@ -5,8 +5,9 @@ import { loadBlaster } from './assets.js';
 // rakiety spadające z góry, kałuże i dym. Trzymane w osobnym module, bo
 // boss.js odpowiada za logikę walki, a nie za grafikę pocisków.
 //
-// Cała mechanika jest POLOWA: atak zawsze celuje w konkretne pole siatki 7x7
-// areny (x, z w zakresie -3..3), pole jest z wyprzedzeniem oznaczane
+// Cała mechanika jest POLOWA: atak zawsze celuje w konkretne pole siatki
+// areny (x, z w zakresie -3..3, albo -4..4 po powiekszeniu - patrz arena.js),
+// pole jest z wyprzedzeniem oznaczane
 // znacznikiem, a skutek dotyka tego, kto w chwili uderzenia na nim stoi.
 // Dzięki temu o wyniku decyduje to, gdzie gracz stoi, a nie losowanie.
 

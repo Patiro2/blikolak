@@ -3,6 +3,7 @@ import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { loadArcade } from './assets.js';
 import { audio } from './audio.js';
 import { getSkinDef } from './skiny.js';
+import { arenaHalf } from './arena.js';
 
 /**
  * Rozstrzyga, jaki model/loader/skala nalezy uzyc dla danego slotu: skin z
@@ -182,15 +183,17 @@ export class WorkerManager {
     this.tlumaczeniaRef = null;
     this.panstwaMiastaRef = null;
     this.bitwaMarekRef = null;
+    this.economyRef = null;
   }
 
-  setContext({ boss, vanessa, flagBattle, tlumaczenia, panstwaMiasta, bitwaMarek }) {
+  setContext({ boss, vanessa, flagBattle, tlumaczenia, panstwaMiasta, bitwaMarek, economy }) {
     this.bossRef = boss;
     this.vanessaRef = vanessa;
     this.flagBattleRef = flagBattle;
     this.tlumaczeniaRef = tlumaczenia;
     this.panstwaMiastaRef = panstwaMiasta;
     this.bitwaMarekRef = bitwaMarek;
+    this.economyRef = economy || this.economyRef;
   }
 
   async _getTemplate(spec) {
@@ -391,8 +394,11 @@ export class WorkerManager {
       obj.userData = { isWorker: true, workerTypeIndex: typeIndex };
 
       const pos = this._circlePosition(typeIndex);
-      const initGridX = Math.max(-3, Math.min(3, Math.round(pos.x)));
-      const initGridZ = Math.max(-3, Math.min(3, Math.round(pos.z)));
+      // Promien kolka pracownikow (1.75) nigdy nie siega granicy areny (min. 3)
+      // - clamp tu jest czystym zabezpieczeniem, ale i tak czyta aktualny rozmiar.
+      const initHalf = this.economyRef ? arenaHalf(this.economyRef) : 3;
+      const initGridX = Math.max(-initHalf, Math.min(initHalf, Math.round(pos.x)));
+      const initGridZ = Math.max(-initHalf, Math.min(initHalf, Math.round(pos.z)));
       const initFacing = snapToCardinal(pos.rotY);
 
       obj.position.set(initGridX, 0, initGridZ);
@@ -654,8 +660,10 @@ export class WorkerManager {
     const nextX = entry.gridX + dx;
     const nextZ = entry.gridZ + dz;
 
-    // Granice areny 7x7: współrzędne od -3 do +3
-    const inBounds = Math.abs(nextX) <= 3 && Math.abs(nextZ) <= 3;
+    // Granice areny (7x7 albo 9x9 po pokonaniu Skorpiona) - rozmiar CZYTANY
+    // W MOMENCIE UZYCIA, patrz arena.js.
+    const half = this.economyRef ? arenaHalf(this.economyRef) : 3;
+    const inBounds = Math.abs(nextX) <= half && Math.abs(nextZ) <= half;
     // Bankomat w centrum (0, 0) blokuje wejście
     const isATM = nextX === 0 && nextZ === 0;
 

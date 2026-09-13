@@ -269,7 +269,13 @@ function createPlazaGroundTexture() {
   // scene.js). 1 j. = size/(PLAZA_HALF*2) = 1024/13 ~= 78.77 px.
   const pxPerUnit = size / (6.5 * 2);
   const center = size / 2;
-  const dirtHalf = 4.35 * pxPerUnit;
+  // Plac jest budowany RAZ, przy starcie strony, niezaleznie od aktualnego
+  // rozmiaru areny (ktory moze urosnac z 7x7 do 9x9 po pokonaniu Skorpiona -
+  // patrz arena.js) - zamiast przerysowywac teksture przy powiekszeniu,
+  // przetarta ziemia/sciezki sa od razu wymiarowane pod WIEKSZA, docelowa
+  // arene (fenceEdge=4.8 przy 9x9, patrz FENCE_OFFSET w scene.js), wiec
+  // wygladaja poprawnie w obu rozmiarach.
+  const dirtHalf = 5.35 * pxPerUnit;
   ctx.save();
   ctx.strokeStyle = 'rgba(150, 115, 78, 0.55)';
   ctx.lineWidth = 1.1 * pxPerUnit;
@@ -666,7 +672,11 @@ export class CityBackground {
     // ========================================================================
     const rng = mulberry32(20260913); // staly seed = powtarzalny uklad dla kazdego widza/przeladowania
 
-    const ARENA_KEEP_R = 4.15; // arena + plotek graniczny (fenceEdge=3.8 w scene.js + margines)
+    // Plac/rekwizyty sa budowane RAZ przy starcie, wiec keepout musi od razu
+    // obejmowac WIEKSZA arene 9x9 (fenceEdge=4.8 po pokonaniu Skorpiona,
+    // patrz arena.js/scene.js) - zaden rekwizyt nigdy nie stanie na arenie
+    // ani na jej nowym plotku, niezaleznie od aktualnego postepu gry.
+    const ARENA_KEEP_R = 5.15; // arena 9x9 + plotek graniczny (fenceEdge=4.8 w scene.js + margines)
     const PLAZA_INNER_R = 6.6; // krawedz wlasciwego placu (PLAZA_HALF=6.5) + margines
     const APRON_OUTER_R = 18.7; // margines przed krawedzia apronu (FOREGROUND_APRON_HALF=19.3)
     const RING_R = 12.5, RING_HALF_W = 1.25; // asfaltowa obwodnica (patrz createApronGroundTexture)
@@ -945,9 +955,17 @@ export class CityBackground {
     // biegna pod katami 0/90/180/270 - omijamy je +-18 stopni), tylko na
     // seedowanym PRNG zamiast Math.random(), zeby CALE przedpole bylo
     // powtarzalne. ---
+    // NAPRAWA: promienie ponizej NIE szly przez zoneBlocked/ARENA_KEEP_R (ta
+    // petla ma wlasna, prostsza logike odrzucania - tylko overlapsOccupied +
+    // heightOkForZ), wiec powiekszenie areny (ARENA_KEEP_R 4.15->5.15, patrz
+    // wyzej) NIE chronilo tych kepek automatycznie - przy starych [4.4,6.2]/
+    // [4.5,6.0] czesc kepek ladowala si na nowym plotku (fenceEdge=4.8,
+    // sprawdzone w konsoli: kolizje az do promienia 4.45). Dolny prog
+    // podniesiony na tyle, by miescic sie poza najdalszym naroznikiem plotka
+    // 9x9 (~4.9) z zapasem.
     const plazaClutterDefs = [
-      { key: 'patchGrassPlaza', gltf: patchGrass, count: 26, scaleRange: [0.8, 1.2], radius: [4.4, 6.2], nearPaths: false },
-      { key: 'patchDirtPlaza', gltf: patchDirt, count: 14, scaleRange: [0.9, 1.3], radius: [4.5, 6.0], nearPaths: true },
+      { key: 'patchGrassPlaza', gltf: patchGrass, count: 26, scaleRange: [0.8, 1.2], radius: [5.05, 6.2], nearPaths: false },
+      { key: 'patchDirtPlaza', gltf: patchDirt, count: 14, scaleRange: [0.9, 1.3], radius: [5.05, 6.0], nearPaths: true },
     ];
     for (const def of plazaClutterDefs) {
       const { footprintR, height } = dims(def.gltf);

@@ -11,6 +11,7 @@ import { strumien, losujInt, losujZ } from './rng.js';
 import { BossKowal } from './boss-kowal.js';
 import { BossBlackjack } from './boss-blackjack.js';
 import { BossSkorpion } from './boss-skorpion.js';
+import { arenaHalf } from './arena.js';
 
 // Architektura gotowa na kolejnych bossow (jeden na kazdy tier bankomatu) -
 // tablica indeksowana numerem tieru, wypelniony na razie tylko indeks 1.
@@ -71,7 +72,16 @@ const RAKIET_NA_SALWE = 10;
 // powtarzana - nie ma tu zadnego losowania, wiec widzowie moga nauczyc sie
 // wzorow i swiadomie uciekac. Kazdy wzor ma dokladnie 10 pol i omija (0,0),
 // czyli pole bankomatu.
-const WZORY_RAKIET = [
+// Wzory sa AUTORSKIE (rysowane recznie pod arene 7x7) - zamiast przeliczac je
+// geometrycznie (co znieksztalcaloby "krzyz"/"przekatne"/"pierscien"), kazdy
+// wspolrzedna o wartosci bezwzglednej 3 (czyli TA, ktora rysuje KRAWEDZ
+// areny 7x7) jest w wzoryRakiet() nizej podmieniana na aktualna krawedz
+// (arenaHalf) - na arenie 9x9 "brzegi areny"/"krzyz"/"przekatne" siegaja wiec
+// do +-4 zamiast +-3, a mniejsze wspolrzedne (+-1/+-2, wnetrze wzoru) zostaja
+// bez zmian. Bez tego gracz stojacy na nowym, zewnetrznym pierscieniu
+// (|x|=4 lub |z|=4) bylby CALKOWICIE bezpieczny przed ostrzalem rakietowym -
+// wymog zadania ("nie moze byc bezkarny") tego zabrania.
+const WZORY_RAKIET_BASE = [
   // krzyz
   [[0,-3],[0,-2],[0,-1],[0,1],[0,2],[0,3],[-3,0],[-1,0],[1,0],[3,0]],
   // przekatne
@@ -81,6 +91,11 @@ const WZORY_RAKIET = [
   // brzegi areny
   [[-3,-3],[0,-3],[3,-3],[-3,0],[3,0],[-3,3],[0,3],[3,3],[-3,-1],[3,1]],
 ];
+/** Wzory rakiet przeskalowane na AKTUALNY brzeg areny (patrz komentarz przy WZORY_RAKIET_BASE). */
+function wzoryRakiet(half) {
+  const mapEdge = (v) => (Math.abs(v) === 3 ? Math.sign(v) * half : v);
+  return WZORY_RAKIET_BASE.map((wzor) => wzor.map(([x, z]) => [mapEdge(x), mapEdge(z)]));
+}
 
 const FAINT_MIN = 12;
 const FAINT_MAX = 22;
@@ -1499,11 +1514,12 @@ export class BossManager {
     const seed = this.economy.state.seedGry;
     const idWalki = this.pendingTier;
     const rng = strumien(`${seed}:pole:${idWalki}:${this.licznikAtakow}`);
+    const half = arenaHalf(this.economy); // rozmiar CZYTANY W MOMENCIE UZYCIA - patrz arena.js
     let x = 0;
     let z = 0;
     do {
-      x = losujInt(rng, -3, 3);
-      z = losujInt(rng, -3, 3);
+      x = losujInt(rng, -half, half);
+      z = losujInt(rng, -half, half);
     } while (x === 0 && z === 0);
     return { x, z };
   }
@@ -1565,7 +1581,8 @@ export class BossManager {
    */
   _startRocketStrike() {
     if (this.state !== 'FIGHT') return;
-    const wzor = WZORY_RAKIET[this._wzorRakiet % WZORY_RAKIET.length];
+    const wzory = wzoryRakiet(arenaHalf(this.economy));
+    const wzor = wzory[this._wzorRakiet % wzory.length];
     this._wzorRakiet += 1;
 
     this._zalozBron();
@@ -1575,7 +1592,7 @@ export class BossManager {
     for (const [x, z] of wzor) {
       this.fx.oznaczPole(x, z, 0xff3b30, RAKIETY_OSTRZEZENIE + RAKIETY_LOT);
     }
-    this._log('bad', `Ostrzal rakietowy - wzor ${(this._wzorRakiet - 1) % WZORY_RAKIET.length}`, { pola: wzor });
+    this._log('bad', `Ostrzal rakietowy - wzor ${(this._wzorRakiet - 1) % wzory.length}`, { pola: wzor });
     showBossNotification(
       'kill',
       '🚀 OSTRZAŁ RAKIETOWY!',

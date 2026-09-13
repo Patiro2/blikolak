@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { loadArcade, loadForest } from './assets.js';
+import { arenaHalf } from './arena.js';
 
 const BASE_FOV = 42;
 const BASE_POS = new THREE.Vector3(0, 3.2, 5.4);
@@ -49,23 +50,80 @@ function buildDaySkyDome() {
   return new THREE.Mesh(geo, mat);
 }
 
+// Polowa areny, dla ktorej BASE_POS/BASE_FOV bylo pierwotnie dostrojone (7x7).
+// Po powiekszeniu do 9x9 (patrz arena.js) blizsza krawedz areny/plotka
+// (~4.9 j.) wypadala POZA kadrem domyslnej kamery (zmierzone projekcja rogow
+// na NDC z konsoli - x/y > 1 dla wielu rogow, nawet przy sporym doslanieciu
+// kamery). GROWN_POS/GROWN_FOV nizej to DRUGI, wlasny preset (nie ciagle
+// skalowanie BASE_POS) - dobrany przeszukaniem siatki pozycji/FOV w konsoli
+// (patrz raport zadania) tak, by wszystkie 8 testowanych punktow brzegu
+// areny 9x9 (rogi plotka + srodki bokow, na wysokosci 0 i 0.4) miescily sie w
+// NDC [-1,1] przy aspect>=1.3. Tylko DWA rozmiary areny istnieja w grze (3 i
+// 4), wiec dwa gotowe presety sa prostsze i pewniejsze niz jeden wzor ciagly.
+const ARENA_BASE_HALF = 3;
+const GROWN_FOV = 48;
+const GROWN_POS = new THREE.Vector3(0, 5.75, 12.25);
+// Delty dla waskiego okna (aspect < 1.3, patrz t nizej) - na 7x7 dochodza do
+// bazowego FOV/pozycji (+30 fov / +1.6 y / +3.4 z), ale to za malo na 9x9
+// (pomiar w konsoli: przy mobile 375x812 rogi plotka dalej wypadaly poza
+// kadrem). Wieksze delty dobrane tym samym przeszukaniem NDC co GROWN_POS/
+// GROWN_FOV wyzej - przetestowane na 768x1024, 375x812, 414x896.
+const GROWN_NARROW_FOV_DELTA = 15;
+const GROWN_NARROW_Y_DELTA = 3;
+const GROWN_NARROW_Z_DELTA = 9.5;
+// controls.maxDistance bazowe (7x7) to 17 (patrz createScene) - przy 9x9 i
+// waskim oknie potrzebny dystans kamery siega ~22.8 j., wiec maxDistance
+// MUSI rosnac razem z arena, inaczej OrbitControls.update() przycina kamere
+// z powrotem do 17 na pierwszej klatce po ustawieniu pozycji (patrz
+// setCameraArenaHalf nizej).
+const BASE_MAX_DISTANCE = 17;
+const GROWN_MAX_DISTANCE = 24;
+let currentArenaHalf = ARENA_BASE_HALF;
+
 /**
  * Przy waskim/wysokim oknie (aspect < 1.3) kadr 42mm/pozycja (0,2.7,4.6) zaweza
  * sie tak bardzo w poziomie, ze pierwszy pracownik zaslania pol ekranu, a
  * maszyna chowa sie za panelem HUD. Cofamy kamere i poszerzamy FOV proporcjonalnie
  * do tego, jak bardzo okno jest waskie.
  */
-function applyCameraFraming(camera, aspect) {
+function applyCameraFraming(camera, aspect, half = currentArenaHalf) {
   camera.aspect = aspect;
+  const grown = half > ARENA_BASE_HALF;
+  const basePos = grown ? GROWN_POS : BASE_POS;
+  const baseFov = grown ? GROWN_FOV : BASE_FOV;
   if (aspect < 1.3) {
     const t = Math.min(1, (1.3 - aspect) / 0.9); // 0 przy 1.3, 1 przy aspect <= 0.4
-    camera.fov = BASE_FOV + t * 30;
-    camera.position.set(BASE_POS.x, BASE_POS.y + t * 1.6, BASE_POS.z + t * 3.4);
+    if (grown) {
+      camera.fov = baseFov + t * GROWN_NARROW_FOV_DELTA;
+      camera.position.set(basePos.x, basePos.y + t * GROWN_NARROW_Y_DELTA, basePos.z + t * GROWN_NARROW_Z_DELTA);
+    } else {
+      camera.fov = baseFov + t * 30;
+      camera.position.set(basePos.x, basePos.y + t * 1.6, basePos.z + t * 3.4);
+    }
   } else {
-    camera.fov = BASE_FOV;
-    camera.position.copy(BASE_POS);
+    camera.fov = baseFov;
+    camera.position.copy(basePos);
   }
   camera.updateProjectionMatrix();
+}
+
+/**
+ * Wolane z arena.js po kazdej zmianie rozmiaru areny (instant rebuild ORAZ po
+ * cutscence powiekszenia) - odswieza kadrowanie kamery pod aktualny rozmiar.
+ * Bez tego kamera zostalaby na kadrowaniu 7x7 nawet na arenie 9x9 (kadrowanie
+ * jest normalnie przeliczane tylko na starcie i przy resize okna).
+ */
+export function setCameraArenaHalf(camera, controls, half) {
+  currentArenaHalf = half;
+  // maxDistance MUSI byc podniesiony PRZED ustawieniem pozycji ponizej -
+  // applyCameraFraming ustawia camera.position bezposrednio (nie przez
+  // controls), ale nastepny controls.update() w petli animate() w main.js
+  // przelicza wewnetrzna sfere OrbitControls z aktualnej pozycji i PRZYCINA
+  // ja do maxDistance - przy starym 17 przycinalby swiezo ustawiona,
+  // dalsza kamere 9x9 z powrotem za blisko (patrz komentarz przy
+  // GROWN_MAX_DISTANCE wyzej).
+  controls.maxDistance = half > ARENA_BASE_HALF ? GROWN_MAX_DISTANCE : BASE_MAX_DISTANCE;
+  applyCameraFraming(camera, camera.aspect, half);
 }
 
 export function createScene(canvas) {
@@ -155,10 +213,15 @@ export function createScene(canvas) {
   // mapy (4096) daje maksymalna ostrosc cienia dokladnie tam, gdzie kamera
   // patrzy najczesciej i z najblizsza (arena/postacie), bez rozmywania tego
   // budzetu tekseli na caly plac.
-  dir.shadow.camera.left = -5;
-  dir.shadow.camera.right = 5;
-  dir.shadow.camera.top = 5;
-  dir.shadow.camera.bottom = -5;
+  // +-5.3 (nie +-5): po powiekszeniu areny do 9x9 (patrz arena.js) plotek
+  // graniczny siega rogami do ok. +-4.9 - +-5 zostawialby ledwie 0.1 j.
+  // marginesu (ryzyko obcietego cienia w rogach). +-5.3 daje bezpieczny
+  // margines przy tekselu wiekszym o ok. 6% (nieistotne dla ostrosci cienia,
+  // patrz uzasadnienie tekseli w komentarzu powyzej).
+  dir.shadow.camera.left = -5.3;
+  dir.shadow.camera.right = 5.3;
+  dir.shadow.camera.top = 5.3;
+  dir.shadow.camera.bottom = -5.3;
   scene.add(dir);
 
   // 2b. To samo slonce (IDENTYCZNY kierunek - ta sama proporcja pozycji, wiec
@@ -320,10 +383,49 @@ function firstMesh(gltf) {
   return found;
 }
 
-/** Buduje pokój 7x7 ze starannie spasowanymi kafelkami (zero Z-fightingu). */
-export async function buildRoom(scene) {
-  const SIZE = 7;
-  const HALF = Math.floor(SIZE / 2); // 3 (kafle od -3 do +3)
+/**
+ * Zwalnia WLASNE zasoby poprzedniego pokoju areny (material/geometria/tekstura
+ * siatki, dwa materialy kafli podlogi) przed zbudowaniem nowego - NIE dotyka
+ * floorMesh.geometry/fenceMesh.geometry/fenceMesh.material, ktore sa
+ * wspoldzielonym cache z assets.js (patrz loadArcade/loadForest) i musza
+ * przetrwac kolejne buildRoom().
+ */
+function disposeArenaRoom(group) {
+  if (!group) return;
+  if (group.parent) group.parent.remove(group);
+  const owned = group.userData.ownedDisposables;
+  if (owned) {
+    for (const d of owned) {
+      if (d && typeof d.dispose === 'function') d.dispose();
+    }
+  }
+}
+
+/**
+ * Buduje pokój areny (7x7 domyslnie, 9x9 po pokonaniu bossa Skorpiona - patrz
+ * arena.js) ze starannie spasowanymi kafelkami (zero Z-fightingu). Rozmiar
+ * jest CZYTANY W MOMENCIE UZYCIA (arenaHalf(economy)), nie zapamietany -
+ * kolejne wywolanie (reset gry, powiekszenie po Skorpionie) usuwa i zwalnia
+ * poprzedni pokoj (disposeArenaRoom) i buduje nowy od zera, wiec wynik jest
+ * ZAWSZE identyczny z tym, co dostalby swiezo otwierajacy strone widz.
+ */
+export async function buildRoom(scene, economy, opts = {}) {
+  const HALF = arenaHalf(economy); // 3 (7x7) albo 4 (9x9)
+  const SIZE = HALF * 2 + 1;
+  // riseFromHalf (uzywane WYLACZNIE przez cutscenke powiekszenia w arena.js):
+  // kafle/plotek POZA tym promieniem startuja schowane (pod podloga / skala 0)
+  // i sa animowane "w gore"/"na zewnatrz" przez wywolujacego - patrz
+  // group.userData.growthQueue/fenceInst nizej. Kafle w promieniu riseFromHalf
+  // sa piksel-identyczne w starym i nowym rozmiarze (ta sama szachownica,
+  // patrz dowod w arena.js), wiec startuja normalnie, bez animacji.
+  const riseFromHalf = typeof opts.riseFromHalf === 'number' ? opts.riseFromHalf : null;
+  const RISE_BURIED_Y = -1.3;
+  const growthQueue = [];
+
+  if (scene.userData.arenaRoom) {
+    disposeArenaRoom(scene.userData.arenaRoom);
+    scene.userData.arenaRoom = null;
+  }
 
   const [floorGltf, fenceGltf] = await Promise.all([
     loadArcade('floor'), loadForest('fence'),
@@ -374,9 +476,11 @@ export async function buildRoom(scene) {
     inst.receiveShadow = true;
     inst.frustumCulled = false;
     placements.forEach(([x, z], i) => {
-      floorDummy.position.set(x, 0, z);
+      const isNewRing = riseFromHalf != null && (Math.abs(x) > riseFromHalf || Math.abs(z) > riseFromHalf);
+      floorDummy.position.set(x, isNewRing ? RISE_BURIED_Y : 0, z);
       floorDummy.updateMatrix();
       inst.setMatrixAt(i, floorDummy.matrix);
+      if (isNewRing) growthQueue.push({ inst, index: i, x, z });
     });
     inst.instanceMatrix.needsUpdate = true;
     group.add(inst);
@@ -423,7 +527,8 @@ export async function buildRoom(scene) {
   // gorna powierzchnia, a jednoczesnie nie "wisiec" w powietrzu (odstep
   // niezauwazalny wizualnie).
   const FENCE_Y = -0.008;
-  const fenceCenters = [-3, -2, -1, 0, 1, 2, 3];
+  const fenceCenters = [];
+  for (let i = -HALF; i <= HALF; i++) fenceCenters.push(i);
 
   // Cala granica (28 segmentow + 4 rogi = 32 instancje) to JEDEN InstancedMesh
   // zamiast 32 osobnych klonow gltf.scene - kazdy klon byl wlasnym draw call,
@@ -475,6 +580,12 @@ export async function buildRoom(scene) {
   }
 
   fenceInst.instanceMatrix.needsUpdate = true;
+  if (riseFromHalf != null) {
+    // Caly plotek (jeden InstancedMesh -> jedna wspolna transformacja obiektu)
+    // startuje "zwiniety" - cutscenka w arena.js animuje fenceInst.scale z
+    // powrotem do 1, gdy fala kafli dobiegnie do krawedzi.
+    fenceInst.scale.setScalar(0.0001);
+  }
   group.add(fenceInst);
 
   // Wizualna siatka 2D na podłodze areny (7x7 pól, każde pole 1.0 x 1.0 m)
@@ -493,7 +604,21 @@ export async function buildRoom(scene) {
   // bez blooma i tak jest tylko rozmytym kwadratem, nie realnym swieceniem).
   group.add(gridMesh);
 
+  // Zasoby WLASNE tego builda (nie wspoldzielony cache assets.js) - zwalniane
+  // przez disposeArenaRoom() przy nastepnym buildRoom() (reset/powiekszenie).
+  group.userData.ownedDisposables = [
+    floorLightMat, floorDarkMat,
+    gridMesh.geometry, gridMesh.material, gridMesh.material.map,
+  ];
+  group.userData.half = HALF;
+  // Uzywane WYLACZNIE przez cutscenke powiekszenia (arena.js) - patrz opts.riseFromHalf wyzej.
+  group.userData.growthQueue = growthQueue;
+  group.userData.fenceInst = fenceInst;
+  group.userData.gridMesh = gridMesh;
+  group.userData.riseFromHalf = riseFromHalf;
+
   scene.add(group);
+  scene.userData.arenaRoom = group;
   return group;
 }
 

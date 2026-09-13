@@ -11,6 +11,7 @@ import { showTopAnnouncement } from './vanessa.js';
 import { loadForest } from './assets.js';
 import { strumien, losujInt, pozycjaBezPowtorek } from './rng.js';
 import { Bojka } from './bojka.js';
+import { arenaHalf } from './arena.js';
 
 
 // Minimalny odstep miedzy polami minigier areny (odleglosc "krolem": max z |dx|,|dz|).
@@ -573,11 +574,12 @@ export class BitwaMarekManager {
       (zaBliskoMinigry(kx, kz, zajeteTlumaczenia)) ||
       (zaBliskoMinigry(kx, kz, zajetePanstwaMiasta));
 
+    const half = arenaHalf(this.economy); // rozmiar CZYTANY W MOMENCIE UZYCIA - patrz arena.js
     let rx = null;
     let rz = null;
     for (let proba = 0; proba < BitwaMarekManager.MAX_PROB_LOSOWANIA_POLA; proba++) {
-      const kx = losujInt(rngPola, -3, 3);
-      const kz = losujInt(rngPola, -3, 3);
+      const kx = losujInt(rngPola, -half, half);
+      const kz = losujInt(rngPola, -half, half);
       if (kx === 0 && kz === 0) continue; // bankomat
       if (zajete(kx, kz)) continue;
       rx = kx;
@@ -587,8 +589,8 @@ export class BitwaMarekManager {
     if (rx === null) {
       // Awaryjny deterministyczny skan siatki (praktycznie nieosiagalne) -
       // ale petla wyzej MUSI miec koniec.
-      szukanie: for (let x = -3; x <= 3; x++) {
-        for (let z = -3; z <= 3; z++) {
+      szukanie: for (let x = -half; x <= half; x++) {
+        for (let z = -half; z <= half; z++) {
           if (x === 0 && z === 0) continue;
           if (zajete(x, z)) continue;
           rx = x;
@@ -835,12 +837,13 @@ export class BitwaMarekManager {
     if (loser) {
       const lw = this.workerManager.getWorkerType(loser.typeIndex);
       if (lw) {
+        const kickHalf = arenaHalf(this.economy);
         let kickX = this.tile.x + (Math.random() > 0.5 ? 1 : -1);
         let kickZ = this.tile.z + (Math.random() > 0.5 ? 1 : -1);
-        if (kickX < -3) kickX = -2;
-        if (kickX > 3) kickX = 2;
-        if (kickZ < -3) kickZ = -2;
-        if (kickZ > 3) kickZ = 2;
+        if (kickX < -kickHalf) kickX = -kickHalf + 1;
+        if (kickX > kickHalf) kickX = kickHalf - 1;
+        if (kickZ < -kickHalf) kickZ = -kickHalf + 1;
+        if (kickZ > kickHalf) kickZ = kickHalf - 1;
         if (kickX === 0 && kickZ === 0) kickX = 1;
 
         lw.gridX = kickX;

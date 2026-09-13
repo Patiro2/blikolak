@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { arenaHalf } from './arena.js';
 
 /**
  * Kod czatu "rocketman" (patrz KODY w kick.js) - wylacznie wizualny jetpack
@@ -13,8 +14,6 @@ import * as THREE from 'three';
  */
 
 const FLIGHT_MS = 15000;
-const GRID_MIN = -3;
-const GRID_MAX = 3;
 // Klipy proboawane w tej kolejnosci jako animacja lotu - kazda postac w
 // projekcie dzieli ten sam slownik klipow (patrz CLAUDE.md), ale nie kazdy
 // model ma akurat te trzy - stad proba po kolei z cichym fallbackiem.
@@ -88,6 +87,7 @@ export class JetpackManager {
     this.tlumaczeniaRef = null;
     this.panstwaMiastaRef = null;
     this.bitwaMarekRef = null;
+    this.economy = null;
     this.isHost = false;
 
     // Stan synchronizowany (getSyncState/applySync) - patrz komentarz przy klasie.
@@ -112,12 +112,13 @@ export class JetpackManager {
     this._smokeDisposePending = false;
   }
 
-  setContext({ workerManager, flagBattle, tlumaczenia, panstwaMiasta, bitwaMarek }) {
+  setContext({ workerManager, flagBattle, tlumaczenia, panstwaMiasta, bitwaMarek, economy }) {
     this.workerManager = workerManager;
     this.flagBattleRef = flagBattle || null;
     this.tlumaczeniaRef = tlumaczenia || null;
     this.panstwaMiastaRef = panstwaMiasta || null;
     this.bitwaMarekRef = bitwaMarek || null;
+    this.economy = economy || this.economy;
   }
 
   /** Ten sam wzorzec co flagBattle.setHost - patrz komentarz tam. */
@@ -141,10 +142,11 @@ export class JetpackManager {
   }
 
   _pickFreeTile() {
+    const half = this.economy ? arenaHalf(this.economy) : 3; // rozmiar CZYTANY W MOMENCIE UZYCIA - patrz arena.js
     const occupied = new Set(this.workerManager.entries.map((e) => `${e.gridX},${e.gridZ}`));
     const candidates = [];
-    for (let x = GRID_MIN; x <= GRID_MAX; x++) {
-      for (let z = GRID_MIN; z <= GRID_MAX; z++) {
+    for (let x = -half; x <= half; x++) {
+      for (let z = -half; z <= half; z++) {
         if (x === 0 && z === 0) continue; // bankomat w centrum
         if (occupied.has(`${x},${z}`)) continue;
         if (this._isTileLockedByMinigry(x, z)) continue;

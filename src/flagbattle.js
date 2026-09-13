@@ -4,6 +4,7 @@ import { usunTagiEmotek } from './kick.js';
 import { loadForest } from './assets.js';
 import { strumien, losujInt, pozycjaBezPowtorek } from './rng.js';
 import { Bojka } from './bojka.js';
+import { arenaHalf } from './arena.js';
 
 
 // Minimalny odstep miedzy polami minigier areny (odleglosc "krolem": max z |dx|,|dz|).
@@ -644,11 +645,12 @@ export class FlagBattleManager {
     // Kolizja z minigra "Zgadnij marke" - ten sam wzorzec co zajeteTlumaczenia powyzej.
     const zajeteMarki = this.bitwaMarekRef && this.bitwaMarekRef.tile ? this.bitwaMarekRef.tile : null;
 
+    const half = arenaHalf(this.economy); // rozmiar CZYTANY W MOMENCIE UZYCIA - patrz arena.js
     let rx = null;
     let rz = null;
     for (let proba = 0; proba < FlagBattleManager.MAX_PROB_LOSOWANIA_POLA; proba++) {
-      const kx = losujInt(rngPola, -3, 3);
-      const kz = losujInt(rngPola, -3, 3);
+      const kx = losujInt(rngPola, -half, half);
+      const kz = losujInt(rngPola, -half, half);
       if (kx === 0 && kz === 0) continue; // bankomat
       if (zaBliskoMinigry(kx, kz, zajeteTlumaczenia)) continue; // pole tlumaczen
       if (zaBliskoMinigry(kx, kz, zajetePanstwaMiasta)) continue; // pole panstw-miast
@@ -660,8 +662,8 @@ export class FlagBattleManager {
     if (rx === null) {
       // Awaryjny deterministyczny skan siatki (praktycznie nieosiagalne) -
       // ale petla wyzej MUSI miec koniec.
-      szukanie: for (let x = -3; x <= 3; x++) {
-        for (let z = -3; z <= 3; z++) {
+      szukanie: for (let x = -half; x <= half; x++) {
+        for (let z = -half; z <= half; z++) {
           if (x === 0 && z === 0) continue;
           if (zaBliskoMinigry(x, z, zajeteTlumaczenia)) continue;
           if (zaBliskoMinigry(x, z, zajetePanstwaMiasta)) continue;
@@ -984,10 +986,11 @@ export class FlagBattleManager {
       const lw = this.workerManager.getWorkerType(loser.typeIndex);
       if (lw) {
          // Teleportujemy obok by go "wyrzucić" z pola chwały
+         const kickHalf = arenaHalf(this.economy);
          let kickX = this.tile.x + (Math.random() > 0.5 ? 1 : -1);
          let kickZ = this.tile.z + (Math.random() > 0.5 ? 1 : -1);
-         if (kickX < -3) kickX = -2; if (kickX > 3) kickX = 2;
-         if (kickZ < -3) kickZ = -2; if (kickZ > 3) kickZ = 2;
+         if (kickX < -kickHalf) kickX = -kickHalf + 1; if (kickX > kickHalf) kickX = kickHalf - 1;
+         if (kickZ < -kickHalf) kickZ = -kickHalf + 1; if (kickZ > kickHalf) kickZ = kickHalf - 1;
          if (kickX === 0 && kickZ === 0) kickX = 1; // Zabezpieczenie przed bankomatem
          
          lw.gridX = kickX;
