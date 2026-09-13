@@ -18,6 +18,7 @@ import { BossManager, BOSS_DEFS } from './boss.js';
 import { fmtShort } from './format.js';
 import { CityBackground } from './city.js';
 import { audio } from './audio.js';
+import { pokazGameOver } from './gameover.js';
 
 async function main() {
   // Sprzatanie po usunietym panelu logu Vanessy - osierocony klucz pozycji
@@ -260,6 +261,29 @@ async function main() {
     }
   }
 
+  /**
+   * Pelny reset gry (plansza + serwer + widzowie) - wyciagniety z onReset
+   * (przycisk wlasciciela w UI), zeby ta sama sciezka mogla wolac tez
+   * onGameOver po przegranej z Kristoferem (boss 3, patrz boss.setContext
+   * nizej i src/boss-blackjack.js). Zachowanie przycisku resetu bez zmian -
+   * onReset dalej sam sprawdza remote.czyAdmin() PRZED wywolaniem tej funkcji.
+   */
+  async function pelnyResetGry() {
+    await resetLokalny();
+    // Reset kasuje takze stan na serwerze - inaczej po odswiezeniu strony
+    // wrocilby stary zapis z KV. Natychmiastowy zapis nowego stanu sprawia,
+    // ze karty widzow zobacza zmieniona epoke przy najblizszej synchronizacji
+    // i tez wyczyszcza u siebie plansze (patrz synchronizujZSerwera).
+    if (remote.czyOnline() && remote.czyAdmin()) {
+      await remote.wyczysc();
+    }
+    save();
+    await zapiszNaSerwer(true);
+    // Natychmiastowa informacja dla widzow kanalem realtime - nie czekaja
+    // na zmiane epokaStartu w kolejnym snapshocie/odpytywaniu.
+    realtime.wyslijZdarzenie('reset', {});
+  }
+
   // Ostatnia epoka zobaczona na serwerze. Sluzy do wykrycia resetu: economy.reset()
   // generuje nowe seedGry i epokaStartu, wiec zmiana epoki = wlasciciel zresetowal gre.
   let ostatniaEpokaSerwera = stanZdalny && stanZdalny.economy ? stanZdalny.economy.epokaStartu : null;
@@ -430,6 +454,13 @@ async function main() {
       // 'flaga-info' powyzej (patrz komentarz tam).
       const text = dane && typeof dane.text === 'string' ? dane.text : null;
       if (text) tlumaczenia.announce(text);
+    } else if (nazwa === 'game-over') {
+      // Wlasciciel przegral cala pule z Kristoferem (boss 3, patrz
+      // boss.onGameOver nizej) - widz WYLACZNIE odgrywa ten sam ekran, nigdy
+      // nie odpala go sam z siebie. Reset planszy przyjdzie osobnym
+      // zdarzeniem 'reset' (albo zmiana epoki w kolejnym snapshocie).
+      audio.play('game-over');
+      pokazGameOver().catch((err) => console.error('[game-over] Blad nakladki u widza:', err));
     }
   }
 
@@ -848,6 +879,22 @@ async function main() {
       }
       save();
     },
+    save,
+    onGameOver: async () => {
+      // Wolane WYLACZNIE przez BossBlackjack (boss 3, tier 3) na hoscie, gdy
+      // pula gracza spadnie do zera po przegranej rundzie (patrz
+      // src/boss-blackjack.js/_zastosujWynik). Widzowie dostaja to samo
+      // zdarzenie natychmiast kanalem realtime (patrz zastosujZdarzenieZdalne
+      // powyzej) - oni NIGDY nie odpalaja game over sami z siebie.
+      if (remote.czyAdmin()) {
+        realtime.wyslijZdarzenie('game-over', {});
+      }
+      audio.play('game-over');
+      await pokazGameOver();
+      // Reset PO tym, jak ekran jest juz w calosci ciemny - nie synchronicznie
+      // w srodku boss.update() (patrz zadanie wlasciciela).
+      await pelnyResetGry();
+    },
   });
   goldCoin.setContext({
     workerManager,
@@ -956,19 +1003,7 @@ async function main() {
   ui = new UI(economy, {
     onReset: async () => {
       if (!remote.czyAdmin()) return;
-      await resetLokalny();
-      // Reset kasuje takze stan na serwerze - inaczej po odswiezeniu strony
-      // wrocilby stary zapis z KV. Natychmiastowy zapis nowego stanu sprawia,
-      // ze karty widzow zobacza zmieniona epoke przy najblizszej synchronizacji
-      // i tez wyczyszcza u siebie plansze (patrz synchronizujZSerwera).
-      if (remote.czyOnline() && remote.czyAdmin()) {
-        await remote.wyczysc();
-      }
-      save();
-      await zapiszNaSerwer(true);
-      // Natychmiastowa informacja dla widzow kanalem realtime - nie czekaja
-      // na zmiane epokaStartu w kolejnym snapshocie/odpytywaniu.
-      realtime.wyslijZdarzenie('reset', {});
+      await pelnyResetGry();
     },
   });
 

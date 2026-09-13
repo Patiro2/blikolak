@@ -9,6 +9,7 @@ import { normalizeNick, usunTagiEmotek } from './kick.js';
 import { audio } from './audio.js';
 import { strumien, losujInt, losujZ } from './rng.js';
 import { BossKowal } from './boss-kowal.js';
+import { BossBlackjack } from './boss-blackjack.js';
 
 // Architektura gotowa na kolejnych bossow (jeden na kazdy tier bankomatu) -
 // tablica indeksowana numerem tieru, wypelniony na razie tylko indeks 1.
@@ -29,7 +30,13 @@ export const BOSS_DEFS = [
     hp: 100,
     mechanika: 'kowal',
   },
-  null, // tier 3 - TODO kolejny boss
+  {
+    tier: 3,
+    name: 'Kristofer',
+    subtitle: 'KRÓL BLACKJACKA',
+    hp: 100,
+    mechanika: 'blackjack',
+  },
   null, // tier 4 - TODO kolejny boss
   null, // tier 5 - TODO kolejny boss
 ];
@@ -191,6 +198,13 @@ export class BossManager {
     this.kickChat = null;
     this.vanessaRef = null;
     this.onDefeated = null;
+    // Wolane WYLACZNIE przez BossBlackjack (tier 3), gdy pula gracza spadnie
+    // do zera po przegranej rundzie - patrz src/boss-blackjack.js/_zastosujWynik
+    // i src/gameover.js. Ustawiane z main.js przez setContext.
+    this.onGameOver = null;
+    // Zapis stanu (economy.save + zapiszNaSerwer) - przekazany przez main.js,
+    // zeby BossBlackjack mogl natychmiast zapisac odjecie kary (patrz zadanie).
+    this.save = null;
 
     // Wzorzec i uzasadnienie identyczne jak machine.czyKlikaniaDozwolone
     // (machine.js) i vanessa.czyKlikaniaDozwolone (vanessa.js): naliczanie
@@ -209,6 +223,9 @@ export class BossManager {
     this.orcTemplate = null; // character-orc.glb (kenney_mini-dungeon) - cialo Kowala_88
     this.orcAnimations = [];
     this.kowal = null; // instancja BossKowal - tylko gdy def.mechanika === 'kowal' (patrz src/boss-kowal.js)
+    this.blackjackTemplate = null; // character-male-b.glb (kenney_mini-arcade) - cialo Kristofera
+    this.blackjackAnimations = [];
+    this.blackjack = null; // instancja BossBlackjack - tylko gdy def.mechanika === 'blackjack' (patrz src/boss-blackjack.js)
 
     this.model = null; // THREE.Group (wozek + postac)
     this.charObj = null; // dziecko-postac, na nim dziala mixer/animacje
@@ -330,19 +347,22 @@ export class BossManager {
     return FAINT_MIN + rng() * (FAINT_MAX - FAINT_MIN);
   }
 
-  setContext({ workerManager, workerOverlays, kickChat, vanessa, onDefeated }) {
+  setContext({ workerManager, workerOverlays, kickChat, vanessa, onDefeated, onGameOver, save }) {
     this.workerManager = workerManager || this.workerManager;
     this.workerOverlays = workerOverlays || this.workerOverlays;
     this.kickChat = kickChat || this.kickChat;
     this.vanessaRef = vanessa || this.vanessaRef;
     this.onDefeated = onDefeated || this.onDefeated;
+    this.onGameOver = onGameOver || this.onGameOver;
+    this.save = save || this.save;
   }
 
   async init() {
-    const [chairGltf, charGltf, orcGltf] = await Promise.all([
+    const [chairGltf, charGltf, orcGltf, blackjackGltf] = await Promise.all([
       loadArcade('wheelchair-deluxe'),
       loadArcade('character-male-f'),
       loadDungeon('character-orc'),
+      loadArcade('character-male-b'),
     ]);
     await this.fx.init();
     this.chairTemplate = chairGltf.scene;
@@ -350,6 +370,8 @@ export class BossManager {
     this.animations = charGltf.animations || [];
     this.orcTemplate = orcGltf.scene;
     this.orcAnimations = orcGltf.animations || [];
+    this.blackjackTemplate = blackjackGltf.scene;
+    this.blackjackAnimations = blackjackGltf.animations || [];
   }
 
   isActive() {
@@ -465,6 +487,60 @@ export class BossManager {
     dymek.style.display = 'none';
     document.body.appendChild(dymek);
     this.dymekEl = dymek;
+
+    // Panel HUD Kristofera (tier 3, blackjack) - pozycja STALA (nie
+    // rzutowana z 3D, patrz style.css .boss-bj-panel), bo dotyczy calej
+    // planszy (obie polfoki DOBIERZ/PASUJ), nie tylko samego bossa.
+    const bjPanel = document.createElement('div');
+    bjPanel.className = 'boss-bj-panel';
+    const bjSums = document.createElement('div');
+    bjSums.className = 'boss-bj-sums';
+    const bjSumBoss = document.createElement('span');
+    bjSumBoss.className = 'bj-bank';
+    const bjSumPlayers = document.createElement('span');
+    bjSumPlayers.className = 'bj-gracze';
+    bjSums.appendChild(bjSumBoss);
+    bjSums.appendChild(bjSumPlayers);
+    const bjFaza = document.createElement('div');
+    bjFaza.className = 'boss-bj-faza';
+    const bjTimerWrap = document.createElement('div');
+    bjTimerWrap.className = 'boss-bj-timer-bar';
+    const bjTimerFill = document.createElement('div');
+    bjTimerFill.className = 'boss-bj-timer-fill';
+    bjTimerWrap.appendChild(bjTimerFill);
+    const bjRemis = document.createElement('div');
+    bjRemis.className = 'boss-bj-remis';
+    bjPanel.appendChild(bjSums);
+    bjPanel.appendChild(bjFaza);
+    bjPanel.appendChild(bjTimerWrap);
+    bjPanel.appendChild(bjRemis);
+    document.body.appendChild(bjPanel);
+    this.bjPanelEl = bjPanel;
+    this.bjSumBossEl = bjSumBoss;
+    this.bjSumPlayersEl = bjSumPlayers;
+    this.bjFazaEl = bjFaza;
+    this.bjTimerWrapEl = bjTimerWrap;
+    this.bjTimerFillEl = bjTimerFill;
+    this.bjRemisEl = bjRemis;
+  }
+
+  /**
+   * Postacie graczy podzielone na dwie polowy planszy wzgledem x=0 - patrz
+   * BossBlackjack (faza WYBOR: x<0 = "DOBIERZ", x>0 = "PASUJ", x=0 neutralne).
+   * Idaca postac liczy sie po polu DOCELOWYM (ten sam wzorzec co _workersOnTile).
+   */
+  _countBySide() {
+    let lewo = 0;
+    let prawo = 0;
+    if (this.workerManager) {
+      for (const e of this.workerManager.entries) {
+        if (!e || !e.obj) continue;
+        const gx = e.isMoving ? e.targetGridX : e.gridX;
+        if (gx < 0) lewo += 1;
+        else if (gx > 0) prawo += 1;
+      }
+    }
+    return { lewo, prawo };
   }
 
   /**
@@ -587,6 +663,11 @@ export class BossManager {
         this._log('bad', 'Nie moge wystartowac - model Kowala_88 jeszcze sie nie zaladowal');
         return false;
       }
+    } else if (def.mechanika === 'blackjack') {
+      if (!this.blackjackTemplate) {
+        this._log('bad', 'Nie moge wystartowac - model Kristofera jeszcze sie nie zaladowal');
+        return false;
+      }
     } else if (!this.chairTemplate || !this.charTemplate) {
       this._log('bad', 'Nie moge wystartowac - model bossa jeszcze sie nie zaladowal');
       return false;
@@ -613,11 +694,19 @@ export class BossManager {
       // Kowal gra wlasny dzwiek wejscia w chwili zjazdu na linie (patrz
       // BossKowal.beginEntrance) - nie ma tu cutscenki z podjazdem jak boss 1.
       this.kowal = new BossKowal(this);
+      this.blackjack = null;
       this.model = this.kowal.build();
       this.mixer = null;
       this._beginCutsceneKowal();
+    } else if (def.mechanika === 'blackjack') {
+      this.kowal = null;
+      this.blackjack = new BossBlackjack(this);
+      this.model = this.blackjack.build();
+      this.mixer = null;
+      this._beginCutsceneBlackjack();
     } else {
       this.kowal = null;
+      this.blackjack = null;
       audio.play('boss-wejscie');
       this._buildModel();
       this._beginCutscene();
@@ -749,6 +838,44 @@ export class BossManager {
     this._log('info', 'Kowal_88 wyladowal na arenie - start walki');
   }
 
+  /**
+   * Wejscie Kristofera (tier 3, blackjack) - ta sama karta tytulowa/letterbox
+   * co Kowal, BEZ blokady kamery (patrz zadanie wlasciciela: "Pokaż tę samą
+   * kartę tytułową/letterbox co przy Kowalu, bez blokady kamery"). Faktyczny
+   * marsz z tylu sceny prowadzi BossBlackjack.update() (patrz beginEntrance).
+   */
+  _beginCutsceneBlackjack() {
+    this.state = 'CUTSCENE';
+    this.cutsceneT = 0;
+
+    this.titleNameEl.textContent = `👹 ${this.def.name.toUpperCase()}`;
+    this.titleSubEl.textContent = this.def.subtitle || '';
+    if (this.nameRowEl) this.nameRowEl.textContent = `👹 ${this.def.name}`;
+
+    void this.letterboxTop.offsetWidth;
+    this.letterboxTop.classList.add('show');
+    this.letterboxBottom.classList.add('show');
+    this.titleCardEl.classList.remove('show');
+    void this.titleCardEl.offsetWidth;
+    this.titleCardEl.classList.add('show');
+
+    this.nameplateEl.style.display = 'flex';
+    if (this.overloadWrapEl) this.overloadWrapEl.style.display = 'none';
+    this.hpFillEl.style.width = '100%';
+    this.hpTextEl.textContent = `${this.hp} / ${this.maxHp}`;
+
+    this.blackjack.beginEntrance();
+  }
+
+  _endCutsceneBlackjack() {
+    this.letterboxTop.classList.remove('show');
+    this.letterboxBottom.classList.remove('show');
+    this.titleCardEl.classList.remove('show');
+
+    this.state = 'FIGHT';
+    this._log('info', 'Kristofer dotarl na arene - start walki blackjacka');
+  }
+
   /** Czy boss aktualnie ma pelna kontrole nad kamera (main.js pomija wtedy controls.update()). */
   isCameraLocked() {
     return this._camLockActive;
@@ -780,6 +907,11 @@ export class BossManager {
     if (this.def && this.def.mechanika === 'kowal') {
       this.kowal.update(delta);
       if (!this.kowal.fazaWejscia) this._endCutsceneKowal();
+      return;
+    }
+    if (this.def && this.def.mechanika === 'blackjack') {
+      this.blackjack.update(delta);
+      if (!this.blackjack.fazaWejscia) this._endCutsceneBlackjack();
       return;
     }
 
@@ -890,6 +1022,10 @@ export class BossManager {
       if (this.overloadFillEl) this.overloadFillEl.style.width = `${this.kowal.przeciazenie}%`;
       return;
     }
+    if (this.def && this.def.mechanika === 'blackjack') {
+      this.blackjack.update(delta);
+      return;
+    }
 
     // Wstrzas kamery po uderzeniu (dogasa w pierwszych ulamkach sekundy walki)
     if (this._camShakeT > 0) {
@@ -990,6 +1126,13 @@ export class BossManager {
     // bossa 1, wiec dalsza czesc tej metody go nie dotyczy.
     if (this.def && this.def.mechanika === 'kowal') {
       if (this.kowal) this.kowal.onChatMessage(username, content);
+      return;
+    }
+
+    // Kristofer (tier 3, blackjack): decyzje graczy ida przez POZYCJE
+    // awatarow na siatce (patrz BossBlackjack._countBySide), nie przez czat -
+    // czat nie ma tu zadnej roli, wiec po prostu nic nie robimy.
+    if (this.def && this.def.mechanika === 'blackjack') {
       return;
     }
 
@@ -1565,6 +1708,20 @@ export class BossManager {
       return;
     }
 
+    if (this.def && this.def.mechanika === 'blackjack') {
+      // Kristofer stoi (nie siedzi w wozku) - standardowy klip "die" pasuje
+      // tu wprost, tak samo jak u Kowala.
+      if (this.blackjack) this.blackjack.playAction('die', { hard: true, once: true });
+      this._victoryT = 0;
+      if (this.bjPanelEl) this.bjPanelEl.classList.remove('show');
+      showBossNotification(
+        'boss',
+        '🏆 KRISTOFER POKONANY!',
+        'Czat wygrał 3 rozdania blackjacka! Bankomat wraca na nowym tierze.',
+      );
+      return;
+    }
+
     // Boss siedzi w wozku - klip "die" (dla postaci stojacej) wygladal tu zle.
     // Zamiast niego bezwladne osuniecie sie w fotelu na kosciach.
     this.playAction('wheelchair-sit', { hard: true });
@@ -1586,6 +1743,9 @@ export class BossManager {
     // klatce i zamarl, bo nic wiecej nie wolaloby mixer.update() w tym stanie.
     if (this.def && this.def.mechanika === 'kowal' && this.kowal && this.kowal.mixer) {
       this.kowal.mixer.update(delta);
+    }
+    if (this.def && this.def.mechanika === 'blackjack' && this.blackjack && this.blackjack.mixer) {
+      this.blackjack.mixer.update(delta);
     }
     this._victoryT = (this._victoryT || 0) + delta;
     if (this.model) {
@@ -1630,6 +1790,11 @@ export class BossManager {
       this.kowal.teardown();
       this.kowal = null;
     }
+    if (this.blackjack) {
+      this.blackjack.teardown();
+      this.blackjack = null;
+    }
+    if (this.bjPanelEl) this.bjPanelEl.classList.remove('show');
     if (this.model) {
       this.scene.remove(this.model);
       this.model = null;
@@ -1751,6 +1916,9 @@ export class BossManager {
     if (this.def && this.def.mechanika === 'kowal' && this.kowal) {
       stan.kowal = this.kowal.getSyncState();
     }
+    if (this.def && this.def.mechanika === 'blackjack' && this.blackjack) {
+      stan.blackjack = this.blackjack.getSyncState();
+    }
     return stan;
   }
 
@@ -1779,6 +1947,10 @@ export class BossManager {
       }
       if (this.def && this.def.mechanika === 'kowal') {
         if (this.kowal && bossState.kowal) this.kowal.applySync(bossState.kowal);
+        return;
+      }
+      if (this.def && this.def.mechanika === 'blackjack') {
+        if (this.blackjack && bossState.blackjack) this.blackjack.applySync(bossState.blackjack);
         return;
       }
 
@@ -1812,6 +1984,11 @@ export class BossManager {
         this._log('bad', 'Nie moge dolaczyc do walki (sync) - model Kowala_88 jeszcze sie nie zaladowal');
         return false;
       }
+    } else if (def.mechanika === 'blackjack') {
+      if (!this.blackjackTemplate) {
+        this._log('bad', 'Nie moge dolaczyc do walki (sync) - model Kristofera jeszcze sie nie zaladowal');
+        return false;
+      }
     } else if (!this.chairTemplate || !this.charTemplate) {
       this._log('bad', 'Nie moge dolaczyc do walki (sync) - model bossa jeszcze sie nie zaladowal');
       return false;
@@ -1835,6 +2012,7 @@ export class BossManager {
 
     if (def.mechanika === 'kowal') {
       this.kowal = new BossKowal(this);
+      this.blackjack = null;
       this.model = this.kowal.build();
       this.mixer = null;
       this.kowal.startFromSync(bossState.kowal);
@@ -1850,7 +2028,23 @@ export class BossManager {
       return true;
     }
 
+    if (def.mechanika === 'blackjack') {
+      this.kowal = null;
+      this.blackjack = new BossBlackjack(this);
+      this.model = this.blackjack.build();
+      this.mixer = null;
+      this.blackjack.startFromSync(bossState.blackjack);
+
+      this.state = 'FIGHT';
+      if (this.nameplateEl) this.nameplateEl.style.display = 'flex';
+      if (this.overloadWrapEl) this.overloadWrapEl.style.display = 'none';
+      if (this.hpFillEl) this.hpFillEl.style.width = `${(this.hp / this.maxHp) * 100}%`;
+      if (this.hpTextEl) this.hpTextEl.textContent = `${this.hp} / ${this.maxHp}`;
+      return true;
+    }
+
     this.kowal = null;
+    this.blackjack = null;
     this._buildModel();
     if (this.machine.model) {
       this.machine.model.rotation.z = 0.35;

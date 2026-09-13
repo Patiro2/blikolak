@@ -202,6 +202,45 @@ export const SOUND_MAP = {
     maxJednoczesnie: 2,
     wysokoscVar: 0.02,
   },
+  // Boss 3 (Kristofer, blackjack) - patrz src/boss-blackjack.js
+  'bj-rozdanie': {
+    pliki: ['card-shuffle.ogg', 'cards-pack-open-1.ogg'],
+    tryb: 'wszystkie',
+    glosnosc: 0.5,
+    cooldownMs: 400,
+    maxJednoczesnie: 1,
+    wysokoscVar: 0.02,
+  },
+  'bj-karta': {
+    pliki: ['card-slide-1.ogg', 'card-slide-2.ogg', 'card-slide-3.ogg', 'card-slide-4.ogg', 'card-place-1.ogg', 'card-place-2.ogg'],
+    glosnosc: 0.45,
+    cooldownMs: 80,
+    maxJednoczesnie: 3,
+    wysokoscVar: 0.06,
+  },
+  'bj-wygrana': {
+    pliki: ['Hit jingles/jingles_HIT05.ogg'],
+    glosnosc: 0.6,
+    cooldownMs: 400,
+    maxJednoczesnie: 1,
+    wysokoscVar: 0.0,
+  },
+  'bj-przegrana': {
+    pliki: ['error_004.ogg', 'lowDown.ogg'],
+    tryb: 'wszystkie',
+    glosnosc: 0.55,
+    cooldownMs: 400,
+    maxJednoczesnie: 2,
+    wysokoscVar: 0.02,
+  },
+  'game-over': {
+    pliki: ['phaserDown3.ogg', 'impactBell_heavy_004.ogg'],
+    tryb: 'wszystkie',
+    glosnosc: 0.7,
+    cooldownMs: 1000,
+    maxJednoczesnie: 2,
+    wysokoscVar: 0.0,
+  },
 };
 
 function loadSettings() {

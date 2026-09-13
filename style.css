@@ -1701,3 +1701,129 @@ body.tryb-widza #widz-plakietka {
 #wasd-dialog-zamknij:hover {
   background: rgba(255, 255, 255, 0.16);
 }
+
+/* ============================================================
+   BOSS 3 - KRISTOFER (BLACKJACK), panel HUD niezalezny od pozycji
+   bossa w 3D (patrz src/boss-blackjack.js) - stala pozycja na gorze
+   ekranu, widoczna tylko w trakcie walki z tym bossem.
+   ============================================================ */
+.boss-bj-panel {
+  position: fixed;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 60;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-width: 260px;
+  padding: 10px 20px;
+  background: linear-gradient(135deg, rgba(10, 18, 12, 0.94), rgba(8, 30, 16, 0.94));
+  border: 2px solid #1fd65f;
+  border-radius: 14px;
+  box-shadow: 0 0 24px rgba(31, 214, 95, 0.5), 0 6px 20px rgba(0, 0, 0, 0.9);
+  pointer-events: none;
+  backdrop-filter: blur(8px);
+}
+
+.boss-bj-panel.show {
+  display: flex;
+}
+
+.boss-bj-sums {
+  display: flex;
+  gap: 22px;
+  font-size: 15px;
+  font-weight: 800;
+  color: #eafff0;
+  white-space: nowrap;
+}
+
+.boss-bj-sums .bj-bank { color: #ff6b6b; }
+.boss-bj-sums .bj-gracze { color: #6bd0ff; }
+
+.boss-bj-faza {
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: 1px;
+  color: #ffe15c;
+  text-shadow: 0 0 8px rgba(255, 225, 92, 0.7);
+  white-space: nowrap;
+}
+
+.boss-bj-timer-bar {
+  width: 220px;
+  height: 8px;
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.boss-bj-timer-fill {
+  height: 100%;
+  width: 100%;
+  background: #1fd65f;
+  transition: width 0.1s linear, background 0.3s ease;
+}
+
+.boss-bj-timer-fill.danger {
+  background: #ff2a2a;
+  box-shadow: 0 0 10px rgba(255, 42, 42, 0.95);
+}
+
+.boss-bj-remis {
+  font-size: 11px;
+  font-weight: 700;
+  color: #ffb3b3;
+}
+
+/* ============================================================
+   GAME OVER (src/gameover.js) - naklada sie na cala gre po tym, jak
+   pula gracza spadnie do zera. Ekran plynnie ciemnieje, potem powoli
+   pojawia sie duzy czerwony napis, trzyma sie kilka sekund i znika.
+   ============================================================ */
+#game-over-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 20000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #000;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 1.5s ease;
+}
+
+#game-over-overlay.ciemno {
+  opacity: 1;
+  pointer-events: all;
+}
+
+#game-over-overlay.zanika {
+  opacity: 0;
+}
+
+#game-over-tekst {
+  font-size: 64px;
+  font-weight: 900;
+  color: #ff1a1a;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  text-align: center;
+  text-shadow: 0 0 40px rgba(255, 26, 26, 0.9), 0 6px 16px rgba(0, 0, 0, 0.9);
+  opacity: 0;
+  transition: opacity 3s ease;
+}
+
+#game-over-tekst.show {
+  opacity: 1;
+}
+
+@media (max-width: 700px) {
+  .boss-bj-panel { min-width: 200px; padding: 8px 14px; }
+  .boss-bj-sums { font-size: 12px; gap: 14px; }
+  .boss-bj-timer-bar { width: 160px; }
+  #game-over-tekst { font-size: 34px; letter-spacing: 2px; }
+}
