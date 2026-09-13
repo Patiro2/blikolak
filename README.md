@@ -101,7 +101,7 @@ Stan zapisuje się sam do `localStorage` co 5 s i przy zamykaniu karty.
 | `src/remote.js` | klient stanu zdalnego (Vercel KV) - logowanie admina, odczyt/zapis stanu, tryb offline lokalny |
 | `src/boss-kowal.js` | mechanika bossa tieru 2 "Kowal_88" - osobny plik, patrz sekcja "Boss" niżej |
 | `src/boss-blackjack.js` | mechanika bossa tieru 3 "Dżordżo" (blackjack) - osobny plik, patrz sekcja "Boss" niżej |
-| `src/flagbattle.js` | minigra "Bitwa o flagi" - losowanie kraju, dopasowanie odpowiedzi z czatu, korzysta z `countries.js` i `bojka.js` |
+| `src/flagbattle.js` | minigra "Bitwa o flagi" - losowanie kraju, dopasowanie odpowiedzi z czatu, korzysta z `countries.js` i `bojka.js`; każda flaga ma limit 60 s (`LIMIT_CZASU_FLAGI_S`) - po jego upływie host odsłania nazwę kraju bez przyznania punktu i po ~3 s losuje kolejną |
 | `src/countries.js` | słownictwo minigry "Bitwa o flagi" - lista krajów, kody ISO, akceptowane warianty nazw |
 | `src/bojka.js` | wspólna, czysto kosmetyczna animacja "bijatyki" (ciosy, kurz) używana przez obie minigry siatki (`flagbattle.js`, `tlumaczenia.js`) |
 | `src/gameover.js` | nakładka "game over" po przegranej rundzie blackjacka z bossem 3 |

@@ -33,6 +33,15 @@ import { Bojka } from './bojka.js';
 const ROZMIAR_TEKSTURY_FLAGI_W = 512;
 const ROZMIAR_TEKSTURY_FLAGI_H = 384; // 512x384 = 4:3, dopasowane do viewBox 640x480 kazdego pliku flag-icons
 
+// Limit czasu na zgadniecie POJEDYNCZEJ flagi (nie calej bitwy - patrz
+// zaktualizowany komentarz przy _sprawdzWyjscieAwaryjne nizej). Liczony
+// WYLACZNIE przez hosta w tick() (this.flagRoundTimer, zerowany w kazdym
+// nextRound()). Po uplywie: host odslania nazwe kraju (_czasFlagiUplynal),
+// po ODSLONIECIE_CZAS_S losuje kolejna flage. Stala latwa do zmiany na
+// potrzeby recznych testow.
+const LIMIT_CZASU_FLAGI_S = 60;
+const ODSLONIECIE_CZAS_S = 3;
+
 // Wysokosc znacznika kontestowanego pola. NIE wolno kolidowac z innymi
 // warstwami podlogi areny: 0.025 wierzch kafla podlogi (scene.js), 0.035
 // neonowa siatka areny (scene.js), 0.042 znaczniki atakow bossa
@@ -202,6 +211,34 @@ function zaladujTeksturaFlagi(kod, renderer) {
   return promise;
 }
 
+/**
+ * Rysuje kilka wierszy tekstu na canvasie i zwraca CanvasTexture - uzywane do
+ * komunikatu "czas minal" w miejscu flagi (patrz _pokazOdslonietaFlage).
+ * W odroznieniu od zaladujTeksturaFlagi NIE cache'ujemy wyniku po kluczu -
+ * to rzadkie zdarzenie (raz na uplyw limitu czasu flagi), rysowanie canvasu
+ * tej wielkosci jest tanie.
+ */
+function renderujTekstNaCanvasie(linie) {
+  const canvas = document.createElement('canvas');
+  canvas.width = ROZMIAR_TEKSTURY_FLAGI_W;
+  canvas.height = ROZMIAR_TEKSTURY_FLAGI_H;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = 'rgba(20, 20, 20, 0.85)';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#ffd700';
+  ctx.font = 'bold 40px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const odstep = 52;
+  const startY = canvas.height / 2 - ((linie.length - 1) * odstep) / 2;
+  linie.forEach((linia, i) => ctx.fillText(linia, canvas.width / 2, startY + i * odstep));
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.needsUpdate = true;
+  return texture;
+}
+
 export class FlagBattleManager {
   constructor(scene, renderer) {
     this.scene = scene;
@@ -215,6 +252,15 @@ export class FlagBattleManager {
     this.currentFlag = null; // np. 'PL'
     this._loadedFlag = null; // ostatnia flaga, ktorej tekstura zostala zaladowana (uzywane w applySync u widza)
     this.flagsGuessed = 0; // Ile flag zgadnięto w obecnej bitwie
+
+    // Limit czasu pojedynczej flagi (patrz LIMIT_CZASU_FLAGI_S) - liczony
+    // WYLACZNIE przez hosta w tick(), zerowany w kazdym nextRound(). Widz go
+    // nie liczy sam (patrz applySync) - dostaje juz gotowy wynik.
+    this.flagRoundTimer = 0;
+    // Kod kraju pokazywany w miejscu flagi po uplywie limitu czasu, albo null
+    // gdy pokazujemy normalnie flage/nic. Synchronizowany (getSyncState/applySync).
+    this.odslonietaFlaga = null;
+    this._loadedOdsloniecie = null; // ostatni odslonietaFlaga narysowany na revealSprite (widz) - jak _loadedFlag wyzej
 
     // idBitwy - patrz nextRound(). Synchronizowany (getSyncState/applySync),
     // NIE lokalny licznik karty - inkrementowany WYLACZNIE przez hosta w
@@ -285,6 +331,17 @@ export class FlagBattleManager {
     this.flagSprite.position.y = 3.0; // Nad polem
     this.flagSprite.visible = false;
     this.scene.add(this.flagSprite);
+
+    // Sprite tekstowy pokazujacy odslonieta nazwe kraju po uplywie
+    // LIMIT_CZASU_FLAGI_S, w tym samym miejscu co flagSprite (pozycja
+    // aktualizowana razem z nim w spawnBattleSquare/applySync). Nigdy nie sa
+    // widoczne oba naraz (patrz _pokazOdslonietaFlage/_ukryjOdslonietaFlage).
+    this.revealMaterial = new THREE.SpriteMaterial({ color: 0xffffff, toneMapped: false });
+    this.revealSprite = new THREE.Sprite(this.revealMaterial);
+    this.revealSprite.scale.set(1.4, 1.05, 1.0);
+    this.revealSprite.position.y = 3.0;
+    this.revealSprite.visible = false;
+    this.scene.add(this.revealSprite);
 
     this._flagReqId = 0; // chroni przed wyscigiem, gdy runda zmieni sie zanim async rasteryzacja skonczy
     this.isHost = false; // wlasciwa wartosc przychodzi z setContext/setHost - patrz nizej
@@ -486,6 +543,12 @@ export class FlagBattleManager {
       this.checkPlayersEntry();
     }
     else if (this.state === 'BATTLE') {
+      if (this.currentFlag) {
+        this.flagRoundTimer += dt;
+        if (this.flagRoundTimer >= LIMIT_CZASU_FLAGI_S) {
+          this._czasFlagiUplynal();
+        }
+      }
       this._sprawdzWyjscieAwaryjne();
     }
     else if (this.state === 'REWARD') {
@@ -651,8 +714,10 @@ export class FlagBattleManager {
    * w tym samym ticku), po prostu resetujemy bez zwyciezcy zamiast
    * przyznawac wygrana nikomu.
    *
-   * Celowo BEZ limitu czasu bitwy - to nie jest sposob na wymuszenie konca
-   * starcia, tylko obsluga wyjatkowego zdarzenia (zniknal jeden z uczestnikow).
+   * Celowo BEZ limitu czasu calej bitwy - to nie jest sposob na wymuszenie
+   * konca starcia, tylko obsluga wyjatkowego zdarzenia (zniknal jeden z
+   * uczestnikow). Limit czasu ISTNIEJE, ale per POJEDYNCZA flage, osobno
+   * (patrz LIMIT_CZASU_FLAGI_S i _czasFlagiUplynal, wolane obok tej metody w tick()).
    */
   _sprawdzWyjscieAwaryjne() {
     const zaginieni = this.players.filter((p) => {
@@ -674,6 +739,7 @@ export class FlagBattleManager {
 
   nextRound() {
     if (this.state !== 'BATTLE') return;
+    this.flagRoundTimer = 0; // nowa flaga = nowy limit czasu (patrz LIMIT_CZASU_FLAGI_S w tick())
 
     // Bez powtorek, dopoki nie zostanie wylosowana CALA pula flag w tej
     // ROZGRYWCE (nie tylko w tej bitwie) - patrz pozycjaBezPowtorek w rng.js
@@ -713,6 +779,58 @@ export class FlagBattleManager {
       .catch((err) => {
         console.error(`[flagi] Blad ladowania tekstury flagi ${kod}:`, err);
       });
+  }
+
+  /**
+   * Pokazuje komunikat "czas minal" w miejscu flagi (revealSprite), chowajac
+   * flagSprite. Wolane zarowno przez hosta (_czasFlagiUplynal) jak i widza
+   * (applySync, echo decyzji hosta) - stad wspolna metoda, jak _stosujTeksturaFlagi.
+   */
+  _pokazOdslonietaFlage(kod) {
+    const nazwa = COUNTRIES[kod] || kod;
+    const grupaBliznieakow = FLAGI_BLIZNIACZE.find((grupa) => grupa.includes(kod));
+    const dopisekBliznika = grupaBliznieakow
+      ? ` (${grupaBliznieakow.filter((k) => k !== kod).map((k) => COUNTRIES[k]).join(', ')})`
+      : '';
+    const texture = renderujTekstNaCanvasie(['⏰ Czas minął! To była:', `${nazwa}${dopisekBliznika}`]);
+    this.revealMaterial.map = texture;
+    this.revealMaterial.needsUpdate = true;
+    this.revealSprite.position.set(this.flagSprite.position.x, this.flagSprite.position.y, this.flagSprite.position.z);
+    this.revealSprite.visible = true;
+    this.flagSprite.visible = false;
+  }
+
+  _ukryjOdslonietaFlage() {
+    this.revealSprite.visible = false;
+  }
+
+  /**
+   * Wolane WYLACZNIE przez hosta z tick() (patrz LIMIT_CZASU_FLAGI_S), gdy
+   * biezaca flaga nie zostala odgadnieta w limicie czasu. Blokuje spoznione
+   * trafienie (currentFlag = null - onChatMessage juz nic z tym nie zrobi),
+   * pokazuje nazwe kraju w miejscu flagi i po ODSLONIECIE_CZAS_S losuje
+   * kolejna runde. mojeBattleId chroni przed wyscigiem: jesli bitwa sie w
+   * miedzyczasie skonczy/zmieni (koniec BATTLE, reset, przerwanie przez
+   * bossa, walkower), setTimeout nie odpali juz nextRound() po fakcie -
+   * ten sam wzorzec co battleId w spawnBattleSquare/reszcie pliku.
+   */
+  _czasFlagiUplynal() {
+    const kod = this.currentFlag;
+    this.currentFlag = null;
+    this.odslonietaFlaga = kod;
+    this.flagRoundTimer = 0;
+    this._pokazOdslonietaFlage(kod);
+
+    const nazwa = COUNTRIES[kod] || kod;
+    this.announce(`⏰ Czas minął! To była: ${nazwa}`);
+
+    const mojeBattleId = this.battleId;
+    setTimeout(() => {
+      if (this.state !== 'BATTLE' || this.battleId !== mojeBattleId) return;
+      this.odslonietaFlaga = null;
+      this._ukryjOdslonietaFlage();
+      this.nextRound();
+    }, ODSLONIECIE_CZAS_S * 1000);
   }
 
   onChatMessage(username, content) {
@@ -767,6 +885,9 @@ export class FlagBattleManager {
     this._lastRewardTime = 0;
     this.winner = winnerPlayer;
     this.flagSprite.visible = false;
+    this.odslonietaFlaga = null;
+    this._loadedOdsloniecie = null;
+    this._ukryjOdslonietaFlage();
     // Gwiazdka za wygrana minigre (ranking + plakietka) - patrz kick.js.
     if (this.kickChat) this.kickChat.zapiszWygranaMinigry(winnerPlayer.username);
 
@@ -950,6 +1071,10 @@ export class FlagBattleManager {
     this.players = [];
     this.currentFlag = null;
     this._loadedFlag = null;
+    this.flagRoundTimer = 0;
+    this.odslonietaFlaga = null;
+    this._loadedOdsloniecie = null;
+    this._ukryjOdslonietaFlage();
     this.winner = null;
     this.rewardTimer = 0;
     this._lastRewardTime = 0;
@@ -977,6 +1102,7 @@ export class FlagBattleManager {
       tile: this.tile,
       players: this.players,
       currentFlag: this.currentFlag,
+      odslonietaFlaga: this.odslonietaFlaga,
       flagsGuessed: this.flagsGuessed,
       winner: this.winner,
       rewardTimer: this.rewardTimer,
@@ -1007,6 +1133,7 @@ export class FlagBattleManager {
     this.rewardTimer = s.rewardTimer || 0;
     this.battleId = s.battleId || 0;
     this.currentFlag = s.currentFlag || null;
+    this.odslonietaFlaga = s.odslonietaFlaga || null;
 
     // Animacja walki - host ja odpala/zatrzymuje w checkPlayersEntry/endBattle,
     // tu odtwarzamy to samo po zmianie stanu (opoznienie jak przy kazdym innym
@@ -1054,14 +1181,27 @@ export class FlagBattleManager {
       this.highlightMesh.visible = true;
     }
 
-    if (this.state === 'BATTLE' && this.currentFlag) {
+    if (this.state === 'BATTLE' && this.odslonietaFlaga) {
+      // Timeout pojedynczej flagi (patrz LIMIT_CZASU_FLAGI_S) - host juz
+      // policzyl to sam, widz tylko odtwarza gotowa decyzje z tego snapshotu.
+      this.flagSprite.visible = false;
+      if (this.odslonietaFlaga !== this._loadedOdsloniecie) {
+        this._loadedOdsloniecie = this.odslonietaFlaga;
+        this._pokazOdslonietaFlage(this.odslonietaFlaga);
+      }
+    } else if (this.state === 'BATTLE' && this.currentFlag) {
+      this._loadedOdsloniecie = null;
+      this._ukryjOdslonietaFlage();
       if (this.currentFlag !== this._loadedFlag) {
         this._loadedFlag = this.currentFlag;
         this._stosujTeksturaFlagi(this.currentFlag);
       }
     } else {
-      // WAITING (jeszcze bez flagi) albo REWARD (flaga juz schowana u hosta).
+      // WAITING (jeszcze bez flagi), REWARD (flaga juz schowana u hosta) albo
+      // krotka przerwa miedzy odslonieciem a kolejna flaga.
       this.flagSprite.visible = false;
+      this._loadedOdsloniecie = null;
+      this._ukryjOdslonietaFlage();
     }
   }
 
