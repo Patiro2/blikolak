@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import { mulberry32, hashString } from './rng.js';
-import { audio } from './audio.js';
 
 // Wspolny modul "bojki" (bijatyki) uzywany przez OBIE minigry na siatce
 // (flagbattle.js i tlumaczenia.js) - zamiast kopiowac ta sama logike walki i
@@ -385,11 +384,8 @@ export class Bojka {
       f.timer -= dt;
       if (f.timer <= 0 && !entry.isMoving) {
         const klip = KLIPY_WALKI[Math.floor(f.rng() * KLIPY_WALKI.length)];
-        const poszlo = workerManager.triggerAttack(entry, klip);
+        workerManager.triggerAttack(entry, klip);
         f.timer = 0.55 + f.rng() * 1.0; // nieregularny rytm - roznica na kazdej postaci (seed z rundy+nicku)
-        if (poszlo && klip !== 'jump' && f.rng() < 0.5) {
-          audio.play('boss-trafienie');
-        }
       }
     }
   }
