@@ -82,7 +82,8 @@ const PIWO_LOT_CZAS = 2.0; // sekund lotu/ostrzezenia, zanim piwo uderzy w pole
 const PIWO_DMG = 12.5; // obrazenia bossa, gdy gracz odrzuci piwo pisac "rzut"
 const PIWO_NAGRODA = 50; // zl dla gracza za trafienie wilkolaka piwem
 const PIWO_NA_ZIEMI_CZAS = 5.0; // sekund, zanim niepodniete piwo zniknie z ziemi
-const PIWO_GAME_OVER_LICZBA = 4; // trafien bossa piwem w graczy w calej Fazie 2 -> game over
+const PIWO_GAME_OVER_LICZBA = 6; // trafien bossa piwem w graczy w calej Fazie 2 -> game over
+const NEON_PIWO = 0xffb000; // bursztynowy neon - podswietlenie lezacego piwa Fazy 2 (jak boss-skorpion.js _makeOutline/_makeItemRing)
 
 export class BossWilkolak {
   constructor(boss) {
@@ -584,6 +585,12 @@ export class BossWilkolak {
     if (this.fazaT >= ALKOHOL_OKNO_KONTRY) {
       this._wyczyscZnaczniki();
       this._ustawNastepnyAtak();
+      // Kontra nieudana (okno minelo bez "lo tego") - brak bezczynnosci,
+      // wilkolak od razu wykonuje kolejny atak zamiast losowej przerwy
+      // CZAS_MIEDZY_ATAKAMI (patrz zadanie wlasciciela). Liczone identycznie
+      // na kazdej karcie gry (fightSec jest deterministyczny), wiec u widza
+      // rowniez natychmiast rusza kolejny atak.
+      this._nextAtakAt = this._fightSec();
     }
   }
 
@@ -1269,7 +1276,7 @@ export class BossWilkolak {
     showBossNotification(
       'boss',
       '🍺 RZUT PIWEM!',
-      'Wilkołak rzuca butelkami! Uciekaj z czerwonych pól - a jeśli piwo spadnie obok, podnieś je i odrzuć pisząc "rzut"!',
+      'Wilkołak rzuca butelkami! Uciekaj z czerwonych pól - a jeśli piwo spadnie obok, podnieś je i odrzuć pisząc "rzut" lub "rzuć"!',
     );
     this.boss._log('bad', 'Wilkolak rzuca piwem (Faza 2)', { cele: cele.map((c) => c.username) });
   }
@@ -1309,7 +1316,7 @@ export class BossWilkolak {
       }
     } else {
       this._piwaNaZiemi.push({ x, z, zostalo: PIWO_NA_ZIEMI_CZAS });
-      showBossNotification('kill', '🍺 PIWO SPADŁO NA ZIEMIĘ!', 'Podnieś je i odrzuć w wilkołaka - napisz "rzut" po podniesieniu!');
+      showBossNotification('kill', '🍺 PIWO SPADŁO NA ZIEMIĘ!', 'Podnieś je i odrzuć w wilkołaka - napisz "rzut" lub "rzuć" po podniesieniu!');
     }
   }
 
@@ -1336,7 +1343,7 @@ export class BossWilkolak {
           if (this._piwoNoszone.has(key)) continue;
           this._piwoNoszone.add(key);
           zebrane = true;
-          showBossNotification('hit', `🍺 @${nick} PODNIÓSŁ PIWO!`, 'Napisz "rzut", żeby odrzucić je w wilkołaka!');
+          showBossNotification('hit', `🍺 @${nick} PODNIÓSŁ PIWO!`, 'Napisz "rzut" lub "rzuć", żeby odrzucić je w wilkołaka!');
           this.boss._log('good', `@${nick} podnosi piwo z ziemi (Faza 2)`, { gracz: nick });
           break;
         }
@@ -1346,13 +1353,77 @@ export class BossWilkolak {
     this._renderujPiwaNaZiemi(delta);
   }
 
-  /** Model butelki (bottle.glb, pirate-kit - juz zaladowany przez boss.js) unoszacy sie nad kazdym lezacym piwem. */
+  /**
+   * "Inverted hull" obrys neonowy + pierscien na podlodze - dokladnie ten sam
+   * wzorzec co boss-skorpion.js (_makeOutline/_makeItemRing, patrz tamten
+   * plik, ok. linii 726 i 750). Skopiowane tutaj zamiast importu, bo to
+   * metody instancji Skorpiona (kolor tam jest parametrem, wiec kod jest
+   * identyczny) - patrz zadanie wlasciciela.
+   */
+  _makeOutline(mesh, color) {
+    const outline = mesh.clone(true);
+    outline.traverse((n) => {
+      if (n.isMesh) {
+        n.castShadow = false;
+        n.material = new THREE.MeshBasicMaterial({
+          color,
+          side: THREE.BackSide,
+          transparent: true,
+          depthWrite: false,
+          opacity: 0.85,
+        });
+      }
+    });
+    outline.scale.setScalar(1.15);
+    mesh.add(outline);
+    return outline;
+  }
+
+  _disposeOutline(outline) {
+    if (!outline) return;
+    outline.traverse((n) => { if (n.isMesh && n.material) n.material.dispose(); });
+  }
+
+  _makeItemRing(color) {
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.32, 0.42, 32),
+      new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity: 0.7,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      }),
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.02;
+    return ring;
+  }
+
+  _disposeItemRing(ring) {
+    if (!ring) return;
+    ring.geometry.dispose();
+    ring.material.dispose();
+  }
+
+  /**
+   * Model butelki (bottle.glb, pirate-kit - juz zaladowany przez boss.js)
+   * unoszacy sie nad kazdym lezacym piwem, podswietlony neonowym obrysem +
+   * pierscieniem na podlodze (bursztynowy NEON_PIWO) - identyczny efekt jak
+   * przedmioty bossa Skorpion, zeby lezace piwo bylo tak samo widoczne.
+   */
   _renderujPiwaNaZiemi(delta) {
     this._piwoWizT += delta;
     const aktywne = new Set(this._piwaNaZiemi.map((b) => `${b.x},${b.z}`));
     for (const [key, wiz] of [...this._piwoWizualizacje]) {
       if (aktywne.has(key)) continue;
       this.boss.scene.remove(wiz.mesh);
+      this._disposeOutline(wiz.outline);
+      if (wiz.ring) {
+        this.boss.scene.remove(wiz.ring);
+        this._disposeItemRing(wiz.ring);
+      }
       this._piwoWizualizacje.delete(key);
     }
     if (!this.boss.bottleTemplate) return;
@@ -1364,11 +1435,20 @@ export class BossWilkolak {
         mesh.traverse((n) => { if (n.isMesh) n.castShadow = true; });
         mesh.scale.setScalar(0.7);
         this.boss.scene.add(mesh);
-        wiz = { mesh };
+        const outline = this._makeOutline(mesh, NEON_PIWO);
+        const ring = this._makeItemRing(NEON_PIWO);
+        this.boss.scene.add(ring);
+        wiz = { mesh, outline, ring };
         this._piwoWizualizacje.set(key, wiz);
       }
       wiz.mesh.position.set(b.x, 0.32 + Math.sin(this._piwoWizT * 3) * 0.05, b.z);
       wiz.mesh.rotation.y += delta * 1.6;
+      const puls = 0.5 + Math.sin(this._piwoWizT * 2.4) * 0.25;
+      if (wiz.outline) wiz.outline.traverse((n) => { if (n.isMesh) n.material.opacity = 0.6 + puls * 0.3; });
+      if (wiz.ring) {
+        wiz.ring.position.set(b.x, 0.02, b.z);
+        wiz.ring.material.opacity = puls;
+      }
     }
   }
 
@@ -1432,9 +1512,9 @@ export class BossWilkolak {
   /**
    * Frazy sterujace (patrz zadanie): "lo tego"/"ło tego" (kontra Szalu
    * alkoholowego, tylko w fazie ALKOHOL_OKNO - PO sweepie, stojac na zielonym
-   * polu za plecami) i "rzut" (rzut piwem - FAZA 2,
-   * na razie bez efektu, ETAP 2 go podepnie). Normalizacja jak reszta gry:
-   * normalizePolish (usuwa polskie znaki diakrytyczne + lowercase).
+   * polu za plecami) i "rzut"/"rzuc"/"rzuć" (rzut piwem - FAZA 2). Normalizacja
+   * jak reszta gry: normalizePolish (usuwa polskie znaki diakrytyczne w tym
+   * ć->c + lowercase), stad wystarczy jeden regex /\brzu(t|c)\b/.
    */
   onChatMessage(username, content) {
     if (this.isBanned(username)) return; // zbanowany - ignorujemy WSZYSTKIE jego komendy (poza ruchem, patrz main.js)
@@ -1442,9 +1522,9 @@ export class BossWilkolak {
     if (this.faza === 'ALKOHOL_OKNO' && /\blo tego\b/.test(norm)) {
       this._sprobujKontre(username);
     }
-    // "rzut" - odrzucenie podnietego piwa FAZY 2 (patrz _sprobujRzutPiwem;
-    // bez efektu, jesli gracz akurat nie niesie piwa).
-    if (/\brzut\b/.test(norm)) {
+    // "rzut"/"rzuc"/"rzuć" - odrzucenie podnietego piwa FAZY 2 (patrz
+    // _sprobujRzutPiwem; bez efektu, jesli gracz akurat nie niesie piwa).
+    if (/\brzu(t|c)\b/.test(norm)) {
       this._sprobujRzutPiwem(username);
     }
   }
