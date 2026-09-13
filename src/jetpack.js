@@ -20,6 +20,11 @@ const GRID_MAX = 3;
 // model ma akurat te trzy - stad proba po kolei z cichym fallbackiem.
 const FLY_CLIP_CANDIDATES = ['fall', 'jump', 'holding-both'];
 
+// Dym z dysz - pula obiektow (patrz _ensureSmokePool), zaden alokowany co
+// klatke. Limit "rozsadny" wg zadania (<=60 naraz).
+const SMOKE_POOL_SIZE = 60;
+const SMOKE_EMIT_INTERVAL = 0.035; // s miedzy czasteczkami, per dysza
+
 /**
  * Buduje model jetpacka z samych prymitywow three.js w stylu Kenney (low-poly,
  * plaskie kolory, flatShading) - w paczkach nie ma gotowego jetpacka. Dwa
@@ -71,6 +76,7 @@ function buildJetpackModel() {
     if (c.isMesh) c.castShadow = true;
   });
   g.userData.flames = [flameL, flameR];
+  g.userData.nozzles = [nozzleL, nozzleR]; // punkty emisji dymu, patrz _spawnSmoke
   return g;
 }
 
@@ -98,6 +104,12 @@ export class JetpackManager {
     this._flightModelRef = null; // entry.model, do wykrycia podmiany skina w trakcie lotu
     this._flightEntryRef = null;
     this._groundT = 0;
+
+    // Dym z dysz - lokalny efekt (nie synchronizowany), patrz _spawnSmoke/_tickSmoke.
+    this._smokePool = null; // Array<{mesh, active, age, life, vel}> - budowana leniwie
+    this._smokeGeo = null;
+    this._smokeEmitAccum = 0;
+    this._smokeDisposePending = false;
   }
 
   setContext({ workerManager, flagBattle, tlumaczenia, panstwaMiasta, bitwaMarek }) {
@@ -184,6 +196,7 @@ export class JetpackManager {
   tick(delta) {
     if (this.isHost) this._hostDecide();
     this._applyVisualState(delta);
+    this._tickSmoke(delta); // niezaleznie od stanu - dogasza czasteczki po ladowaniu
   }
 
   _applyVisualState(delta) {
@@ -263,25 +276,99 @@ export class JetpackManager {
         fl.scale.y = 0.8 + Math.random() * 0.5;
         fl.material.opacity = 0.55 + Math.random() * 0.35;
       }
+      this._emitSmoke(delta);
     }
   }
 
   /**
-   * Doczepia obiekt jetpacka do wezla pleców postaci (torso, awatary paczek
-   * mini-*, albo body-mesh - patrz CLAUDE.md, wspolny slownik wezlow rigu).
-   * Brak obu (fallback) - doczepiamy wprost do korzenia modelu, zeby lot
-   * nigdy nie zostal bez jetpacka na plecach.
+   * Emituje szare czasteczki dymu z pozycji swiata obu dysz, w stalym tempie
+   * (SMOKE_EMIT_INTERVAL na dysze) niezaleznie od fps - akumulator zamiast
+   * "raz na klatke", zeby przy przycietych/wysokich fps tempo bylo takie samo.
+   */
+  _emitSmoke(delta) {
+    const nozzles = this.jetpackNode.userData.nozzles || [];
+    if (nozzles.length === 0) return;
+    this._smokeEmitAccum += delta;
+    const wp = new THREE.Vector3();
+    while (this._smokeEmitAccum >= SMOKE_EMIT_INTERVAL) {
+      this._smokeEmitAccum -= SMOKE_EMIT_INTERVAL;
+      for (const nz of nozzles) {
+        nz.getWorldPosition(wp);
+        this._spawnSmoke(wp);
+      }
+    }
+  }
+
+  /**
+   * Doczepia obiekt jetpacka do wezla pleców postaci (torso - patrz CLAUDE.md,
+   * wspolny slownik wezlow rigu). Dwa typy rigu (patrz workers.js/skiny.js):
+   *  - mini-pack: torso to Bone bez wlasnej geometrii, siatka tulowia lezy w
+   *    osobnym SkinnedMesh "body-mesh" (bind pose - skinning nie zmienia
+   *    geometrii samej siatki, wiec bbox jest stabilny).
+   *  - blocky-characters: torso to Mesh z wlasna geometria wprost (bez
+   *    skinningu) - bbox jest juz w lokalnym ukladzie torso.
+   * W obu przypadkach pozycja jetpacka liczona jest z bbox tulowia (tylna
+   * powierzchnia -Z = plecy, gorna czesc wysokosci), zamiast stalej liczby -
+   * dziala niezaleznie od proporcji modelu z danej paczki.
+   *
+   * Skala swiata torso bywa != 1 (blocky-characters ~0.25x, patrz
+   * BLOCKY_SCALE w skiny.js) - kompensujemy ja na wezle jetpacka, zeby jego
+   * rozmiar w swiecie byl staly niezaleznie od skina.
    */
   _attachJetpackToEntry(entry) {
-    const parentNode = entry.model.getObjectByName('torso') || entry.model.getObjectByName('body-mesh') || entry.model;
+    const model = entry.model;
+    const torso = model.getObjectByName('torso') || model.getObjectByName('body-mesh') || model;
     const node = buildJetpackModel();
-    // Lekko w tyl i w gore wzgledem torso - patrz snapToCardinal w workers.js
-    // (0 = poludnie/+Z to "przod" postaci), stad "-z" jako "w tyl/na plecy".
-    node.position.set(0, 0.04, -0.14);
-    parentNode.add(node);
+
+    torso.updateWorldMatrix(true, false);
+    const el = torso.matrixWorld.elements;
+    const worldScale = Math.hypot(el[4], el[5], el[6]) || 1; // os Y macierzy swiata
+    node.scale.setScalar(1 / worldScale);
+
+    node.position.copy(this._computeBackpackLocalPos(model, torso));
+    torso.add(node);
     this.jetpackNode = node;
-    this._flightModelRef = entry.model;
+    this._flightModelRef = model;
     this._flightEntryRef = entry;
+  }
+
+  /**
+   * Liczy pozycje jetpacka w lokalnym ukladzie wezla `torso`, z bbox siatki
+   * tulowia (patrz komentarz przy _attachJetpackToEntry). Fallback na stara
+   * stala wartosc, gdy nie znajdziemy siatki z geometria (model spoza
+   * znanych rigów) - lot nigdy nie zostaje bez jetpacka.
+   */
+  _computeBackpackLocalPos(model, torso) {
+    const fallback = new THREE.Vector3(0, 0.04, -0.14);
+    const bodyMesh = model.getObjectByName('body-mesh') || (torso.isMesh ? torso : null);
+    if (!bodyMesh || !bodyMesh.geometry) return fallback;
+
+    if (!bodyMesh.geometry.boundingBox) bodyMesh.geometry.computeBoundingBox();
+    const box = bodyMesh.geometry.boundingBox;
+    // Srodek na wysokosci ~75% bbox (gorna partia = okolice barkow/plecow,
+    // omija nogi u dolu), najbardziej wysuniety punkt "w tyl" (-Z, przod
+    // postaci = +Z lokalnie - patrz CLAUDE.md) jako powierzchnia plecow.
+    const backLocal = new THREE.Vector3(
+      (box.min.x + box.max.x) / 2,
+      box.min.y + (box.max.y - box.min.y) * 0.75,
+      box.min.z,
+    );
+    backLocal.z -= 0.05; // maly odstep, zeby jetpack nie przebijal do srodka
+
+    if (bodyMesh.isSkinnedMesh && torso.isBone) {
+      // backLocal jest w ukladzie bind pose siatki (== swiat bind pose, bo
+      // body-mesh siedzi w korzeniu modelu) - boneInverses[i] to gotowa
+      // macierz "swiat bind pose -> lokalny uklad kosci i", dokladnie to,
+      // czego trzeba, zeby dziecko torso mialo poprawny staly offset.
+      const boneIdx = bodyMesh.skeleton.bones.indexOf(torso);
+      if (boneIdx !== -1) {
+        return backLocal.applyMatrix4(bodyMesh.skeleton.boneInverses[boneIdx]);
+      }
+      return fallback;
+    }
+    // Node-hierarchy (blocky-characters) - torso JEST siatka, bbox juz w jego
+    // wlasnym lokalnym ukladzie, zadnej dalszej transformacji nie trzeba.
+    return backLocal;
   }
 
   _cleanupFlightVisual() {
@@ -296,6 +383,79 @@ export class JetpackManager {
     if (this._flightEntryRef) this._updateFlightAnim(this._flightEntryRef, false);
     this._flightModelRef = null;
     this._flightEntryRef = null;
+
+    // Dym: przestajemy emitowac, istniejace czasteczki dogasaja same w
+    // _tickSmoke (wolane co klatke niezaleznie od stanu), pula sprzata sie
+    // (dispose) jak tylko ostatnia zgasnie - patrz _tickSmoke.
+    this._smokeEmitAccum = 0;
+    if (this._smokePool) this._smokeDisposePending = true;
+  }
+
+  /** Nowa czasteczka z puli (bez alokacji geometrii/materialu co emisje). */
+  _spawnSmoke(worldPos) {
+    this._ensureSmokePool();
+    const p = this._smokePool.find((x) => !x.active);
+    if (!p) return; // pula pelna (limit SMOKE_POOL_SIZE) - cicho pomijamy
+    p.active = true;
+    p.age = 0;
+    p.life = 0.6 + Math.random() * 0.4;
+    p.mesh.position.copy(worldPos);
+    p.mesh.visible = true;
+    p.baseScale = 0.6 + Math.random() * 0.3;
+    p.mesh.scale.setScalar(p.baseScale);
+    p.mesh.material.opacity = 0.5;
+    p.vel.set((Math.random() - 0.5) * 0.15, -(0.15 + Math.random() * 0.1), (Math.random() - 0.5) * 0.15);
+  }
+
+  /** Starzenie/opadanie/rozszerzanie/zanikanie aktywnych czasteczek dymu, plus sprzatanie puli po koncu lotu. */
+  _tickSmoke(delta) {
+    if (!this._smokePool) return;
+    let anyActive = false;
+    for (const p of this._smokePool) {
+      if (!p.active) continue;
+      p.age += delta;
+      if (p.age >= p.life) {
+        p.active = false;
+        p.mesh.visible = false;
+        continue;
+      }
+      anyActive = true;
+      const t = p.age / p.life;
+      p.mesh.position.addScaledVector(p.vel, delta);
+      p.mesh.scale.setScalar(p.baseScale * (1 + t * 0.8)); // rozszerzanie
+      p.mesh.material.opacity = 0.5 * (1 - t); // zanikanie
+    }
+    if (this._smokeDisposePending && !anyActive) this._disposeSmokePool();
+  }
+
+  _ensureSmokePool() {
+    if (this._smokePool) return;
+    this._smokeGeo = new THREE.SphereGeometry(0.045, 6, 5);
+    this._smokePool = [];
+    for (let i = 0; i < SMOKE_POOL_SIZE; i++) {
+      const mat = new THREE.MeshBasicMaterial({
+        color: 0x9a9a9a,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+      });
+      const mesh = new THREE.Mesh(this._smokeGeo, mat);
+      mesh.visible = false;
+      this.scene.add(mesh);
+      this._smokePool.push({ mesh, active: false, age: 0, life: 0, baseScale: 1, vel: new THREE.Vector3() });
+    }
+  }
+
+  _disposeSmokePool() {
+    if (!this._smokePool) return;
+    for (const p of this._smokePool) {
+      this.scene.remove(p.mesh);
+      p.mesh.material.dispose();
+    }
+    if (this._smokeGeo) this._smokeGeo.dispose();
+    this._smokePool = null;
+    this._smokeGeo = null;
+    this._smokeDisposePending = false;
   }
 
   /**
