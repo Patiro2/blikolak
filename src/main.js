@@ -613,7 +613,7 @@ async function main() {
     audio.play('awans-bankomatu');
     showTopAnnouncement(
       '🎰 AWANS BANKOMATU!',
-      `Wbite już <strong>${economy.state.totalChatClicks}</strong> klików - bankomat awansuje na <strong>${def.name}</strong> (×${def.mult} zarobku)!`,
+      `Wbite już <strong>${economy.state.totalChatClicks}</strong> klików - bankomat awansuje na <strong>${def.name}</strong>!`,
       3400,
     );
   }

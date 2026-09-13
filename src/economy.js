@@ -9,11 +9,11 @@ const OLD_SAVE_KEY = 'bankomat-clicker-v2'; // stary zapis z systemem kupowania 
 
 export const MACHINE_TIERS = [
   { key: 'gambling-machine', name: 'Automat hazardowy', mult: 1 },
-  { key: 'vending-machine', name: 'Automat vendingowy', mult: 3 },
-  { key: 'ticket-machine', name: 'Automat biletowy', mult: 10 },
-  { key: 'arcade-machine', name: 'Automat arcade', mult: 35 },
-  { key: 'claw-machine', name: 'Automat ze szczypcami', mult: 120 },
-  { key: 'dance-machine', name: 'Automat taneczny', mult: 500 },
+  { key: 'vending-machine', name: 'Automat vendingowy', mult: 1 },
+  { key: 'ticket-machine', name: 'Automat biletowy', mult: 1 },
+  { key: 'arcade-machine', name: 'Automat arcade', mult: 1 },
+  { key: 'claw-machine', name: 'Automat ze szczypcami', mult: 1 },
+  { key: 'dance-machine', name: 'Automat taneczny', mult: 1 },
 ];
 
 // Progi LACZNEJ liczby klikniec z czatu potrzebne do awansu na dany tier
