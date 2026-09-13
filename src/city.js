@@ -195,6 +195,212 @@ function createStreetTexture() {
   return tex;
 }
 
+/**
+ * Rysuje miekkie, wielotonowe "placki" trawy na canvasie - kilkadziesiat
+ * duzych (promien >= 26px), polprzezroczystych kol w kilku odcieniach
+ * zieleni. Duzy promien celowo - CLAUDE.md/plan zadania ostrzega przed
+ * drobnym szumem, ktory z daleka miga (alias); plamy tej wielkosci przy
+ * skali canvasu uzywanej ponizej (plaza/apron) maja co najmniej kilkanascie
+ * centymetrow w swiecie gry, wiec sa stabilne wizualnie przy ruchu kamery.
+ */
+function paintGrassBlobs(ctx, size, count, palette, radiusRange) {
+  for (let i = 0; i < count; i++) {
+    const x = Math.random() * size;
+    const y = Math.random() * size;
+    const r = randRange(radiusRange[0], radiusRange[1]);
+    const grad = ctx.createRadialGradient(x, y, 0, x, y, r);
+    const color = palette[Math.floor(Math.random() * palette.length)];
+    grad.addColorStop(0, `rgba(${color}, 0.55)`);
+    grad.addColorStop(1, `rgba(${color}, 0)`);
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+/**
+ * Generuje raz teksture nawierzchni placu pod arena (uklada sie na
+ * PlazaGroundMesh, cienkiej nakladce tuz nad betonowym cokolem - patrz
+ * _buildPlaza). Trawa z wieloma odcieniami, przetarta ziemia w pierscieniu
+ * tuz przy plotku granicy areny (fenceEdge=3.8, patrz scene.js) i 4 kamienne
+ * sciezki prowadzace od plotka do krawedzi placu (PLAZA_HALF=6.5) w stronach
+ * N/E/S/W - zgodnie z orientacja plotkow granicy.
+ */
+function createPlazaGroundTexture() {
+  const size = 1024;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+
+  ctx.fillStyle = '#3a5a34';
+  ctx.fillRect(0, 0, size, size);
+
+  paintGrassBlobs(ctx, size, 90, ['58,90,50', '70,110,62', '46,74,40', '85,125,70'], [26, 60]);
+
+  // Przetarta ziemia dookola plotka granicy areny (kwadratowy pas, plotek
+  // siega do ok. +-3.9 j. z naroznikami - patrz FENCE_EDGE+CORNER_SIZE/2 w
+  // scene.js). 1 j. = size/(PLAZA_HALF*2) = 1024/13 ~= 78.77 px.
+  const pxPerUnit = size / (6.5 * 2);
+  const center = size / 2;
+  const dirtHalf = 4.35 * pxPerUnit;
+  ctx.save();
+  ctx.strokeStyle = 'rgba(150, 115, 78, 0.55)';
+  ctx.lineWidth = 1.1 * pxPerUnit;
+  ctx.lineJoin = 'round';
+  ctx.strokeRect(center - dirtHalf, center - dirtHalf, dirtHalf * 2, dirtHalf * 2);
+  ctx.strokeStyle = 'rgba(120, 92, 62, 0.35)';
+  ctx.lineWidth = 0.4 * pxPerUnit;
+  ctx.strokeRect(center - dirtHalf, center - dirtHalf, dirtHalf * 2, dirtHalf * 2);
+  ctx.restore();
+
+  // 4 kamienne sciezki od przetartej ziemi do krawedzi placu, w kierunkach
+  // odpowiadajacych bokom plotka (N/E/S/W).
+  const pathHalfW = 0.55 * pxPerUnit;
+  const pathStart = dirtHalf;
+  const pathEnd = size / 2;
+  const drawStoneStrip = (horizontal) => {
+    for (const sign of [-1, 1]) {
+      ctx.save();
+      if (horizontal) {
+        const x0 = center + sign * pathStart;
+        const x1 = center + sign * pathEnd;
+        ctx.fillStyle = '#8a8579';
+        ctx.fillRect(Math.min(x0, x1), center - pathHalfW, Math.abs(x1 - x0), pathHalfW * 2);
+        // Fugi kamiennej sciezki - kilka poprzecznych kresek
+        ctx.strokeStyle = 'rgba(60,56,48,0.4)';
+        ctx.lineWidth = 2;
+        const steps = 8;
+        for (let i = 1; i < steps; i++) {
+          const x = x0 + (x1 - x0) * (i / steps);
+          ctx.beginPath();
+          ctx.moveTo(x, center - pathHalfW);
+          ctx.lineTo(x, center + pathHalfW);
+          ctx.stroke();
+        }
+      } else {
+        const y0 = center + sign * pathStart;
+        const y1 = center + sign * pathEnd;
+        ctx.fillStyle = '#8a8579';
+        ctx.fillRect(center - pathHalfW, Math.min(y0, y1), pathHalfW * 2, Math.abs(y1 - y0));
+        ctx.strokeStyle = 'rgba(60,56,48,0.4)';
+        ctx.lineWidth = 2;
+        const steps = 8;
+        for (let i = 1; i < steps; i++) {
+          const y = y0 + (y1 - y0) * (i / steps);
+          ctx.beginPath();
+          ctx.moveTo(center - pathHalfW, y);
+          ctx.lineTo(center + pathHalfW, y);
+          ctx.stroke();
+        }
+      }
+      ctx.restore();
+    }
+  };
+  drawStoneStrip(true);
+  drawStoneStrip(false);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  return tex;
+}
+
+/**
+ * Generuje raz teksture "dzikiego" terenu na apronie (do FOREGROUND_APRON_HALF
+ * = 19.3) - wielotonowa trawa, promieniste sciezki gruntowe od placu (6.5) do
+ * kazdego skomponowanego zestawu rekwizytow (CLUSTER_RADIUS=7.65, katy 0/60/
+ * .../300 - patrz _buildForegroundProps) i szeroka asfaltowa obwodnica z
+ * pasami na promieniu 12.5 (bezpiecznie miedzy niska zielenia [do 8.6] a
+ * wysoka zabudowa [od 18.2]).
+ */
+function createApronGroundTexture() {
+  const size = 1536;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const half = 19.3;
+  const pxPerUnit = size / (half * 2);
+  const center = size / 2;
+
+  ctx.fillStyle = '#33502f';
+  ctx.fillRect(0, 0, size, size);
+  paintGrassBlobs(ctx, size, 260, ['61,97,54', '74,115,64', '44,69,39', '92,138,78', '58,90,52'], [45, 130]);
+
+  // Promieniste sciezki gruntowe od krawedzi placu (6.5) do kazdego zestawu
+  // rekwizytow (7.65) - lekko poszerzone poza sam promien clustra (do 8.4),
+  // zeby wygladaly jak wydeptana droga dojsciowa, nie kropka.
+  const clusterAngles = [0, 60, 120, 180, 240, 300].map((d) => (d * Math.PI) / 180);
+  ctx.save();
+  ctx.strokeStyle = 'rgba(140, 108, 72, 0.5)';
+  ctx.lineCap = 'round';
+  for (const angle of clusterAngles) {
+    const x0 = center + Math.sin(angle) * 6.4 * pxPerUnit;
+    const y0 = center + Math.cos(angle) * 6.4 * pxPerUnit;
+    const x1 = center + Math.sin(angle) * 8.4 * pxPerUnit;
+    const y1 = center + Math.cos(angle) * 8.4 * pxPerUnit;
+    ctx.lineWidth = 0.8 * pxPerUnit;
+    ctx.beginPath();
+    ctx.moveTo(x0, y0);
+    ctx.lineTo(x1, y1);
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  // Szeroka obwodnica asfaltowa na promieniu 12.5 - pierscien z przerywana
+  // linia jezdni i jasniejszym kraweznikiem po obu stronach.
+  const ringR = 12.5 * pxPerUnit;
+  const ringW = 1.6 * pxPerUnit;
+  ctx.save();
+  // Jasny kraweznik pod spodem (szerszy stroke), potem ciemny asfalt na
+  // wierzchu (wezszy) - zostawia widoczny pasek kraweznika po obu stronach.
+  ctx.strokeStyle = 'rgba(210,210,200,0.55)';
+  ctx.lineWidth = ringW + 6;
+  ctx.beginPath();
+  ctx.arc(center, center, ringR, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.strokeStyle = '#1c1d24';
+  ctx.lineWidth = ringW;
+  ctx.beginPath();
+  ctx.arc(center, center, ringR, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(255, 214, 110, 0.65)';
+  ctx.lineWidth = 4;
+  ctx.setLineDash([30, 22]);
+  ctx.beginPath();
+  ctx.arc(center, center, ringR, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+
+  // Drobne kepki kwiatow/krzewow - male grupki kolorowych kropek, wielkosc
+  // pojedynczej kropki >= 5px (nie pojedynczy piksel - patrz uwaga o aliasie
+  // w CLAUDE.md/createWindowTexture) rozrzucone po trawie.
+  const flowerColors = ['#ffd166', '#ff8fd6', '#f4f4f4', '#c084fc'];
+  for (let i = 0; i < 70; i++) {
+    const cx = Math.random() * size;
+    const cy = Math.random() * size;
+    const dist = Math.hypot(cx - center, cy - center) / pxPerUnit;
+    if (dist < 7 || (dist > 11.5 && dist < 13.5) || dist > 18) continue; // omijaj plac/droge/skraj mgly
+    const clusterSize = 3 + Math.floor(Math.random() * 4);
+    const col = flowerColors[Math.floor(Math.random() * flowerColors.length)];
+    ctx.fillStyle = col;
+    for (let j = 0; j < clusterSize; j++) {
+      const ox = cx + randRange(-14, 14);
+      const oy = cy + randRange(-14, 14);
+      ctx.beginPath();
+      ctx.arc(ox, oy, 5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  return tex;
+}
+
 /** Zwraca pozycje (x,z) i kierunek (kat rotation.y) na obwodzie prostokatnej petli ulicy dla dystansu s. */
 function pointOnLoop(halfSize, s, out) {
   const side = halfSize * 2;
@@ -245,11 +451,11 @@ export class CityBackground {
     // scene.js) zostala CALKOWICIE poza zasiegiem mgly.
     scene.fog = new THREE.Fog(0x0e1118, FOG_NEAR, FOG_FAR);
 
-    this._buildPlaza(scene);
+    this._buildPlaza(scene, renderer);
     this._buildStreetGround(scene);
     this._buildBuildings(scene, renderer);
     this._buildCars(scene);
-    this._buildForegroundApron(scene);
+    this._buildForegroundApron(scene, renderer);
     // Asynchroniczne (GLB) - leci w tle, nie blokuje pierwszej klatki. Ewentualny
     // blad sieci/ladowania jest logowany, ale NIE wywraca reszty gry (patrz
     // main.js - city.build() nigdy nie jest await-owane).
@@ -260,7 +466,7 @@ export class CityBackground {
 
   // --- Zielony "apron" - lekko obnizone (o 0.005, zero Z-fightingu z placem)
   // rozszerzenie placu, na ktorym stoi caly zielono-miejski foreground. ---
-  _buildForegroundApron(scene) {
+  _buildForegroundApron(scene, renderer) {
     const geo = new THREE.BoxGeometry(FOREGROUND_APRON_HALF * 2, PLAZA_HEIGHT, FOREGROUND_APRON_HALF * 2);
     const mat = new THREE.MeshStandardMaterial({ color: 0x1c2a1e, roughness: 1, metalness: 0 });
     const mesh = new THREE.Mesh(geo, mat);
@@ -268,6 +474,25 @@ export class CityBackground {
     mesh.receiveShadow = true;
     scene.add(mesh);
     this.foregroundApronMesh = mesh;
+
+    // Nakladka z wielotonowa trawa + sciezki gruntowe do klastrow rekwizytow +
+    // asfaltowa obwodnica (patrz createApronGroundTexture) - cienka plaszczyzna
+    // TUZ nad wierzchem apronu (ktory zostaje pod spodem, niewidoczny, samym
+    // kolorem juz nie gra roli). Poziom Y = apron top (-0.025) + 0.004 =
+    // -0.021: ponizej wierzchu placu (-0.02, plac go zaslania w swoim
+    // obrysie, tak jak wczesniej robil to sam apron) i nad apronem - brak
+    // wspolplaszczyznowosci z ktorakolwiek z tych dwoch powierzchni.
+    const apronTopY = CITY_GROUND_Y + PLAZA_HEIGHT - 0.005; // = PLAZA_TOP_Y - 0.005
+    const overlayGeo = new THREE.PlaneGeometry(FOREGROUND_APRON_HALF * 2, FOREGROUND_APRON_HALF * 2);
+    const overlayTex = createApronGroundTexture();
+    applyTextureFiltering(overlayTex, renderer);
+    const overlayMat = new THREE.MeshStandardMaterial({ map: overlayTex, roughness: 1, metalness: 0 });
+    const overlay = new THREE.Mesh(overlayGeo, overlayMat);
+    overlay.rotation.x = -Math.PI / 2;
+    overlay.position.set(0, apronTopY + 0.004, 0);
+    overlay.receiveShadow = true;
+    scene.add(overlay);
+    this.apronGroundOverlay = overlay;
   }
 
   /** Zwraca pierwszy THREE.Mesh znaleziony w scenie GLTF (kazdy model mini-forest ma dokladnie jeden). */
@@ -296,6 +521,7 @@ export class CityBackground {
       aStatue, aBanner,
       mFruit, mCart, mBasket, mFreezer, mBottleReturn,
       dWoodStruct, dWoodSupport, dBarrel, dTable,
+      patchGrass, patchDirt, pGrass, pGrassPlant, pGrassFoliage,
     ] = await Promise.all([
       loadForest('tree'), loadForest('tree-high'), loadForest('plant'),
       loadForest('rocks-high'), loadForest('rocks-low'), loadForest('stones'),
@@ -306,6 +532,8 @@ export class CityBackground {
       loadArcade('display-fruit'), loadArcade('shopping-cart'), loadArcade('shopping-basket'),
       loadArcade('freezers-standing'), loadArcade('bottle-return'),
       loadDungeon('wood-structure'), loadDungeon('wood-support'), loadDungeon('barrel'), loadDungeon('table'),
+      loadForest('patch-grass'), loadForest('patch-dirt'),
+      loadPirate('grass'), loadPirate('grass-plant'), loadPirate('patch-grass-foliage'),
     ]);
 
     const dummy = new THREE.Object3D();
@@ -340,6 +568,9 @@ export class CityBackground {
     });
 
     // --- Niska zielen (promien 6.7-8.6): rosliny, kamienie, ogrodzenia ---
+    // Uwaga: plotek w tym pierscieniu (promien 8.75) to OZDOBNE ogrodzenie
+    // oddzielajace plac (do 6.5) od dzikszego terenu apronu - stoi ~5 j. dalej
+    // niz wlasciwa granica areny (fenceEdge=3.8 w scene.js) i nie dubluje jej.
     const lowDefs = [
       { gltf: plant, count: 22, scaleRange: [0.8, 1.3] },
       { gltf: rocksLow, count: 10, scaleRange: [0.7, 1.1] },
@@ -366,6 +597,80 @@ export class CityBackground {
         dummy.position.set(x, 0, z);
         dummy.rotation.set(0, def.tangential ? angle : randRange(0, Math.PI * 2), 0);
         dummy.scale.setScalar(s);
+        dummy.updateMatrix();
+        inst.setMatrixAt(i, dummy.matrix);
+      }
+      inst.instanceMatrix.needsUpdate = true;
+      scene.add(inst);
+    }
+
+    // --- Drobny "zywy" runiec terenu: kepki trawy/gruntu wprost na placu (za
+    // plotkiem granicy areny, przed kamiennymi sciezkami) i na apronie (miedzy
+    // plotkiem ozdobnym 8.75 a droga 12.5) - patrz createPlazaGroundTexture /
+    // createApronGroundTexture powyzej dla samego podloza; to jest jego 3D
+    // uzupelnienie modelami Kenney. Wszystkie ponizej 0.6 j. wysokosci (patrz
+    // twarde ograniczenie kamery w opisie zadania), pozycjonowane na y=0 -
+    // ten sam prosty poziom, ktorego juz uzywa lowDefs powyzej dla reszty
+    // rekwizytow na tym samym terenie (bez nowego poziomu Y do pilnowania).
+    const groundClutterDefs = [
+      // Kepki trawy mini-forest wprost na placu, w 4 "wycinkach" miedzy
+      // kamiennymi sciezkami (unikamy katow 0/90/180/270 +-18st, gdzie biegna
+      // sciezki), promien 4.4-6.2 (za plotkiem areny, przed krawedzia placu).
+      {
+        gltf: patchGrass, count: 26, scaleRange: [0.8, 1.2],
+        radius: [4.4, 6.2], plazaRing: true,
+      },
+      // Przetarte kepki gruntu przy samych sciezkach placu (blisko katow
+      // 0/90/180/270), jakby ziemia byla wydeptana tuz obok kamieni.
+      {
+        gltf: patchDirt, count: 14, scaleRange: [0.9, 1.3],
+        radius: [4.5, 6.0], plazaRing: true, nearPaths: true,
+      },
+      // Kepki trawy pirate-kit (skalowane w dol, pirate-kit ~1.5-2x wiekszy
+      // od siatki mini-* - patrz CLAUDE.md) rozrzucone na apronie miedzy
+      // plazą a droga.
+      { gltf: pGrass, count: 46, scaleRange: [0.35, 0.55], radius: [6.9, 11.6] },
+      // Rzadsze, wieksze kepy/krzaki (grass-plant) - jako akcenty.
+      { gltf: pGrassPlant, count: 16, scaleRange: [0.3, 0.42], radius: [6.9, 11.6] },
+      // Duze plaskie "placki" zarosniete (patch-grass-foliage) - lokalnie
+      // gestsza roslinnosc, mocno pomniejszone (oryginal ~5.27 x 4.1 j.).
+      { gltf: pGrassFoliage, count: 10, scaleRange: [0.16, 0.22], radius: [7.2, 11.4] },
+    ];
+    for (const def of groundClutterDefs) {
+      const mesh = this._firstMesh(def.gltf);
+      const inst = new THREE.InstancedMesh(mesh.geometry, mesh.material, def.count);
+      inst.castShadow = false; // niska roslinnosc - cien pomijalny, oszczedza cykle
+      inst.receiveShadow = true;
+      inst.frustumCulled = false;
+      let placed = 0;
+      let guard = 0;
+      while (placed < def.count && guard < def.count * 20) {
+        guard++;
+        let angle = randRange(0, Math.PI * 2);
+        if (def.plazaRing) {
+          // Omijaj +-18st wokol kazdej z 4 kamiennych sciezek (0/90/180/270st)
+          const deg = (angle * 180) / Math.PI;
+          const angDist = (a) => Math.abs(((deg - a + 540) % 360) - 180);
+          const nearAxis = [0, 90, 180, 270].some((a) => angDist(a) <= 18);
+          if (def.nearPaths !== nearAxis) continue;
+        }
+        const radius = randRange(def.radius[0], def.radius[1]);
+        const x = Math.sin(angle) * radius;
+        const z = Math.cos(angle) * radius;
+        const s = randRange(def.scaleRange[0], def.scaleRange[1]);
+        dummy.position.set(x, 0, z);
+        dummy.rotation.set(0, randRange(0, Math.PI * 2), 0);
+        dummy.scale.setScalar(s);
+        dummy.updateMatrix();
+        inst.setMatrixAt(placed, dummy.matrix);
+        placed++;
+      }
+      // Gdyby (teoretycznie) zabraklo prob trafienia w wymagany "wycinek" -
+      // pozostale, niewykorzystane sloty chowamy poza scena (skala 0), zeby
+      // nie zostawic domyslnej macierzy jednostkowej (obiekt w (0,0,0)).
+      for (let i = placed; i < def.count; i++) {
+        dummy.position.set(0, -1000, 0);
+        dummy.scale.setScalar(0.0001);
         dummy.updateMatrix();
         inst.setMatrixAt(i, dummy.matrix);
       }
@@ -554,8 +859,9 @@ export class CityBackground {
     this.foregroundMeshes = [...TALL_TYPES.map((t) => t.inst), structInst, roofInst, ...clusterMeshes, columnInst];
   }
 
-  // --- Plac pod arena - jedna bryla betonu, wierzch na y=0 (poziom podlogi areny) ---
-  _buildPlaza(scene) {
+  // --- Plac pod arena - jedna bryla betonu (cokol), wierzch na y=PLAZA_TOP_Y
+  // przykryty cienka nakladka z trawa+sciezkami (patrz nizej) ---
+  _buildPlaza(scene, renderer) {
     const geo = new THREE.BoxGeometry(PLAZA_HALF * 2, PLAZA_HEIGHT, PLAZA_HALF * 2);
     const mat = new THREE.MeshStandardMaterial({ color: 0x20242f, roughness: 0.95, metalness: 0.05 });
     const mesh = new THREE.Mesh(geo, mat);
@@ -564,6 +870,25 @@ export class CityBackground {
     mesh.castShadow = true;
     scene.add(mesh);
     this.plazaMesh = mesh;
+
+    // Nakladka z trawa+przetarta ziemia+kamienne sciezki (createPlazaGroundTexture)
+    // - cienka plaszczyzna 0.005 j. NAD betonowym cokolem (PLAZA_TOP_Y=-0.02),
+    // wciaz WYRAZNIE ponizej wierzchu kafli podlogi areny (y=0) - zero
+    // wspolplaszczyznowosci z ktorymkolwiek z tych dwoch poziomow. Boczne
+    // sciany cokolu zostaja bez tekstury (material box'a niezmieniony), wiec
+    // plac nadal wyglada jak podniesiony betonowy postument z zielonym
+    // "dywanem" na wierzchu, a nie jednolita bryla trawy.
+    const plazaTopY = CITY_GROUND_Y + PLAZA_HEIGHT; // = PLAZA_TOP_Y
+    const overlayGeo = new THREE.PlaneGeometry(PLAZA_HALF * 2, PLAZA_HALF * 2);
+    const overlayTex = createPlazaGroundTexture();
+    applyTextureFiltering(overlayTex, renderer);
+    const overlayMat = new THREE.MeshStandardMaterial({ map: overlayTex, roughness: 1, metalness: 0 });
+    const overlay = new THREE.Mesh(overlayGeo, overlayMat);
+    overlay.rotation.x = -Math.PI / 2;
+    overlay.position.set(0, plazaTopY + 0.005, 0);
+    overlay.receiveShadow = true;
+    scene.add(overlay);
+    this.plazaGroundOverlay = overlay;
 
     // Cienki neonowy pasek Kicka na krawedzi placu, tuz PONIZEJ wierzchu placu.
     // Uwaga (naprawa Z-fightingu): pasek jest szerszy od placu tylko o 0.06, wiec

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { loadArcade } from './assets.js';
+import { loadArcade, loadForest } from './assets.js';
 
 const BASE_FOV = 42;
 const BASE_POS = new THREE.Vector3(0, 3.2, 5.4);
@@ -132,13 +132,22 @@ export function createScene(canvas) {
   return { renderer, scene, camera, controls, spot, neon };
 }
 
+/** Zwraca pierwszy THREE.Mesh znaleziony w scenie GLTF (fence.glb ma dokladnie jeden). */
+function firstMesh(gltf) {
+  let found = null;
+  gltf.scene.traverse((o) => {
+    if (!found && o.isMesh) found = o;
+  });
+  return found;
+}
+
 /** Buduje pokój 7x7 ze starannie spasowanymi kafelkami (zero Z-fightingu). */
 export async function buildRoom(scene) {
   const SIZE = 7;
   const HALF = Math.floor(SIZE / 2); // 3 (kafle od -3 do +3)
 
-  const [floorGltf, wallGltf, cornerGltf] = await Promise.all([
-    loadArcade('floor'), loadArcade('wall'), loadArcade('wall-corner'),
+  const [floorGltf, fenceGltf] = await Promise.all([
+    loadArcade('floor'), loadForest('fence'),
   ]);
 
   const group = new THREE.Group();
@@ -152,72 +161,97 @@ export async function buildRoom(scene) {
     }
   }
 
-  // Ściany posadowione są na y = 0.025, dzięki czemu ich spód nie konkuruje
-  // płaszczyzną z podłogą (koniec Y-fightingu).
+  // Granica areny: plotek kenney_mini-forest (assets/forest/fence.glb) zamiast
+  // dawnych scian/naroznikow z mini-arcade (wall.glb/wall-corner.glb).
   //
-  // Każdy narożnik (wall-corner) zajmuje skrzydła o długości 0.5 jednostki.
-  // Pomiędzy narożnikami (-3.0 do +3.0) jest DOKŁADNIE 6.0 jednostek.
-  // Umieszczamy dokładnie 6 ścian o szerokości 1.0 (centra: -2.5, -1.5, -0.5, 0.5, 1.5, 2.5),
-  // które stykają się idealnie na styk bez ani milimetra nakładania się (zero Z-fightingu).
-  const wallY = 0.025;
-  const edge = HALF + 0.5; // 3.5
-  const wallCenters = [-2.5, -1.5, -0.5, 0.5, 1.5, 2.5];
+  // Zmierzony bbox fence.glb (skrypt z CLAUDE.md): x[-0.548,0.548] (dlugosc
+  // wzdluz lokalnej osi X), y[0,0.4] (wysokosc), z[-0.1229,0.1229] (grubosc
+  // panelu, 0.2458 lacznie). Segment jest szerszy (1.096) niz siatka areny
+  // (1.0), wiec 7 segmentow na bok (centra -3..3, jak kafle podlogi) zachodzi
+  // na siebie po ok. 0.048 z kazdej strony styku i laczy sie bez szczelin.
+  //
+  // Granica NIE stoi dokladnie na krawedzi siatki (3.5) tylko w odsunieciu
+  // FENCE_OFFSET na zewnatrz. Powod: minigry flagbattle.js/tlumaczenia.js (nie
+  // ruszane w tym zadaniu) stawiaja WLASNE plotki z tego samego modelu wokol
+  // kontestowanego pola na pozycjach tile+-0.5 - dla pola przy krawedzi areny
+  // (np. x=3,z=0) ich plotek wypada dokladnie na x=3.5 z tym samym rot=PI/2,
+  // czyli ta sama orientacja i os co nasz rzad wschodni.
+  // Zmierzone (przeliczenie transformacji rot.y=PI/2, ta sama metoda co dla
+  // minigry): przy sugerowanym w planie odsunieciu 0.12-0.15 (fenceEdge~3.62-
+  // 3.65) plotek granicy i plotek minigry NADAL SIE PRZENIKAJA - wewnetrzna
+  // (blizsza arenie) sciana naszego plotka wypada na fenceEdge-0.1229, a
+  // zewnetrzna sciana plotka minigry na 3.5+0.1229=3.623; przy fenceEdge=3.63
+  // to 3.507 < 3.623, czyli zakladanie siatek na ~0.12 j. Dopiero odsuniecie
+  // >= ~0.2458+0.03 marginesu (czyli fenceEdge >= 3.78) daje realny przeswit.
+  // Uzyte FENCE_OFFSET=0.3 (fenceEdge=3.8) daje ok. 5.4 cm czystego odstepu -
+  // zweryfikowane w raporcie zadania (zblizenie + zmierzone wspolrzedne).
+  // To ODSTEPSTWO od zaproponowanej w planie wartosci 0.12-0.15 - potrzebne,
+  // bo plotek ma realna grubosc (0.2458 j.), nie jest plaskim dekalem.
+  const FENCE_OFFSET = 0.3;
+  const FENCE_EDGE = HALF + 0.5; // 3.5 - krawedz siatki areny/plotkow minigry
+  const fenceEdge = FENCE_EDGE + FENCE_OFFSET; // 3.8
+  // Granica lezy poza kaflami podlogi (te siegaja tylko do 3.5), a wiec nad
+  // plazą z city.js (CityBackground._buildPlaza). Plac ma tam DWIE
+  // powierzchnie: betonowy cokol (PLAZA_TOP_Y=-0.02) i cienka nakladke z
+  // trawa/sciezkami tuz nad nim (plazaTopY+0.005 = -0.015, patrz
+  // createPlazaGroundTexture w city.js). Podpieramy plotek 0.007 j. NAD TA
+  // NAKLADKA (nie dokladnie na niej), zeby nie byc wspolplaszczyznowym z jej
+  // gorna powierzchnia, a jednoczesnie nie "wisiec" w powietrzu (odstep
+  // niezauwazalny wizualnie).
+  const FENCE_Y = -0.008;
+  const fenceCenters = [-3, -2, -1, 0, 1, 2, 3];
 
-  for (const pos of wallCenters) {
-    // Ściana południowa (+Z, tył kamery)
-    const wallS = wallGltf.scene.clone(true);
-    wallS.position.set(pos, wallY, edge);
-    wallS.rotation.y = Math.PI;
-    group.add(wallS);
+  // Cala granica (28 segmentow + 4 rogi = 32 instancje) to JEDEN InstancedMesh
+  // zamiast 32 osobnych klonow gltf.scene - kazdy klon byl wlasnym draw call,
+  // co mierzalnie podbijalo renderer.info.render.calls (zmierzone w raporcie
+  // zadania: ~28 dodatkowych wywolan tylko na sam plotek). Ta sama geometria
+  // i material (fence.glb ma dokladnie jeden mesh) wiec instancing jest
+  // bezpieczny - zero roznicy wizualnej, jeden draw call zamiast 32.
+  const fenceMesh = firstMesh(fenceGltf);
+  const FENCE_INSTANCE_COUNT = fenceCenters.length * 4 + 4;
+  const fenceInst = new THREE.InstancedMesh(fenceMesh.geometry, fenceMesh.material, FENCE_INSTANCE_COUNT);
+  fenceInst.castShadow = true;
+  fenceInst.receiveShadow = true;
+  fenceInst.frustumCulled = false;
 
-    // Ściana północna (-Z)
-    const wallN = wallGltf.scene.clone(true);
-    wallN.position.set(pos, wallY, -edge);
-    group.add(wallN);
+  const fenceDummy = new THREE.Object3D();
+  let fenceIdx = 0;
+  const placeFence = (x, z, ry, scaleX = 1) => {
+    fenceDummy.position.set(x, FENCE_Y, z);
+    fenceDummy.rotation.set(0, ry, 0);
+    fenceDummy.scale.set(scaleX, 1, 1);
+    fenceDummy.updateMatrix();
+    fenceInst.setMatrixAt(fenceIdx++, fenceDummy.matrix);
+  };
 
-    // Ściana wschodnia (+X)
-    const wallE = wallGltf.scene.clone(true);
-    wallE.position.set(edge, wallY, pos);
-    wallE.rotation.y = -Math.PI / 2;
-    group.add(wallE);
-
-    // Ściana zachodnia (-X)
-    const wallW = wallGltf.scene.clone(true);
-    wallW.position.set(-edge, wallY, pos);
-    wallW.rotation.y = Math.PI / 2;
-    group.add(wallW);
+  // Rotacje zgodne z konwencja flagbattle.js/tlumaczenia.js (boki wokol pola:
+  // dz=+0.5 -> rot=0, dz=-0.5 -> rot=PI, dx=+0.5 -> rot=PI/2, dx=-0.5 ->
+  // rot=-PI/2), zeby orientacja tekstury plotka byla spojna w calej grze.
+  for (const c of fenceCenters) {
+    placeFence(c, fenceEdge, 0); // +Z
+    placeFence(c, -fenceEdge, Math.PI); // -Z
+    placeFence(fenceEdge, c, Math.PI / 2); // +X
+    placeFence(-fenceEdge, c, -Math.PI / 2); // -X
   }
 
-  // 4 Narożniki w rogach (3.5, 3.5) na poziomie y = 0.025.
-  //
-  // UWAGA na asymetrie modelu wall-corner.glb: jego lokalny bounding box to
-  // x[-0.5, 0.3], z[-0.3, 0.5] - NIE jest symetryczny (0.8 x 0.8, srodek
-  // przesuniety o (-0.1, +0.1) wzgledem pivota). W efekcie jedno "ramie"
-  // naroznika siega pelne 0.5 j. (styka sie ze sciana idealnie), a drugie,
-  // prostopadle, tylko 0.3 j. (o 0.2 j. za krotko - zostawia szczeline na
-  // pelnej wysokosci sciany). Zmierzone bbox-y (skrypt w opisie zadania +
-  // przeliczenie transformacji rotacji/translacji) pokazuja, ze kazdy z 4
-  // naroznikow ma te "krotka" strone na innej osi swiata (bo kazdy ma inny
-  // ry). Przesuniecie kazdego naroznika o 0.2 j. wzdluz WLASNIE tej krotkiej
-  // osi domyka pierscien: krotkie ramie dociaga sie do konca sciany (styk
-  // 3.0/-3.0), a dlugie ramie nie zmienia polozenia na drugiej osi (bo dla
-  // katow 0/90/180/270 rotacja nie miesza osi x/z), wiec zostaje tak samo
-  // idealnie styczne jak wczesniej. Wynik: wszystkie 4 narozniki zajmuja
-  // symetryczne 0.8x0.8 w rogu, zewnetrzna sciana naroznika (3.8/-3.8)
-  // pokrywa sie z zewnetrznym licem scian (edge +- 0.3) - zero szczeliny,
-  // zero nakladania (dowod w raporcie zadania 1).
-  const cornerPositions = [
-    { x: edge - 0.2, z: edge, ry: Math.PI },
-    { x: -edge, z: edge - 0.2, ry: Math.PI / 2 },
-    { x: edge, z: -edge + 0.2, ry: -Math.PI / 2 },
-    { x: -edge + 0.2, z: -edge, ry: 0 },
-  ];
-  for (const c of cornerPositions) {
-    const corner = cornerGltf.scene.clone(true);
-    corner.position.set(c.x, wallY, c.z);
-    corner.rotation.y = c.ry;
-    group.add(corner);
+  // Rogi: ostatnie slupki rzedow (koniec segmentu na +-3.548) nie stykaja sie
+  // w rogu (+-3.8,+-3.8) - dzieli je ok. 0.36 j. po przekatnej. Domykamy to
+  // krotkim segmentem tego samego fence.glb, polozonym STYCZNIE do rogu (po
+  // przekatnej miedzy tymi dwoma slupkami) i scisnietym wzdluz lokalnej osi X.
+  // Segment ustawiony wzdluz dwusiecznej (atan2(-sz, sx), bez +PI/2) sterczal
+  // z rogu na zewnatrz jak ostroga - sprawdzone zrzutem z bliska.
+  const FENCE_LEN = 1.096; // zmierzona dlugosc fence.glb wzdluz lokalnej osi X
+  const fenceRowEnd = fenceCenters[fenceCenters.length - 1] + FENCE_LEN / 2; // 3.548
+  const cornerMid = (fenceEdge + fenceRowEnd) / 2;
+  const cornerScaleX = (Math.SQRT2 * (fenceEdge - fenceRowEnd)) / FENCE_LEN + 0.15;
+  for (const sx of [-1, 1]) {
+    for (const sz of [-1, 1]) {
+      placeFence(sx * cornerMid, sz * cornerMid, Math.atan2(-sz, sx) + Math.PI / 2, cornerScaleX);
+    }
   }
+
+  fenceInst.instanceMatrix.needsUpdate = true;
+  group.add(fenceInst);
 
   // Wizualna neonowa siatka 2D na podłodze areny (7x7 pól, każde pole 1.0 x 1.0 m)
   const gridMesh = createFloorGridMesh(SIZE, SIZE);
