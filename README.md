@@ -165,7 +165,8 @@ Każdy boss ma własną mechanikę w osobnym pliku:
   przeczyszczający, łączyć je w truciznę i zadawać nią obrażenia z bliska.
 - **Tier 5 - Wilkołak, "OSTATNI BOSS MYŚLIBORZA"** (`src/boss-wilkolak.js`,
   mechanika `'wilkolak'`) - opisany szczegółowo niżej. FAZA 1 (100→50 HP):
-  losowo Szał alkoholowy (zamach z kontrą "ło tego" i stunem), Nur (wężyk po
+  losowo Szał alkoholowy (zamach → sweep → 8 s okno kontry "ło tego" na
+  zielonym polu za plecami → stun ze gwiazdkami), Nur (wężyk po
   arenie) albo Płacz (zbiórka na kwadracie 3×3), rzadko Szał banowy. Przy
   50 HP jednorazowe Przejście (ścieżki 1-2-3 do przebiegnięcia w 15 s), potem
   FAZA 2 (0→50 HP): Rzut piwem (uciekaj albo odrzuć podniesione piwo pisząc
@@ -234,15 +235,22 @@ postaci.
   `boss.czyNaliczanieDozwolone()` - widz odtwarza wynik z sync
   (`getSyncState`/`applySync`/`startFromSync`, ten sam wzorzec co Kowal/Skorpion).
 - **Szał alkoholowy**: wilkołak biegnie (`sprint`) na pole obok losowego
-  żywego gracza i odwraca się do niego przodem. 2 s zamachu - 3 pola przed nim
-  (rząd w poprzek kierunku patrzenia) świecą czerwono. Gracz stojący ZA jego
-  plecami (jedno z 3 tylnych pól) może skontrować pisząc na czacie `ło tego`
-  (też `lo tego`, dowolna wielkość liter - pierwszy wygrywa): atak przerwany,
-  kontrujący dostaje 100 zł, wilkołak dostaje STUN na 10 s - w tym czasie 3
-  pola za jego plecami świecą niebiesko, a gdy stanie na nich (każde pole inny
-  gracz) wymagana liczba graczy (`min(3, graczy w grze)`, pomniejszona o pola
-  poza areną/na bankomacie), traci jednorazowo 25 HP. Bez kontry: sweep zabija
-  każdego na 3 czerwonych polach (skutek jak rakieta bossa 1).
+  żywego gracza (preferując pole, którego "tył" po dobiegnięciu leży w
+  arenie - patrz niżej) i odwraca się do niego przodem. 2 s zamachu - 3 pola
+  przed nim (rząd w poprzek kierunku patrzenia) świecą czerwono, BEZ okna na
+  kontrę. Po zamachu zawsze wykonuje się sweep: zabija każdego na 3
+  czerwonych polach (skutek jak rakieta bossa 1). Zaraz potem, PO sweepie,
+  za jego plecami zapala się JEDNO zielone pole (dokładnie za nim,
+  `x - facing.x, z - facing.z`) na 8 s - okno kontry. Kto w tym oknie stoi na
+  zielonym polu i napisze na czacie `ło tego` (też `lo tego`, dowolna
+  wielkość liter - pierwszy wygrywa): dostaje 100 zł, wilkołak dostaje STUN
+  na 10 s (baner "💫 WILKOŁAK OGŁUSZONY!", zatrzymuje się, 4 żółte gwiazdki
+  orbitują nad jego głową). W trakcie stuna 3 pola za jego plecami świecą
+  niebiesko (te same okrągłe znaczniki co reszta gry); gdy KAŻDE z widocznych
+  pól ma na sobie gracza (przy mniejszej liczbie żywych graczy niż pól
+  wystarczy tyle zajętych pól, ilu jest graczy), wilkołak jednorazowo traci
+  25 HP. Jeśli okno kontry minie bez `ło tego`, zielone pole gaśnie i leci
+  kolejny atak bez skutku.
 - **Nur**: serpentyna co drugi rząd/kolumnę (losowa orientacja
   pozioma/pionowa i róg startowy), z pominięciem pola bankomatu (wilkołak je
   "przeskakuje" - widoczny mały skok w animacji). Cała trasa świeci czerwono
@@ -265,8 +273,9 @@ postaci.
   Skorpiona - `wilkolakBan` na wpisie rankingu).
 - **Sterowanie z czatu**: frazy normalizowane istniejącymi `normalizePolish`/
   `normalizeNick`/`usunTagiEmotek`. `ło tego`/`lo tego` kontruje Szał
-  alkoholowy (tylko w oknie zamachu, tylko gracz na tylnych polach). `rzut`
-  odrzuca podniesione piwo Fazy 2 (bez efektu, jeśli akurat go nie niesiesz).
+  alkoholowy (tylko w 8-sekundowym oknie kontry PO sweepie, tylko gracz
+  stojący na zielonym polu). `rzut` odrzuca podniesione piwo Fazy 2 (bez
+  efektu, jeśli akurat go nie niesiesz).
 
 #### Przejście (HP ≤ 50, jednorazowo)
 

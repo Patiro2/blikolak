@@ -38,15 +38,21 @@ const CZAS_WEJSCIA = 2.6; // sekund - timing karty tytulowej/letterboxu (jak Sko
 
 const KOLOR_ZAMACH = 0xff3b30; // czerwone pola - zamach Szalu alkoholowego / trasa Nura / rzut piwem (faza 2)
 const KOLOR_STUN = 0x2fb4ff; // niebieskie pola - stun Szalu alkoholowego / kwadrat Placzu
+const KOLOR_KONTRA = 0x2ecc71; // zielone pole - okno kontry Szalu alkoholowego (po sweepie)
+const KOLOR_GWIAZDKA = 0xffd60a; // zolte gwiazdki nad glowa w trakcie stuna
 
 const CZAS_MIEDZY_ATAKAMI = [8, 12]; // sekund [min,max] do kolejnego ataku
 const SZANSA_BANOWY = 0.10; // ~10% szans na Szal banowy zamiast zwyklego ataku
 
 const ALKOHOL_BIEG_CZAS = 1.1; // sekund biegu (sprint) na pole obok gracza
-const ALKOHOL_ZAMACH_CZAS = 2.0; // sekund telegrafu przed sweepem/kontra
+const ALKOHOL_ZAMACH_CZAS = 2.0; // sekund telegrafu przed sweepem
+const ALKOHOL_OKNO_KONTRY = 8.0; // sekund okna kontry PO sweepie (zielone pole za plecami)
 const ALKOHOL_STUN_CZAS = 10.0; // sekund stuna po udanej kontrze
 const ALKOHOL_STUN_DMG = 25;
 const ALKOHOL_KONTRA_NAGRODA = 100; // zl dla kontrujacego
+const GWIAZDKA_LICZBA = 4; // ile gwiazdek orbituje nad glowa w trakcie stuna
+const GWIAZDKA_PROMIEN = 0.4;
+const GWIAZDKA_WYSOKOSC = 2.4; // nad modelem - jak offset zlotej nagrody kontry nizej (projectAndFloat)
 
 const NUR_KROK_CZAS = 0.2; // sekund na pole
 const NUR_OSTRZEZENIE_CZAS = 3.0; // sekund telegrafu calej trasy przed startem
@@ -99,7 +105,7 @@ export class BossWilkolak {
     this.facing = { x: 0, z: 1 }; // kierunek patrzenia (jednostkowy wektor siatki)
 
     // --- FSM ataku (patrz naglowek pliku - deterministyczny telegraf) ---
-    this.faza = 'CZEKANIE'; // CZEKANIE | ALKOHOL_BIEG | ALKOHOL_ZAMACH | ALKOHOL_STUN | NUR | PLACZ | BANOWY
+    this.faza = 'CZEKANIE'; // CZEKANIE | ALKOHOL_BIEG | ALKOHOL_ZAMACH | ALKOHOL_OKNO | ALKOHOL_STUN | NUR | PLACZ | BANOWY
     this.fazaT = 0; // czas W BIEZACEJ fazie (rosnie) - uzywany do interpolacji/odliczania
     this._nextAtakAt = 0; // fightSec, w ktorej odpala sie kolejny atak
     this._licznikAtakow = 0;
@@ -143,6 +149,9 @@ export class BossWilkolak {
 
     this._ogonT = 0;
     this._ogonBaza = null;
+
+    // --- Gwiazdki stuna Szalu alkoholowego (patrz _stworzGwiazdki) ---
+    this._gwiazdki = [];
   }
 
   // ================= BUDOWA MODELU =================
@@ -288,6 +297,9 @@ export class BossWilkolak {
     // Reset stanu Fazy 2/Przejscia - istotne dla przycisku testowy "Zresp
     // wilkolaka" (boss.start(5,{force:true})), ktory moze odpalic walke od
     // nowa, gdy poprzednia dotarla do Fazy 2 (patrz spec-wilkolak.md).
+    // Sprzata tez ewentualne znaczniki/gwiazdki, gdyby respawn zlapal walke
+    // w trakcie Szalu alkoholowego (zamach/okno kontry/stun).
+    this._wyczyscEfektyAtaku();
     this._usunWizualizacjeSciezek();
     this._piwoTrafien = 0;
     this._gameOverWywolany = false;
@@ -386,6 +398,7 @@ export class BossWilkolak {
     for (const wpis of this._nurZnacznikiPol.values()) this.boss.fx.usunZnacznik(wpis);
     this._nurZnacznikiPol.clear();
     this._ukryjPlaczOverlay();
+    this._usunGwiazdki();
   }
 
   // ================= WYBOR KOLEJNEGO ATAKU =================
@@ -416,6 +429,15 @@ export class BossWilkolak {
 
   // ================= SZAL ALKOHOLOWY =================
 
+  /** Kierunek patrzenia z pola `from` w strone pola `to`, zaokraglony do najblizszej osi siatki. */
+  _facingDo(from, to) {
+    const dx = to.x - from.x;
+    const dz = to.z - from.z;
+    return Math.abs(dx) >= Math.abs(dz)
+      ? { x: Math.sign(dx) || 1, z: 0 }
+      : { x: 0, z: Math.sign(dz) || 1 };
+  }
+
   _rozpocznijAlkoholBieg() {
     const zywi = this._zywiGracze();
     if (zywi.length === 0) { this._ustawNastepnyAtak(); return; }
@@ -426,8 +448,19 @@ export class BossWilkolak {
     const kandydaci = [[1, 0], [-1, 0], [0, 1], [0, -1]]
       .map(([dx, dz]) => ({ x: ofiara.x + dx, z: ofiara.z + dz }))
       .filter((p) => this._wSiatce(p.x, p.z) && !(p.x === 0 && p.z === 0));
-    const cel = kandydaci.length > 0
-      ? losujZ(this._rng('alkohol-pole'), kandydaci)
+    // Wsrod tych kandydatow preferuj te, dla ktorych pole ZA PLECAMI (po
+    // dobiegnieciu) tez jest poprawne w arenie - tam stanie zielone pole
+    // okna kontry PO sweepie (patrz _rozpocznijOknoKontry). Bez tego zielone
+    // pole mogloby wypasc poza arene / na bankomacie i kontra bylaby nie do
+    // wykonania.
+    const zPoprawnymTylem = kandydaci.filter((p) => {
+      const facing = this._facingDo(p, ofiara);
+      const tyl = { x: p.x - facing.x, z: p.z - facing.z };
+      return this._wSiatce(tyl.x, tyl.z) && !(tyl.x === 0 && tyl.z === 0);
+    });
+    const pula = zPoprawnymTylem.length > 0 ? zPoprawnymTylem : kandydaci;
+    const cel = pula.length > 0
+      ? losujZ(this._rng('alkohol-pole'), pula)
       : { x: ofiara.x, z: ofiara.z };
 
     this.faza = 'ALKOHOL_BIEG';
@@ -457,11 +490,7 @@ export class BossWilkolak {
       this.x = d.celX; this.z = d.celZ;
       // Kierunek patrzenia zaokraglony do najblizszego kierunku siatki (na
       // wprost ofiary) - potrzebny do wyliczenia rzedow pol przed/za nim.
-      const dx = d.patrzX - this.x;
-      const dz = d.patrzZ - this.z;
-      this.facing = Math.abs(dx) >= Math.abs(dz)
-        ? { x: Math.sign(dx) || 1, z: 0 }
-        : { x: 0, z: Math.sign(dz) || 1 };
+      this.facing = this._facingDo(this, { x: d.patrzX, z: d.patrzZ });
       this._rozpocznijZamach();
     }
   }
@@ -489,7 +518,6 @@ export class BossWilkolak {
   _rozpocznijZamach() {
     this.faza = 'ALKOHOL_ZAMACH';
     this.fazaT = 0;
-    this._kontraZlapana = false;
     const front = this._frontTiles();
     this._dane = { front };
     this._wyczyscZnaczniki();
@@ -500,16 +528,13 @@ export class BossWilkolak {
     showBossNotification(
       'boss',
       '🍺 SZAŁ ALKOHOLOWY!',
-      'Wilkołak zamierza się na 3 pola przed sobą! Kto stoi ZA jego plecami, niech pisze "ło tego" - to kontra!',
+      'Wilkołak zamierza się na 3 pola przed sobą - UCIEKAJ z czerwonych pól!',
     );
   }
 
   _updateZamach(delta) {
     this.fazaT += delta;
-    if (this.fazaT >= ALKOHOL_ZAMACH_CZAS) {
-      if (this._kontraZlapana) this._rozpocznijStun();
-      else this._wykonajSweep();
-    }
+    if (this.fazaT >= ALKOHOL_ZAMACH_CZAS) this._wykonajSweep();
   }
 
   _wykonajSweep() {
@@ -524,29 +549,65 @@ export class BossWilkolak {
       }
     }
     audio.wilkolakUderzenie();
-    this._ustawNastepnyAtak();
+    this._rozpocznijOknoKontry();
   }
 
-  /** Wykrywanie kontry - patrz onChatMessage. Wolane WYLACZNIE z fazy ALKOHOL_ZAMACH. */
+  /**
+   * Okno kontry PO sweepie: jedno zielone pole bezposrednio za plecami
+   * wilkolaka (srodek _backTiles(), preferowany juz przy wyborze pola biegu -
+   * patrz _rozpocznijAlkoholBieg - zeby prawie zawsze wypadl w arenie).
+   * Fallback na lewy/prawy tyl, gdyby jednak srodek okazal sie niepoprawny.
+   */
+  _rozpocznijOknoKontry() {
+    const [lewy, srodek, prawy] = this._backTiles();
+    const poprawne = (t) => this._wSiatce(t.x, t.z) && !(t.x === 0 && t.z === 0);
+    const zielone = poprawne(srodek) ? srodek : (poprawne(lewy) ? lewy : (poprawne(prawy) ? prawy : null));
+    if (!zielone) { this._ustawNastepnyAtak(); return; } // nie powinno sie zdarzac, patrz preferencja wyzej
+
+    this.faza = 'ALKOHOL_OKNO';
+    this.fazaT = 0;
+    this._kontraZlapana = false;
+    this._kontraGracz = null;
+    this._dane = { zielone };
+    this._wyczyscZnaczniki();
+    this._znaczniki.push(this.boss.fx.oznaczPole(zielone.x, zielone.z, KOLOR_KONTRA, ALKOHOL_OKNO_KONTRY));
+    this.playAction('idle');
+    showBossNotification(
+      'boss',
+      '🍺 OKNO KONTRY!',
+      'Stań na zielonym polu za wilkołakiem i napisz "ło tego"! Masz 8 sekund.',
+    );
+  }
+
+  _updateOknoKontry(delta) {
+    this.fazaT += delta;
+    if (this.fazaT >= ALKOHOL_OKNO_KONTRY) {
+      this._wyczyscZnaczniki();
+      this._ustawNastepnyAtak();
+    }
+  }
+
+  /** Wykrywanie kontry - patrz onChatMessage. Wolane WYLACZNIE z fazy ALKOHOL_OKNO. */
   _sprobujKontre(username) {
     if (this._kontraZlapana) return;
-    const back = this._backTiles();
+    const zielone = this._dane.zielone;
+    if (!zielone) return;
     const pozycja = this._zywiGracze().find((g) => normalizeNick(g.username) === normalizeNick(username));
-    if (!pozycja) return;
-    const naPolu = back.some((t) => t.x === pozycja.x && t.z === pozycja.z);
-    if (!naPolu) return;
+    if (!pozycja || pozycja.x !== zielone.x || pozycja.z !== zielone.z) return;
 
     this._kontraZlapana = true;
     this._kontraGracz = username;
+    this._wyczyscZnaczniki();
     this._pokazKontre(username);
+    this._rozpocznijStun();
   }
 
   _pokazKontre(username) {
     audio.wilkolakUderzenie();
     showBossNotification(
       'hit',
-      `🛡️ @${username} SKONTROWAŁ WILKOŁAKA!`,
-      'Atak przerwany - wilkołak zostaje ogłuszony na 10 sekund!',
+      '💫 WILKOŁAK OGŁUSZONY!',
+      `@${username} skontrował Szał alkoholowy - wilkołak ogłuszony na 10 sekund!`,
     );
     this.boss._log('good', `@${username} kontruje Szal alkoholowy - wilkolak STUN`, { gracz: username });
   }
@@ -562,6 +623,7 @@ export class BossWilkolak {
       if (!this._wSiatce(t.x, t.z) || (t.x === 0 && t.z === 0)) continue;
       this._znaczniki.push(this.boss.fx.oznaczPole(t.x, t.z, KOLOR_STUN, ALKOHOL_STUN_CZAS));
     }
+    this._stworzGwiazdki();
     this.playAction('emote-no', { once: true }) || this.playAction('idle');
 
     if (this._jestemHostem() && this._kontraGracz) {
@@ -578,23 +640,17 @@ export class BossWilkolak {
 
   _updateStun(delta) {
     this.fazaT += delta;
+    this._updateGwiazdki(delta);
     if (this._jestemHostem() && !this._stunNagrodaWyplacona) {
       const back = this._dane.back || [];
-      let pominiete = 0;
-      const valid = [];
-      for (const t of back) {
-        if (!this._wSiatce(t.x, t.z) || (t.x === 0 && t.z === 0)) { pominiete += 1; continue; }
-        valid.push(t);
-      }
-      const wymagane = Math.max(0, Math.min(3, this._zywiGracze().length) - pominiete);
-      const wlasciciele = new Set();
-      for (const t of valid) {
-        for (const entry of this._workersOnTile(t.x, t.z)) {
-          const nick = this._userForWorker(entry);
-          if (nick) wlasciciele.add(normalizeNick(nick));
-        }
-      }
-      if (wymagane > 0 && wlasciciele.size >= wymagane) {
+      const valid = back.filter((t) => this._wSiatce(t.x, t.z) && !(t.x === 0 && t.z === 0));
+      // Nowa regula (patrz zadanie): kazde WIDOCZNE kolko musi byc zajete
+      // przez co najmniej jednego gracza (nie tylko N roznych graczy
+      // gdziekolwiek). Zabezpieczenie na malo graczy zostaje: przy mniejszej
+      // liczbie zywych niz kolek wystarczy tyle zajetych kolek, ilu jest graczy.
+      const zajete = valid.filter((t) => this._workersOnTile(t.x, t.z).some((e) => this._userForWorker(e))).length;
+      const wymagane = Math.min(valid.length, this._zywiGracze().length);
+      if (wymagane > 0 && zajete >= wymagane) {
         this._stunNagrodaWyplacona = true;
         this._wyczyscZnaczniki();
         this.boss.damage(ALKOHOL_STUN_DMG);
@@ -605,8 +661,47 @@ export class BossWilkolak {
     }
     if (this.fazaT >= ALKOHOL_STUN_CZAS) {
       this._wyczyscZnaczniki();
+      this._usunGwiazdki();
       this._ustawNastepnyAtak();
     }
+  }
+
+  // --- Gwiazdki stuna (kilka zoltych oktaedrow orbitujacych nad glowa) ---
+
+  _stworzGwiazdki() {
+    this._usunGwiazdki();
+    this._gwiazdki = [];
+    const mat = new THREE.MeshBasicMaterial({ color: KOLOR_GWIAZDKA });
+    for (let i = 0; i < GWIAZDKA_LICZBA; i++) {
+      const mesh = new THREE.Mesh(new THREE.OctahedronGeometry(0.09, 0), mat);
+      mesh.userData.kat = (i / GWIAZDKA_LICZBA) * Math.PI * 2;
+      this.boss.scene.add(mesh);
+      this._gwiazdki.push(mesh);
+    }
+  }
+
+  _updateGwiazdki(delta) {
+    if (!this._gwiazdki || !this._gwiazdki.length || !this.model) return;
+    const centrum = this.model.position;
+    for (const g of this._gwiazdki) {
+      g.userData.kat += delta * 3;
+      g.position.set(
+        centrum.x + Math.cos(g.userData.kat) * GWIAZDKA_PROMIEN,
+        GWIAZDKA_WYSOKOSC * WILK_SCALE + Math.sin(g.userData.kat * 2) * 0.08,
+        centrum.z + Math.sin(g.userData.kat) * GWIAZDKA_PROMIEN,
+      );
+      g.rotation.y += delta * 4;
+    }
+  }
+
+  _usunGwiazdki() {
+    if (!this._gwiazdki || !this._gwiazdki.length) { this._gwiazdki = []; return; }
+    for (const g of this._gwiazdki) {
+      this.boss.scene.remove(g);
+      if (g.geometry) g.geometry.dispose();
+    }
+    if (this._gwiazdki[0].material) this._gwiazdki[0].material.dispose();
+    this._gwiazdki = [];
   }
 
   // ================= NUR =================
@@ -1336,14 +1431,15 @@ export class BossWilkolak {
 
   /**
    * Frazy sterujace (patrz zadanie): "lo tego"/"ło tego" (kontra Szalu
-   * alkoholowego, tylko w fazie ALKOHOL_ZAMACH) i "rzut" (rzut piwem - FAZA 2,
+   * alkoholowego, tylko w fazie ALKOHOL_OKNO - PO sweepie, stojac na zielonym
+   * polu za plecami) i "rzut" (rzut piwem - FAZA 2,
    * na razie bez efektu, ETAP 2 go podepnie). Normalizacja jak reszta gry:
    * normalizePolish (usuwa polskie znaki diakrytyczne + lowercase).
    */
   onChatMessage(username, content) {
     if (this.isBanned(username)) return; // zbanowany - ignorujemy WSZYSTKIE jego komendy (poza ruchem, patrz main.js)
     const norm = normalizePolish(content);
-    if (this.faza === 'ALKOHOL_ZAMACH' && /\blo tego\b/.test(norm)) {
+    if (this.faza === 'ALKOHOL_OKNO' && /\blo tego\b/.test(norm)) {
       this._sprobujKontre(username);
     }
     // "rzut" - odrzucenie podnietego piwa FAZY 2 (patrz _sprobujRzutPiwem;
@@ -1387,6 +1483,7 @@ export class BossWilkolak {
     if (this.faza === 'CZEKANIE') this._updateCzekanie();
     else if (this.faza === 'ALKOHOL_BIEG') this._updateAlkoholBieg(delta);
     else if (this.faza === 'ALKOHOL_ZAMACH') this._updateZamach(delta);
+    else if (this.faza === 'ALKOHOL_OKNO') this._updateOknoKontry(delta);
     else if (this.faza === 'ALKOHOL_STUN') this._updateStun(delta);
     else if (this.faza === 'NUR') this._updateNur(delta);
     else if (this.faza === 'PLACZ') this._updatePlacz(delta);
@@ -1492,6 +1589,7 @@ export class BossWilkolak {
     this._nurZnacznikiPol.clear();
     this._ukryjPlaczOverlay();
     this._usunWizualizacjeSciezek();
+    this._usunGwiazdki();
 
     if (this.faza === 'PRZEJSCIE' && this._dane.sciezki) {
       this._pokazZnacznikiSciezek(this._dane.sciezki);
@@ -1501,11 +1599,15 @@ export class BossWilkolak {
       }
     } else if (this.faza === 'ALKOHOL_ZAMACH' && this._dane.front) {
       for (const t of this._dane.front) this._znaczniki.push(this.boss.fx.oznaczPole(t.x, t.z, KOLOR_ZAMACH, Math.max(0.1, ALKOHOL_ZAMACH_CZAS - this.fazaT)));
+    } else if (this.faza === 'ALKOHOL_OKNO' && this._dane.zielone) {
+      const z = this._dane.zielone;
+      this._znaczniki.push(this.boss.fx.oznaczPole(z.x, z.z, KOLOR_KONTRA, Math.max(0.1, ALKOHOL_OKNO_KONTRY - this.fazaT)));
     } else if (this.faza === 'ALKOHOL_STUN' && this._dane.back) {
       for (const t of this._dane.back) {
         if (!this._wSiatce(t.x, t.z) || (t.x === 0 && t.z === 0)) continue;
         this._znaczniki.push(this.boss.fx.oznaczPole(t.x, t.z, KOLOR_STUN, Math.max(0.1, ALKOHOL_STUN_CZAS - this.fazaT)));
       }
+      this._stworzGwiazdki();
     } else if (this.faza === 'NUR' && this._dane.trasa) {
       for (const t of this._dane.trasa) {
         this._nurZnacznikiPol.set(`${t.x},${t.z}`, this.boss.fx.oznaczPole(t.x, t.z, KOLOR_ZAMACH, 30));
