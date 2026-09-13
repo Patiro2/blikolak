@@ -42,6 +42,15 @@ export function normalizeNick(username) {
   return stripNickPrefix(username).toLowerCase();
 }
 
+// Nicki botow czatu, ktore NIE moga wchodzic do gry (klik, ranking, kody,
+// komendy) - patrz czyZablokowany i jej uzycie w _processChatMessage.
+const ZABLOKOWANE_NICKI = new Set(['botrix']);
+
+/** Czy dany nick (w dowolnej wielkosci liter, z ew. "@") jest zablokowanym botem czatu. */
+export function czyZablokowany(username) {
+  return ZABLOKOWANE_NICKI.has(normalizeNick(username));
+}
+
 // [emote:ID:NAZWA] - ID MUSI byc \d+, bo leci prosto do URL-a, a tresc czatu
 // jest niezaufana; dowolny znak pozwolilby podmienic adres obrazka.
 const RE_EMOTE = /\[emote:(\d+):([^\]]*)\]/g;
@@ -164,6 +173,16 @@ export class KickChatClient {
     // "wlasnie wyeliminowany" od "nigdy nie klikal" w krotkim oknie miedzy
     // eliminacja a nastepnym klikiem.
     this.eliminated = new Set();
+
+    // Sprzatanie: bot moglby juz miec wpis w rankingu/przypisaniach z czasu
+    // przed wprowadzeniem blokady (patrz ZABLOKOWANE_NICKI) - usuwamy go tu,
+    // eliminateUser usuwa zarowno z leaderboard jak i z assignments naraz.
+    for (const key of new Set([
+      ...Object.keys(this.leaderboard),
+      ...Object.keys(this.assignments.userToWorker),
+    ])) {
+      if (czyZablokowany(key)) this.eliminateUser(key);
+    }
   }
 
   _loadLeaderboard() {
@@ -647,6 +666,14 @@ export class KickChatClient {
     const sender = msg.sender || { username: 'Anonim', identity: { color: '#53fc18' } };
     const username = sender.username || 'Anonim';
     const userColor = sender.identity?.color || '#53fc18';
+
+    // Boty czatu (patrz ZABLOKOWANE_NICKI) nie wchodza do gry: zaden klik,
+    // wpis w rankingu, kod, dymek nad glowa pracownika ani nawet wiadomosc w
+    // widzecie czatu (onMessage) - bezpieczenstwo wazniejsze niz widocznosc
+    // wiadomosci bota na czacie.
+    if (czyZablokowany(username)) {
+      return;
+    }
 
     // Kazda niepusta wiadomosc na czacie liczy sie jako klik w bankomat.
     const isKlik = content.length > 0;
