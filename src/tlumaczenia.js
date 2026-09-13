@@ -9,6 +9,7 @@ import {
 import { usunTagiEmotek } from './kick.js';
 import { loadForest } from './assets.js';
 import { strumien, losujInt, tasuj } from './rng.js';
+import { Bojka } from './bojka.js';
 
 // Minigra "Tlumaczenia" - DRUGA (a chronologicznie trzecia w projekcie) minigra
 // na siatce areny, obok "Bitwy o flagi". Mechanika jest CELOWO skopiowana z
@@ -231,6 +232,10 @@ export class TlumaczeniaManager {
     this.scene.add(this.wordSprite);
 
     this.isHost = false;
+
+    // Bijatyka + chmura kurzu (patrz src/bojka.js) - identyczny wzorzec co w
+    // flagbattle.js: jedna wspoldzielona instancja na cale zycie tej minigry.
+    this.bojka = new Bojka(this.scene);
   }
 
   setContext({ workerManager, kickChat, economy, isHost, boss, flagBattle }) {
@@ -323,6 +328,10 @@ export class TlumaczeniaManager {
     }
 
     this._aktualizujPlotki(dt);
+
+    // Bijatyka + chmura kurzu - identyczny wzorzec co w flagbattle.js
+    // (kosmetyczna animacja lokalna, dziala niezaleznie od isHost).
+    this.bojka.update(dt, this.workerManager);
 
     if (!this.isHost) return;
 
@@ -482,8 +491,8 @@ export class TlumaczeniaManager {
       p2.targetRotY = angleP1 + Math.PI;
       p2.facingAngle = angleP1 + Math.PI;
 
-      if (p1.interactAction) p1.interactAction.play();
-      if (p2.interactAction) p2.interactAction.play();
+      // Animacja bijatyki (ciosy + chmura kurzu) - patrz src/bojka.js.
+      this.bojka.start(this.tile, this.players, `${this.economy.state.seedGry}:tlumaczenia-bojka:${this.battleId}`);
 
       this.nextRound();
       this.announce(`Bitwa tlumaczen! ${p1User} vs ${p2User}! Tlumacz slowo na polski na czacie! Kto pierwszy zdobedzie ${PUNKTY_DO_WYGRANEJ} pkt wygrywa!`);
@@ -592,10 +601,7 @@ export class TlumaczeniaManager {
     this.highlightMesh.visible = false;
     this._usunPlotki();
 
-    this.players.forEach((p) => {
-      const w = this.workerManager.getWorkerType(p.typeIndex);
-      if (w && w.interactAction) w.interactAction.stop();
-    });
+    this.bojka.stop(this.workerManager);
 
     const loser = this.players.find((p) => p.typeIndex !== winnerPlayer.typeIndex);
     if (loser) {
@@ -640,10 +646,7 @@ export class TlumaczeniaManager {
       this.announce('⚔️ Boss atakuje! Bitwa tlumaczen przerwana - pole zwolnione.');
     }
 
-    this.players.forEach((p) => {
-      const w = this.workerManager && this.workerManager.getWorkerType(p.typeIndex);
-      if (w && w.interactAction) w.interactAction.stop();
-    });
+    this.bojka.stop(this.workerManager);
 
     this.reset();
   }
@@ -714,6 +717,10 @@ export class TlumaczeniaManager {
   }
 
   reset() {
+    // Identyczne uzasadnienie co w flagbattle.js/reset() - reset() bywa
+    // wolany z miejsc, ktore nie zatrzymuja bojke jawnie (setHost, koniec
+    // REWARD, oboje walczacych znika naraz).
+    if (this.bojka) this.bojka.stop(this.workerManager);
     this.state = 'IDLE';
     this.timer = 0;
     this.tile = null;
@@ -765,15 +772,9 @@ export class TlumaczeniaManager {
     this.currentWord = s.currentWord || null;
 
     if (this.state === 'BATTLE' && prevState !== 'BATTLE') {
-      this.players.forEach((p) => {
-        const w = this.workerManager && this.workerManager.getWorkerType(p.typeIndex);
-        if (w && w.interactAction) w.interactAction.play();
-      });
+      this.bojka.start(this.tile, this.players, `${this.economy.state.seedGry}:tlumaczenia-bojka:${this.battleId}`);
     } else if (prevState === 'BATTLE' && this.state !== 'BATTLE') {
-      this.players.forEach((p) => {
-        const w = this.workerManager && this.workerManager.getWorkerType(p.typeIndex);
-        if (w && w.interactAction) w.interactAction.stop();
-      });
+      this.bojka.stop(this.workerManager);
     }
 
     if (this.state === 'BATTLE' && this.wordsGuessed > prevWordsGuessed) {

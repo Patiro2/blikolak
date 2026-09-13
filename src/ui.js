@@ -468,6 +468,23 @@ export class WorkerOverlayManager {
     this.overlays = new Map();
     this._headWorld = new THREE.Vector3();
     this._projected = new THREE.Vector3();
+
+    // Warstwa SVG na cienkie linie-lacznik miedzy plakietka a glowa postaci,
+    // gdy plakietka zostala rozsunieta pionowo (patrz _rozsunNaGrupy nizej) -
+    // bez tego widz nie wie, ktora rozsunieta plakietka nalezy do ktorej
+    // postaci, gdy kilku graczy stoi na tym samym polu (lub na sasiednich
+    // polach blisko siebie na ekranie). Ten sam kontener #worker-overlays
+    // (position: fixed; inset: 0 - patrz style.css) wiec wspolrzedne pikselowe
+    // (sx/sy ponizej) pasuja bez dodatkowych przeliczen.
+    this.linesSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    this.linesSvg.setAttribute('class', 'worker-connector-layer');
+    this.linesSvg.style.position = 'absolute';
+    this.linesSvg.style.inset = '0';
+    this.linesSvg.style.width = '100%';
+    this.linesSvg.style.height = '100%';
+    this.linesSvg.style.overflow = 'visible';
+    this.linesSvg.style.pointerEvents = 'none';
+    this.container.appendChild(this.linesSvg);
   }
 
   _getOrCreate(workerIndex) {
@@ -493,17 +510,28 @@ export class WorkerOverlayManager {
     this.container.appendChild(nameplateEl);
     this.container.appendChild(bubbleEl);
 
+    const connectorEl = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    connectorEl.setAttribute('class', 'worker-connector');
+    connectorEl.style.opacity = '0';
+    this.linesSvg.appendChild(connectorEl);
+
     const data = {
       workerIndex,
       nameplateEl,
       rankSpan,
       userSpan,
       bubbleEl,
+      connectorEl,
       timer: null,
       active: false,
       fainted: false, // stan omdlenia (boss.js) - musi przetrwac kazdy update z syncLeaderboardAndOverlays
       savedRank: '',
       lastUsername: null,
+      // Biezace (wygladzone) pionowe przesuniecie plakietki wzgledem
+      // naturalnej pozycji nad glowa - patrz updatePositions/_rozsunNaGrupy.
+      // Trzymane MIEDZY klatkami (nie resetowane co wywolanie), zeby
+      // przejscie do/z rozsuniecia bylo plynne, a nie skokowe.
+      stackOffset: 0,
     };
     this.overlays.set(workerIndex, data);
     return data;
@@ -578,7 +606,20 @@ export class WorkerOverlayManager {
     }, 6000);
   }
 
+  // Przyblizona polowa szerokosci/wysokosci plakietki na ekranie - nick ma
+  // zmienna dlugosc (flex + padding, patrz .worker-nameplate w style.css), ale
+  // stala aproksymacja wystarcza do wykrycia "prawdziwego" nakladania sie na
+  // ekranie (wymaganie: grupowac po realnym nakladaniu, nie po wspolnym polu
+  // siatki, bo postacie z SASIEDNICH pol tez moga sie nalozyc z daleka) i,
+  // w odroznieniu od pomiaru getBoundingClientRect co klatke, jest calkowicie
+  // stabilna - zero migotania przy zmianie dlugosci nicku miedzy klatkami.
+  static _POLOWA_SZEROKOSCI_PLAKIETKI = 60;
+  static _POLOWA_WYSOKOSCI_PLAKIETKI = 13;
+  static _ODSTEP_STOSU = 24; // odleglosc miedzy kolejnymi plakietkami w stosie (px)
+
   updatePositions(workerEntries, camera, canvasRect) {
+    const aktywne = [];
+
     for (const entry of workerEntries) {
       if (!entry.obj) continue;
       const item = this.overlays.get(entry.typeIndex);
@@ -594,22 +635,122 @@ export class WorkerOverlayManager {
       if (this._projected.z >= 1.0) {
         item.nameplateEl.style.display = 'none';
         item.bubbleEl.style.display = 'none';
+        item.connectorEl.style.opacity = '0';
         continue;
       }
 
       const sx = canvasRect.left + (this._projected.x * 0.5 + 0.5) * canvasRect.width;
       const sy = canvasRect.top + (-this._projected.y * 0.5 + 0.5) * canvasRect.height;
-
       const zIndex = Math.max(1, Math.round((1.0 - this._projected.z) * 100)) + 10;
 
       item.nameplateEl.style.display = 'flex';
+      aktywne.push({ item, sx, sy, zIndex, typeIndex: entry.typeIndex });
+    }
+
+    this._rozsunNaGrupy(aktywne);
+
+    for (const w of aktywne) {
+      const { item, sx, sy, zIndex } = w;
+      const top = sy - 6 + item.stackOffset;
+
       item.nameplateEl.style.left = `${sx}px`;
-      item.nameplateEl.style.top = `${sy - 6}px`;
+      item.nameplateEl.style.top = `${top}px`;
       item.nameplateEl.style.zIndex = zIndex;
 
       item.bubbleEl.style.left = `${sx}px`;
-      item.bubbleEl.style.top = `${sy - 34}px`;
+      item.bubbleEl.style.top = `${top - 28}px`;
       item.bubbleEl.style.zIndex = zIndex + 5;
+
+      // Lacznik widoczny TYLKO gdy plakietka faktycznie zostala odsunieta od
+      // naturalnej pozycji nad glowa - dla pojedynczych postaci (bez nikogo
+      // w poblizu na ekranie) nie ma czego wskazywac, plakietka i tak jest
+      // dokladnie nad glowa jak wczesniej.
+      if (Math.abs(item.stackOffset) > 2) {
+        item.connectorEl.setAttribute('x1', String(sx));
+        item.connectorEl.setAttribute('y1', String(top));
+        item.connectorEl.setAttribute('x2', String(sx));
+        item.connectorEl.setAttribute('y2', String(sy));
+        item.connectorEl.style.opacity = '0.85';
+      } else {
+        item.connectorEl.style.opacity = '0';
+      }
+    }
+  }
+
+  /**
+   * Grupuje plakietki, ktorych ekranowe prostokaty (aproksymowane stalym
+   * rozmiarem, patrz stale wyzej) faktycznie sie nakladaja - NIE po wspolnym
+   * polu siatki 3D, bo dwie postacie na SASIEDNICH polach moga tez nalozyc
+   * sie na ekranie z daleka (kamera perspektywiczna), a dwie na tym samym
+   * polu moga NIE nakladac sie wcale, gdy kamera jest bardzo blisko. W
+   * kazdej grupie >= 2 elementow plakietki ida w PIONOWY STOS (kolejna nad
+   * poprzednia, o stala odleglosc _ODSTEP_STOSU), zaczynajac od naturalnie
+   * najwyzej polozonej glowy w grupie.
+   *
+   * Kolejnosc w stosie jest stabilna miedzy klatkami (sortowanie po
+   * typeIndex - NIE po biezacej pozycji na ekranie, ktora drga klatka po
+   * klatce) - bez tego dwie plakietki potrafilyby zamieniac sie miejscami z
+   * klatki na klatke (migotanie). Docelowe przesuniecie jest tylko CELEM -
+   * faktyczne item.stackOffset dochodzi do niego plynnie (wygladzanie w dole
+   * tej funkcji), zeby wejscie/wyjscie z grupy (np. gdy ktos wchodzi na pole)
+   * nie bylo skokowe.
+   */
+  _rozsunNaGrupy(aktywne) {
+    const n = aktywne.length;
+    if (n === 0) return;
+
+    aktywne.sort((a, b) => a.typeIndex - b.typeIndex);
+
+    const parent = aktywne.map((_, i) => i);
+    const find = (i) => {
+      while (parent[i] !== i) {
+        parent[i] = parent[parent[i]];
+        i = parent[i];
+      }
+      return i;
+    };
+    const union = (a, b) => {
+      const ra = find(a);
+      const rb = find(b);
+      if (ra !== rb) parent[ra] = rb;
+    };
+
+    const progW = WorkerOverlayManager._POLOWA_SZEROKOSCI_PLAKIETKI * 2;
+    const progH = WorkerOverlayManager._POLOWA_WYSOKOSCI_PLAKIETKI * 2;
+    for (let i = 0; i < n; i++) {
+      for (let j = i + 1; j < n; j++) {
+        const dx = Math.abs(aktywne[i].sx - aktywne[j].sx);
+        const dy = Math.abs(aktywne[i].sy - aktywne[j].sy);
+        if (dx < progW && dy < progH) union(i, j);
+      }
+    }
+
+    const grupy = new Map();
+    for (let i = 0; i < n; i++) {
+      const root = find(i);
+      if (!grupy.has(root)) grupy.set(root, []);
+      grupy.get(root).push(aktywne[i]);
+    }
+
+    const STEP = WorkerOverlayManager._ODSTEP_STOSU;
+    for (const grupa of grupy.values()) {
+      if (grupa.length < 2) {
+        grupa[0]._celOffset = 0;
+        continue;
+      }
+      // grupa dziedziczy stabilna kolejnosc po typeIndex z sortowania aktywne[] wyzej
+      const najwyzsze = Math.min(...grupa.map((g) => g.sy));
+      grupa.forEach((g, idx) => {
+        g._celOffset = (najwyzsze - g.sy) - idx * STEP;
+      });
+    }
+
+    for (const w of aktywne) {
+      if (w.item.stackOffset === undefined) w.item.stackOffset = w._celOffset;
+      // Wygladzenie wykladnicze, niezalezne od dt (jak reszta drobnej
+      // kosmetyki w tym projekcie, np. pulsowanie markerow minigier) - w
+      // ~60 kl/s daje plynne, ale szybkie (kilka klatek) dojscie do celu.
+      w.item.stackOffset += (w._celOffset - w.item.stackOffset) * 0.28;
     }
   }
 
@@ -617,6 +758,7 @@ export class WorkerOverlayManager {
     for (const item of this.overlays.values()) {
       item.nameplateEl.remove();
       item.bubbleEl.remove();
+      item.connectorEl.remove();
     }
     this.overlays.clear();
   }

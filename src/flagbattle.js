@@ -3,6 +3,7 @@ import { COUNTRIES, COUNTRY_CODES, tokenizujOdpowiedz, INDEKS_WARIANTOW } from '
 import { usunTagiEmotek } from './kick.js';
 import { loadForest } from './assets.js';
 import { strumien, losujInt, tasuj } from './rng.js';
+import { Bojka } from './bojka.js';
 
 // Zrodlo flag: assets/flags-vector/<KOD>.svg pochodzi z pakietu flag-icons
 // (github.com/lipis/flag-icons, MIT - patrz assets/flags-vector/LICENSE-flag-icons.txt),
@@ -294,6 +295,10 @@ export class FlagBattleManager {
 
     this._flagReqId = 0; // chroni przed wyscigiem, gdy runda zmieni sie zanim async rasteryzacja skonczy
     this.isHost = false; // wlasciwa wartosc przychodzi z setContext/setHost - patrz nizej
+
+    // Bijatyka + chmura kurzu (patrz src/bojka.js) - jedna wspoldzielona
+    // instancja na cale zycie tej minigry, wlaczana/wylaczana per bitwa.
+    this.bojka = new Bojka(this.scene);
   }
 
   setContext({ workerManager, kickChat, economy, isHost, boss, tlumaczenia }) {
@@ -440,6 +445,15 @@ export class FlagBattleManager {
     }
 
     this._aktualizujPlotki(dt);
+
+    // Bijatyka + chmura kurzu: czysto kosmetyczna animacja lokalna (jak
+    // pulsowanie koloru markera wyzej) - dziala tak samo u hosta i u
+    // widza, bo oba wywoluja ja co klatke niezaleznie od isHost, a jedyny
+    // "przelacznik" (bojka.active) jest ustawiany w checkPlayersEntry/
+    // endBattle/_przerwijPrzezBossa/reset/applySync - wszystkie te miejsca
+    // sa juz w pelni wyprowadzone ze zsynchronizowanego stanu (state/tile/
+    // players), wiec nie potrzeba tu zadnego nowego zdarzenia sieciowego.
+    this.bojka.update(dt, this.workerManager);
 
     // Reszta (losowanie kafelka/flagi, przejscia stanow, przyznawanie kasy)
     // to decyzje - te podejmuje WYLACZNIE host. Widz dostaje gotowy wynik
@@ -628,10 +642,11 @@ export class FlagBattleManager {
       p2.targetRotY = angleP1 + Math.PI;
       p2.facingAngle = angleP1 + Math.PI;
       
-      // Animacja walki
-      if (p1.interactAction) p1.interactAction.play();
-      if (p2.interactAction) p2.interactAction.play();
-      
+      // Animacja bijatyki (ciosy + chmura kurzu) - patrz src/bojka.js. Seed
+      // zawiera battleId (juz zsynchronizowany), zeby rytm byl powtarzalny w
+      // obrebie tej bitwy.
+      this.bojka.start(this.tile, this.players, `${this.economy.state.seedGry}:flaga-bojka:${this.battleId}`);
+
       this.nextRound();
       this.announce(`Bitwa o flagi! ${p1User} vs ${p2User}! Wpisuj nazwę państwa na czacie! Kto pierwszy zdobędzie 3 pkt wygrywa!`);
     }
@@ -795,12 +810,9 @@ export class FlagBattleManager {
     this.highlightMesh.visible = false;
     this._usunPlotki();
 
-    // Zatrzymujemy animacje walki
-    this.players.forEach(p => {
-      const w = this.workerManager.getWorkerType(p.typeIndex);
-      if (w && w.interactAction) w.interactAction.stop();
-    });
-    
+    // Zatrzymujemy bijatyke (chowa chmure, odstawia obu na srodek kafla)
+    this.bojka.stop(this.workerManager);
+
     // Przegranego wyrzucamy na losowe wolne pole (lub sąsiednie)
     const loser = this.players.find(p => p.typeIndex !== winnerPlayer.typeIndex);
     if (loser) {
@@ -856,12 +868,9 @@ export class FlagBattleManager {
       this.announce('⚔️ Boss atakuje! Bitwa o flagi przerwana - pole zwolnione.');
     }
 
-    // Zatrzymujemy ewentualne animacje walki uczestnikow (ten sam wzorzec co
-    // w endBattle) - inaczej zostaliby zamrozeni w pozie ataku/gotowosci.
-    this.players.forEach((p) => {
-      const w = this.workerManager && this.workerManager.getWorkerType(p.typeIndex);
-      if (w && w.interactAction) w.interactAction.stop();
-    });
+    // Zatrzymujemy bijatyke (ten sam wzorzec co w endBattle) - inaczej
+    // walczacy zostaliby zamrozeni odsunieci od srodka pola / w trakcie ciosu.
+    this.bojka.stop(this.workerManager);
 
     // reset() sam sprzata kafelek, flage, plotki (natychmiast, bez animacji
     // chowania - polu ma zniknac od razu, nie za pol sekundy animacji) i
@@ -959,6 +968,12 @@ export class FlagBattleManager {
   }
 
   reset() {
+    // Zabezpieczenie: reset() bywa wolany z kilku miejsc (setHost, koniec
+    // REWARD, _sprawdzWyjscieAwaryjne gdy OBAJ walczacy znikna naraz) - nie
+    // wszystkie z nich przechodza przez endBattle/_przerwijPrzezBossa, ktore
+    // juz jawnie zatrzymuja bojke, wiec robimy to tez tutaj (no-op, gdy bojka
+    // juz nieaktywna).
+    if (this.bojka) this.bojka.stop(this.workerManager);
     this.state = 'IDLE';
     this.timer = 0;
     this.tile = null;
@@ -1030,15 +1045,12 @@ export class FlagBattleManager {
     // tu odtwarzamy to samo po zmianie stanu (opoznienie jak przy kazdym innym
     // snapshocie, max ok. 2 s - patrz interwal wyslijSnapshot w main.js).
     if (this.state === 'BATTLE' && prevState !== 'BATTLE') {
-      this.players.forEach((p) => {
-        const w = this.workerManager && this.workerManager.getWorkerType(p.typeIndex);
-        if (w && w.interactAction) w.interactAction.play();
-      });
+      // Widz wchodzi w BATTLE dopiero po snapshocie hosta (opoznienie jak
+      // przy kazdym innym stanie, patrz komentarz nizej przy triggerAttack) -
+      // startujemy bojke tu, dokladnie tak jak host w checkPlayersEntry.
+      this.bojka.start(this.tile, this.players, `${this.economy.state.seedGry}:flaga-bojka:${this.battleId}`);
     } else if (prevState === 'BATTLE' && this.state !== 'BATTLE') {
-      this.players.forEach((p) => {
-        const w = this.workerManager && this.workerManager.getWorkerType(p.typeIndex);
-        if (w && w.interactAction) w.interactAction.stop();
-      });
+      this.bojka.stop(this.workerManager);
     }
 
     // Cios za poprawna odpowiedz - u widza wykrywamy to po wzroscie

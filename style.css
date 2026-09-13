@@ -1397,6 +1397,18 @@ html, body {
   filter: grayscale(0.6);
 }
 
+/* Cienki lacznik miedzy plakietka a glowa postaci, gdy plakietka zostala
+   rozsunieta pionowo, zeby dwie+ postacie na tym samym (lub sasiednim) polu
+   nie mialy nickow w tym samym miejscu - patrz WorkerOverlayManager.updatePositions
+   w src/ui.js. Ukryty (opacity: 0, ustawiane inline w JS) dla plakietek, ktore
+   nie zostaly przesuniete. */
+.worker-connector {
+  stroke: rgba(255, 255, 255, 0.75);
+  stroke-width: 1.5;
+  stroke-dasharray: 2 2;
+  transition: opacity 0.15s ease;
+}
+
 /* ============================================================
    BOSS COMBAT FEED (adnotacje walki z bossem po prawej stronie)
    ============================================================ */
