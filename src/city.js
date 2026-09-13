@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import { loadForest, loadArcade, loadDungeon, loadPirate, loadArena } from './assets.js';
-import { BLOOM_LAYER } from './scene.js';
 
 // Tlo gry: proceduralne miasto noca wokol i ponizej areny. Arena (pokoj 7x7
 // ze scianami, patrz scene.js) zostaje DOKLADNIE taka, jaka jest - stoi na
@@ -149,28 +148,6 @@ function applyTextureFiltering(tex, renderer) {
   tex.needsUpdate = true;
 }
 
-/**
- * Miekka, okragla tekstura "glow" (radialny gradient, biel->przezroczystosc)
- * do latarni ulicznych (patrz _buildStreetlamps) - ten sam wzorzec canvasowy
- * co reszta tekstur w tym pliku. Uzywana z SpriteMaterial.color, wiec sama
- * tekstura zostaje neutralnie biala - barwe nadaje material.
- */
-function createGlowSpriteTexture() {
-  const size = 128;
-  const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext('2d');
-  const grad = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-  grad.addColorStop(0, 'rgba(255,255,255,0.9)');
-  grad.addColorStop(0.4, 'rgba(255,255,255,0.35)');
-  grad.addColorStop(1, 'rgba(255,255,255,0)');
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, size, size);
-  const tex = new THREE.CanvasTexture(canvas);
-  return tex;
-}
-
 /** Generuje raz teksture nawierzchni ulicy - asfalt z jasnymi pasami jezdni. */
 function createStreetTexture() {
   const canvas = document.createElement('canvas');
@@ -188,11 +165,11 @@ function createStreetTexture() {
     ctx.fillRect(x, y, 2, 2);
   }
 
-  // Jasne, swiecace pasy jezdni na krzyz (siatka ulic)
+  // Zwykle, matowe pasy jezdni na krzyz (siatka ulic) - w nocnej wersji mialy
+  // shadowBlur/jaskrawy poblask (swiecaca farba drogowa); w dzien to zwykle,
+  // odblaskowe, ale NIE swiecace pasy (bez shadowBlur).
   ctx.strokeStyle = 'rgba(255, 214, 110, 0.85)';
   ctx.lineWidth = 5;
-  ctx.shadowColor = '#ffb347';
-  ctx.shadowBlur = 12;
   ctx.setLineDash([26, 18]);
   ctx.beginPath();
   ctx.moveTo(canvas.width / 2, 0);
@@ -203,12 +180,12 @@ function createStreetTexture() {
   ctx.lineTo(canvas.width, canvas.height / 2);
   ctx.stroke();
 
-  // Neonowo-zielona krawedz Kicka wzdluz brzegow kafla (swiecaca krawedz ulicy)
+  // Krawedz kafla ulicy - dawniej neonowo-zielona (marka Kicka, nocny akcent
+  // "sprzedawany" przez selektywny bloom - usuniety, patrz main.js). W dzien
+  // zwykla, przygaszona krawedz/fuga plyty betonowej zamiast neonu.
   ctx.setLineDash([]);
-  ctx.strokeStyle = 'rgba(83, 252, 24, 0.35)';
+  ctx.strokeStyle = 'rgba(120, 120, 110, 0.3)';
   ctx.lineWidth = 6;
-  ctx.shadowColor = '#53fc18';
-  ctx.shadowBlur = 8;
   ctx.strokeRect(4, 4, canvas.width - 8, canvas.height - 8);
 
   const tex = new THREE.CanvasTexture(canvas);
@@ -468,11 +445,14 @@ export class CityBackground {
   }
 
   build(scene, renderer) {
-    // Mgla dopasowana do koloru tla (0x0e1118) - odlegle budynki rozmywaja sie
-    // plynnie zamiast urywac sie ostra krawedzia. near/far dobrane tak, zeby
-    // arena (w promieniu maxDistance=17 od kamery, patrz OrbitControls w
-    // scene.js) zostala CALKOWICIE poza zasiegiem mgly.
-    scene.fog = new THREE.Fog(0x0e1118, FOG_NEAR, FOG_FAR);
+    // Mgla dopasowana do koloru horyzontu dziennej kopuly nieba (buildDaySkyDome
+    // w scene.js, 0xdcecf7) - odlegle budynki rozmywaja sie plynnie w jasna,
+    // zamglona poswiata popoludnia zamiast urywac sie ostra krawedzia albo
+    // (gdyby zostal stary, nocny granat 0x0e1118) tworzyc wyrazny, ciemny pas
+    // na tle jasnego nieba. near/far NIE ruszane wzgledem nocnej wersji -
+    // dotycza tylko geometrii kamery/areny (patrz komentarze przy FOG_NEAR/
+    // FOG_FAR powyzej), nie nastroju/pory dnia.
+    scene.fog = new THREE.Fog(0xdcecf7, FOG_NEAR, FOG_FAR);
 
     this._buildPlaza(scene, renderer);
     this._buildStreetGround(scene);
@@ -548,22 +528,30 @@ export class CityBackground {
     poleMesh.castShadow = true;
     poleMesh.receiveShadow = true;
 
-    // "Klosz" latarni - cieply, jasny emissive (nie musi byc na warstwie
-    // bloomu, bo to MALA, mocno swiecaca bryla - juz sama w sobie czytelna;
-    // dodatkowy blask daje glow-sprite ponizej).
+    // "Klosz" latarni - w dzien latarnie sa WYLACZONE (realistycznie, i
+    // zgodnie z wymaganiem zadania "latarnie nie moga swiecic jak w nocy") -
+    // emissiveIntensity zbita z 2.4 do 0.15, tyle zeby szklany klosz mial
+    // lekki, cieply odblask od slonca, a nie wygladal jak wlaczona zarowka.
     const headGeo = new THREE.SphereGeometry(0.1, 8, 6);
     const headMat = new THREE.MeshStandardMaterial({
       color: 0xffdca0,
       emissive: 0xffc978,
-      emissiveIntensity: 2.4,
+      emissiveIntensity: 0.15,
       roughness: 0.4,
     });
     const headMesh = new THREE.InstancedMesh(headGeo, headMat, LAMP_COUNT);
     headMesh.frustumCulled = false;
 
-    const glowTex = createGlowSpriteTexture();
+    // Dawniej kazda latarnia miala tez wlasny addytywny Sprite-glow (imitacja
+    // swiecacej poswiaty nocnej latarni, czytany razem z selektywnym bloomem
+    // - patrz historia tego pliku/main.js). W dziennej wersji latarnie sa
+    // wylaczone (patrz headMat.emissiveIntensity powyzej) i nie ma juz
+    // blooma (usuniety w main.js - patrz raport zadania), wiec ten sprite nie
+    // mialby czego "sprzedawac": zostalby tylko jasna, biala plama widoczna w
+    // pelnym sloncu, dokladnie to, czego zadanie zabrania ("latarnie nie moga
+    // swiecic jak w nocy"). Usuniety calkowicie - dodatkowo oszczedza 10
+    // draw calls (jeden Sprite na latarnie) i jedna teksture canvas.
     const dummy = new THREE.Object3D();
-    this.streetlampGlows = [];
 
     for (let i = 0; i < LAMP_COUNT; i++) {
       const angle = (i / LAMP_COUNT) * Math.PI * 2 + randRange(-0.05, 0.05);
@@ -579,28 +567,6 @@ export class CityBackground {
       dummy.position.set(x, headY, z);
       dummy.updateMatrix();
       headMesh.setMatrixAt(i, dummy.matrix);
-
-      // Kazda latarnia to WLASNY Sprite (material wspoldzielony miedzy
-      // wszystkimi - jeden THREE.SpriteMaterial/THREE.Texture, tylko instancja
-      // Sprite jest osobna) - to 10 dodatkowych draw calls (podobny rzad
-      // wielkosci co juz istniejace flagSprite/wordSprite), zmierzone w
-      // raporcie zadania, akceptowalne wobec ~100-115 draw calls calej sceny.
-      const glowMat = new THREE.SpriteMaterial({
-        map: glowTex,
-        color: 0xffc978,
-        transparent: true,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending,
-        toneMapped: false, // czysty efekt "swiatla", nie ma byc tlumiony przez ACES/exposure
-      });
-      const glow = new THREE.Sprite(glowMat);
-      glow.scale.set(1.1, 1.1, 1);
-      glow.position.set(x, headY, z);
-      // Selektywny bloom (patrz BLOOM_LAYER w scene.js) - TYLKO ten glow,
-      // nigdy karty/etykiety minigier.
-      glow.layers.enable(BLOOM_LAYER);
-      scene.add(glow);
-      this.streetlampGlows.push(glow);
     }
 
     poleMesh.instanceMatrix.needsUpdate = true;
@@ -755,7 +721,15 @@ export class CityBackground {
     for (const def of groundClutterDefs) {
       const mesh = this._firstMesh(def.gltf);
       const inst = new THREE.InstancedMesh(mesh.geometry, mesh.material, def.count);
-      inst.castShadow = false; // niska roslinnosc - cien pomijalny, oszczedza cykle
+      // W dziennej wersji sceny (patrz raport zadania) wlasciciel wprost
+      // zazyczyl sobie cieni na WSZYSTKICH obiektach blisko areny, kepki
+      // trawy/gruntu wlacznie (byly jedynym wyjatkiem z castShadow=false w
+      // poprzedniej, nocnej wersji tego pliku - tam cien byl pomijalny
+      // wizualnie przy niskim, kontrastowym oswietleniu). W dzien, przy
+      // ostrym kierunkowym sloncu, nawet niska roslinnosc rzuca wyrazny,
+      // czytelny cien na trawie/sciezkach - included w promieniu dirWide
+      // (r<=13, patrz scene.js).
+      inst.castShadow = true;
       inst.receiveShadow = true;
       inst.frustumCulled = false;
       let placed = 0;
@@ -812,18 +786,26 @@ export class CityBackground {
     ];
     const HUT_COUNT = 4; // "domki" mini-forest (struktura+dach) licza sie osobno - stackowana para
 
+    // Wysoka zielen/zabudowa (promien 18.2-19.1) - POZA zasiegiem obu swiatel
+    // kierunkowych z cieniem (dir/dirWide w scene.js siegaja do r<=13.5,
+    // patrz uzasadnienie tam) - wlasciciel wprost zazyczyl sobie, zeby
+    // wysoka zabudowa/zielen daleko od areny NIE rzucala cienia (castShadow
+    // = false), w odroznieniu od niskiego pierscienia/klastrow blizej areny
+    // ponizej. receiveShadow tez false - nic w promieniu dirWide nie siega
+    // az tutaj, wiec probkowanie mapy cienia na tych powierzchniach byloby
+    // czystym kosztem bez zadnego widocznego efektu.
     for (const t of TALL_TYPES) {
       t.mesh = this._firstMesh(t.gltf);
       t.inst = new THREE.InstancedMesh(t.mesh.geometry, t.mesh.material, t.count);
-      t.inst.castShadow = true; t.inst.receiveShadow = true; t.inst.frustumCulled = false;
+      t.inst.castShadow = false; t.inst.receiveShadow = false; t.inst.frustumCulled = false;
       t.idx = 0;
     }
     const structMesh = this._firstMesh(bStruct);
     const roofMesh = this._firstMesh(bRoof);
     const structInst = new THREE.InstancedMesh(structMesh.geometry, structMesh.material, HUT_COUNT);
     const roofInst = new THREE.InstancedMesh(roofMesh.geometry, roofMesh.material, HUT_COUNT);
-    structInst.castShadow = true; structInst.receiveShadow = true; structInst.frustumCulled = false;
-    roofInst.castShadow = true; roofInst.receiveShadow = true; roofInst.frustumCulled = false;
+    structInst.castShadow = false; structInst.receiveShadow = false; structInst.frustumCulled = false;
+    roofInst.castShadow = false; roofInst.receiveShadow = false; roofInst.frustumCulled = false;
 
     // Kolejka slotow: kazdy typ tyle razy, ile ma "count" (+ HUT_COUNT domkow),
     // przetasowana (Fisher-Yates) - kazdy z 26 slotow katowych dostaje losowy,
@@ -951,7 +933,10 @@ export class CityBackground {
     const columnMesh = this._firstMesh(columnGltf);
     const columnCount = 6;
     const columnInst = new THREE.InstancedMesh(columnMesh.geometry, columnMesh.material, columnCount * 2);
-    columnInst.castShadow = true; columnInst.receiveShadow = true; columnInst.frustumCulled = false;
+    // Kolumny stoja przy wysokiej zabudowie (promien FOREGROUND_TALL_MIN+0.1
+    // ~18.3) - poza zasiegiem cienia (patrz TALL_TYPES powyzej), ten sam brak
+    // castShadow/receiveShadow.
+    columnInst.castShadow = false; columnInst.receiveShadow = false; columnInst.frustumCulled = false;
     let ci = 0;
     for (let i = 0; i < columnCount; i++) {
       const angle = (i / columnCount) * Math.PI * 2 + 0.3;
@@ -1006,19 +991,25 @@ export class CityBackground {
     scene.add(overlay);
     this.plazaGroundOverlay = overlay;
 
-    // Cienki neonowy pasek Kicka na krawedzi placu, tuz PONIZEJ wierzchu placu.
+    // Cienki pasek na krawedzi placu, tuz PONIZEJ wierzchu placu.
     // Uwaga (naprawa Z-fightingu): pasek jest szerszy od placu tylko o 0.06, wiec
     // jego gorna sciana lezy nad CALA powierzchnia placu. Gdy obie byly na
     // dokladnie tej samej wysokosci (y = 0), caly plac wokol areny migotal przy
     // ruchu kamery - dwie nieprzezroczyste, wspolplaszczyznowe sciany walczyly
     // o glebie. Zepchniecie paska o EDGE_DROP w dol usuwa konflikt, a widoczna
     // z gory pozostaje dokladnie ta obwodka, o ktora chodzilo.
+    // Kolor zmieniony z jaskrawego neonowego zielonego (0x53fc18, nocny akcent
+    // Kicka, mial byc "sprzedany" przez selektywny bloom) na stonowany, cieply
+    // kamienny bezowy - w pelnym sloncu, bez blooma (usuniety, patrz main.js),
+    // czysty neon-zielony wygladalby jak wymalowana linia farby, nie
+    // krawedz/obrzeze postumentu.
     const EDGE_DROP = 0.012;
     const edgeGeo = new THREE.BoxGeometry(PLAZA_HALF * 2 + 0.06, 0.06, PLAZA_HALF * 2 + 0.06);
-    const edgeMat = new THREE.MeshBasicMaterial({ color: 0x53fc18 });
+    const edgeMat = new THREE.MeshStandardMaterial({ color: 0x9a8f7c, roughness: 0.9, metalness: 0.05 });
     const edge = new THREE.Mesh(edgeGeo, edgeMat);
     edge.position.set(0, CITY_GROUND_Y + PLAZA_HEIGHT - 0.03 - EDGE_DROP, 0);
-    edge.layers.enable(BLOOM_LAYER); // neonowa krawedz placu - praktyczny akcent, bezpieczny do bloomu
+    edge.castShadow = false;
+    edge.receiveShadow = true;
     scene.add(edge);
     this.plazaEdgeMesh = edge;
   }
@@ -1031,7 +1022,13 @@ export class CityBackground {
     const mesh = new THREE.Mesh(geo, mat);
     mesh.rotation.x = -Math.PI / 2;
     mesh.position.set(0, CITY_GROUND_Y, 0);
-    mesh.receiveShadow = true;
+    // Ta plaszczyzna siega od krawedzi apronu (19.3) az do CITY_HALF*2+20=108 -
+    // niemal cala jej powierzchnia lezy poza zasiegiem obu swiatel z cieniem
+    // (r<=13.5, patrz scene.js), a czesc blisko areny i tak jest przykryta
+    // apronem (ktory MA receiveShadow=true) stojacym nad nia. receiveShadow
+    // tu byloby wiec czystym kosztem (probkowanie mapy cienia na ogromnym
+    // obszarze ekranu przy szerokich ujeciach) bez zadnego widocznego efektu.
+    mesh.receiveShadow = false;
     scene.add(mesh);
     this.groundMesh = mesh;
   }
@@ -1045,11 +1042,14 @@ export class CityBackground {
       color: 0xffffff,
       emissive: 0xffffff,
       emissiveMap: windowTex,
-      // Zbite z 0.7 - przy czystej bieli/zolci na czerni to byl maksymalny
-      // mozliwy kontrast miedzy sasiednimi teksturami (jedna z przyczyn
-      // szumu). Razem z przygaszonymi kolorami okien w createWindowTexture
-      // daje to spokojna, przygaszona panorame zamiast stroboskopu.
-      emissiveIntensity: 0.42,
+      // Dawniej 0.42 (symulowaly "zapalone" okna nocnego miasta). W dzien
+      // okna NIE moga swiecic jak w nocy (wymaganie zadania) - budynki sa
+      // teraz oswietlane WYLACZNIE realnym slonce+niebo (dir/hemi w scene.js),
+      // a windowTex nadal daje wizualna teksture podzialu na okna (poprzez
+      // sam kolor/kontrast bodyPalette), tylko bez wlasnej emisji swiatla.
+      // Bardzo niska (nie zero) resztkowa wartosc - delikatny refleks szyby,
+      // nie realne swiecenie.
+      emissiveIntensity: 0.03,
       roughness: 0.85,
       metalness: 0.1,
       vertexColors: true,
@@ -1068,8 +1068,14 @@ export class CityBackground {
 
     const count = cells.length;
     const buildingMesh = new THREE.InstancedMesh(boxGeo, bodyMat, count);
-    buildingMesh.castShadow = true;
-    buildingMesh.receiveShadow = true;
+    // Budynki miasta stoja od promienia BUILDING_KEEPOUT_RADIUS=26 w gore -
+    // daleko poza zasiegiem obu swiatel z cieniem (dir/dirWide w scene.js,
+    // r<=13.5). Wlasciciel wprost zazyczyl sobie braku cienia na dalekiej
+    // zabudowie miasta - i to jednoczesnie spory zysk wydajnosci, bo to
+    // najwieksza pojedyncza grupa instancji w calej scenie (patrz raport
+    // zadania, liczby przed/po).
+    buildingMesh.castShadow = false;
+    buildingMesh.receiveShadow = false;
     // InstancedMesh liczy domyslna kule odciecia (frustum culling) wokol
     // lokalnego originu geometrii bazowej, IGNORUJAC rozrzucenie instancji
     // przez ich wlasne macierze - przy budynkach rozrzuconych na promieniu
@@ -1080,14 +1086,24 @@ export class CityBackground {
 
     const dummy = new THREE.Object3D();
     const color = new THREE.Color();
-    const bodyPalette = [0x2a2e3a, 0x232735, 0x2e2440, 0x243044, 0x33251f];
+    // Paleta rozjasniona wzgledem nocnej wersji (byla niemal czarno-granatowo-
+    // fioletowa, dobrana pod sylwetki na tle ciemnego nieba) - w dzien budynki
+    // pokazuja swoj rzeczywisty kolor w swietle slonca, wiec dostaja
+    // stonowane, jasniejsze betonowo/piaskowe/szklane tony pasujace do
+    // dziennego nieba i mgly (patrz scene.js/FOG_* powyzej).
+    const bodyPalette = [0x8d93a1, 0x9aa0ac, 0x8b7f6f, 0x8996a6, 0xa4967f];
 
-    // Neonowe akcenty (szyldy) - male jasne prostopadloscianki na wybranych dachach, osobny InstancedMesh
+    // Dawniej "neonowe szyldy" (paleta czystych, nasyconych barw - zielony/
+    // rozowy/blekit/zolty/czerwony - mial je "sprzedawac" selektywny bloom,
+    // patrz usuniety BLOOM_LAYER/main.js). W dzien, bez blooma, czytaja sie
+    // teraz jako zwykle, przygaszone akcenty dachowe (klimatyzatory/zbiorniki/
+    // anteny) - ta sama geometria/rola w scenie, ale STONOWANA paleta zamiast
+    // czystych, jaskrawych barw.
     const neonCount = Math.max(1, Math.round(count * 0.08));
     const neonMat = new THREE.MeshBasicMaterial({ color: 0xffffff, vertexColors: true });
     const neonMesh = new THREE.InstancedMesh(boxGeo, neonMat, neonCount);
     neonMesh.frustumCulled = false;
-    const neonPalette = [0x53fc18, 0xff4fd8, 0x4fd8ff, 0xffd166, 0xff5c5c];
+    const neonPalette = [0x5c6b58, 0x7a5c68, 0x5c6b74, 0x9c8f66, 0x8a6058];
     let neonIdx = 0;
 
     // Miasto ma czytac sie jako TLO za scianami areny - dalsze budynki wyzsze
@@ -1147,7 +1163,6 @@ export class CityBackground {
     neonMesh.instanceMatrix.needsUpdate = true;
     if (neonMesh.instanceColor) neonMesh.instanceColor.needsUpdate = true;
 
-    neonMesh.layers.enable(BLOOM_LAYER); // neonowe szyldy na dachach - praktyczny akcent, bezpieczny do bloomu
     scene.add(buildingMesh);
     scene.add(neonMesh);
     this.buildingMesh = buildingMesh;
@@ -1194,10 +1209,10 @@ export class CityBackground {
     }
     if (bodyMesh.instanceColor) bodyMesh.instanceColor.needsUpdate = true;
 
-    // Swiatla aut (przednie/tylne) - male, jasne emissive powierzchnie,
-    // praktyczny akcent bezpieczny do selektywnego bloomu (nigdy karoseria).
-    frontMesh.layers.enable(BLOOM_LAYER);
-    rearMesh.layers.enable(BLOOM_LAYER);
+    // Swiatla aut (przednie/tylne) - male, kolorowe (bez emisji swiatla)
+    // powierzchnie zderzaka/lamp, widoczne w dzien jako zwykly detal
+    // karoserii (dawny selektywny bloom na tej warstwie - usuniety, patrz
+    // main.js/raport zadania).
     scene.add(bodyMesh);
     scene.add(frontMesh);
     scene.add(rearMesh);

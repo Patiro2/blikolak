@@ -1,66 +1,46 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { loadArcade, loadForest } from './assets.js';
 
 const BASE_FOV = 42;
 const BASE_POS = new THREE.Vector3(0, 3.2, 5.4);
 const LOOK_TARGET = new THREE.Vector3(0, 0.65, 0.1);
 
-// Warstwa (THREE.Layers) dla obiektow, ktore MAJA dostac selektywny bloom
-// (patrz UnrealBloomPass w main.js). Uzywana tu (siatka neonowa podlogi) i w
-// city.js (latarnie/neonowe akcenty/swiatla aut) - NIGDY na kartach/etykietach
-// minigier (boss-blackjack.js, tlumaczenia.js), zeby czytelnosc HUD 3D byla
-// gwarantowana samą konstrukcją, a nie tylko dobranym progiem bloomu.
-export const BLOOM_LAYER = 1;
 
 /**
- * Buduje minimalna "kapsule" do wypalenia mapy srodowiska (PMREM) zamiast
- * jasnego RoomEnvironment z three/addons. Zmierzone przy poprzednim podejsciu
- * (RoomEnvironment, patrz historia tego pliku): render z domyslnej kamery przy
- * scene.environment = null i przy scene.environment = RoomEnvironment byl
- * PRAKTYCZNIE IDENTYCZNY - RoomEnvironment to jasne studio z kilkoma
- * kolorowymi "softboxami", zaprojektowane pod dzienne/warsztatowe sceny, wiec
- * przy naszym mocno przygaszonym, nocnym rigu jego IBL ginal w tle i nie byl
- * w stanie wplynac na nastroj. Wlasna, ciemna, dwutonowa "kapsula" (chlodny
- * granat u gory jak nocne niebo, niemal-czarny cieply dol) daje materialom
- * Kenney widoczne, ale STONOWANE odbicia otoczenia bez podbijania ogolnej
- * jasnosci sceny - kontrolujemy intensywnosc samą zawartoscią sceny zrodlowej
- * (three@0.160 w tym projekcie NIE ma jeszcze scene.environmentIntensity -
- * dodane dopiero w r163+, sprawdzone w konsoli przegladarki), nie mnoznikiem.
+ * Wlasciciel po obejrzeniu nocnego wariantu (commit a04ec6b) zmienil zdanie:
+ * "doskonale oswietlenie, ale w dzien". Ta funkcja buduje WIDOCZNA (dodawana
+ * wprost do glownej sceny, nie tylko do PMREM) kopule nieba - gradient
+ * canvas-free, wierzcholkowy (ten sam wzorzec co dawna
+ * buildNightEnvironmentScene ponizej niej w historii tego pliku): blekit
+ * zenitu u gory, jasny, prawie bialy horyzont u dolu (typowy dla sloneczmego,
+ * lekko zamglonego popoludnia). Kula jest duza (promien 90) - poza FOG_FAR
+ * (55, patrz city.js) i camera.far (100), wiec zawsze stoi ZA mgla/wszystkimi
+ * obiektami, nigdy jej krawedz nie jest widoczna. `fog: false` na materiale
+ * wylacza wplyw scene.fog na te siatke - mgla ma rozmywac ODLEGLE OBIEKTY na
+ * tle nieba (budynki, patrz city.js), a nie samo niebo, ktore juz jest
+ * wlasnym, dalekim tlem.
+ * Tanie w wykonaniu: jeden dodatkowy draw call, zero tekstur, prosty
+ * MeshBasicMaterial (bez oswietlenia).
  */
-function buildNightEnvironmentScene() {
-  const envScene = new THREE.Scene();
-
-  const geo = new THREE.SphereGeometry(6, 16, 16);
-  const mat = new THREE.MeshBasicMaterial({ side: THREE.BackSide, vertexColors: true });
+function buildDaySkyDome() {
+  const geo = new THREE.SphereGeometry(90, 24, 16);
+  const mat = new THREE.MeshBasicMaterial({ side: THREE.BackSide, vertexColors: true, fog: false, toneMapped: false });
   const pos = geo.attributes.position;
   const colors = new Float32Array(pos.count * 3);
-  const colorTop = new THREE.Color(0x1c2748); // chlodny granat "nieba"
-  const colorBottom = new THREE.Color(0x0a0705); // niemal czarny, lekko cieply
+  const colorTop = new THREE.Color(0x4c8fd9); // nasycony blekit zenitu
+  const colorHorizon = new THREE.Color(0xdcecf7); // jasny, lekko cieply horyzont (zamglone popoludnie)
   const tmp = new THREE.Color();
   for (let i = 0; i < pos.count; i++) {
-    const t = THREE.MathUtils.clamp((pos.getY(i) / 6 + 1) / 2, 0, 1);
-    tmp.copy(colorBottom).lerp(colorTop, t);
+    const t = THREE.MathUtils.clamp((pos.getY(i) / 90 + 0.12) / 0.55, 0, 1);
+    tmp.copy(colorHorizon).lerp(colorTop, t);
     colors[i * 3] = tmp.r;
     colors[i * 3 + 1] = tmp.g;
     colors[i * 3 + 2] = tmp.b;
   }
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-  envScene.add(new THREE.Mesh(geo, mat));
-
-  // Przygaszony cieply "punkt" (odpowiednik zlotego spotu/neonu Kicka) - bez
-  // niego gladkie/metaliczne powierzchnie dostawalyby WYLACZNIE chlodne
-  // odbicia nieba ze wszystkich stron, co wygladaloby monotonnie. Mala kula,
-  // stonowany kolor (nie czysta biel) - to tylko drugi ton odbicia, nie ma
-  // sluzyc jako realne zrodlo swiatla sceny.
-  const warm = new THREE.Mesh(
-    new THREE.SphereGeometry(0.9, 12, 12),
-    new THREE.MeshBasicMaterial({ color: 0xa96a3a }),
-  );
-  warm.position.set(2.4, 1.0, 1.6);
-  envScene.add(warm);
-
-  return envScene;
+  return new THREE.Mesh(geo, mat);
 }
 
 /**
@@ -90,30 +70,34 @@ export function createScene(canvas) {
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   // Kinowy Tone Mapping ACESFilmic - żywe, bogate kolory bez przepaleń bieli.
-  // Ekspozycja obnizona z 1.15 do 0.92 - caly rig ponizej jest teraz WYRAZNIE
-  // ciemniejszy (nastroj nocy, patrz swiatlo 1-2), wiec ACES dostaje material
-  // wejsciowy, ktory juz sam w sobie nie jest jasnym "dniem" - nizsza
-  // ekspozycja poglebia kontrast cien/akcent zamiast podnosic ogolna jasnosc
-  // z powrotem do poprzedniego, dziennego wygladu.
+  // Ekspozycja wraca do wartosci dziennej (1.05, w okolicy domyslnej 1.0) -
+  // rig ponizej (slonce + niebo) jest teraz sam w sobie jasny, wiec nie
+  // potrzebujemy juz sztucznego przygaszenia, ktore sluzylo tylko nocnemu
+  // nastrojowi z poprzedniej wersji (0.92).
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 0.92;
+  renderer.toneMappingExposure = 1.05;
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x0e1118);
+  // Plaski fallback w kolorze horyzontu - widoczny tylko, gdyby kopula nieba
+  // (buildDaySkyDome, dodawana ponizej) z jakiegos powodu nie pokryla calego
+  // kadru (np. pierwsza klatka przed jej dodaniem do sceny).
+  scene.background = new THREE.Color(0xdcecf7);
+  scene.add(buildDaySkyDome());
 
   // Environment map (IBL) - generowana RAZ, przy starcie (PMREMGenerator,
   // jednorazowy koszt rzedu ~20ms, zmierzone; zero kosztu per-klatke pozniej).
   // Modele Kenney (MeshStandardMaterial z GLB) bez tego maja wylacznie
   // oswietlenie kierunkowe/punktowe - plaskie, matowe powierzchnie bez
-  // zadnego odbicia otoczenia. Zrodlo PMREM to WLASNA, ciemna "kapsula"
-  // (buildNightEnvironmentScene powyzej), NIE domyslny RoomEnvironment z
-  // three/addons - RoomEnvironment jest jasnym studiem i przy naszym nocnym
-  // rigu jego wplyw byl NIEZAUWAZALNY (zmierzone: zrzut z env=null i
-  // env=RoomEnvironment byl praktycznie identyczny z domyslnej kamery).
-  // scene.environment (NIE scene.background) - tlo/mgla/miasto (city.js)
+  // zadnego odbicia otoczenia. Zrodlo PMREM to teraz domyslny RoomEnvironment
+  // z three/addons (NIE wlasna ciemna "kapsula" jak w poprzedniej, nocnej
+  // wersji tego pliku) - RoomEnvironment to jasne, neutralne "studio" z
+  // kilkoma kolorowymi softboxami, zaprojektowane wlasnie pod jasne/dzienne
+  // sceny (patrz historia tego pliku - przy nocnym rigu jego wplyw byl
+  // niezauwazalny z dokladnie tego powodu). scene.environment (NIE
+  // scene.background/kopula nieba powyzej) - tlo/mgla/miasto (city.js)
   // zostaja bez zmian.
   const pmremGenerator = new THREE.PMREMGenerator(renderer);
-  scene.environment = pmremGenerator.fromScene(buildNightEnvironmentScene(), 0.04).texture;
+  scene.environment = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
   pmremGenerator.dispose();
 
   // Zwiększenie near z 0.05 do 0.1 podwaja precyzję bufora głębokości (eliminacja Z-fightingu kamery)
@@ -121,103 +105,128 @@ export function createScene(canvas) {
   applyCameraFraming(camera, window.innerWidth / window.innerHeight);
   camera.lookAt(LOOK_TARGET);
 
-  // 1. Otoczenie nocnego miasta (Hemisphere) - chlodny granat nieba u gory,
-  // niemal-czarny cieply odblask ulicy/neonow u dolu. Intensywnosc zbita z
-  // 0.75 do 0.22 - to byla GLOWNA przyczyna "plaskiego, jasnego dnia" z
-  // poprzedniej wersji: przy 0.75 i cieplym gornym kolorze hemi samo w sobie
-  // wypelnialo caly cien rownomiernym, jasnym swiatlem, zabijajac kontrast
-  // miedzy arena (ma byc punktem skupienia) a jej krawedziami.
-  const hemi = new THREE.HemisphereLight(0x2c3c63, 0x0d0a08, 0.22);
+  // 1. Otoczenie dziennego nieba (Hemisphere) - blekit zenitu u gory (pasuje
+  // do buildDaySkyDome), cieply, przygaszony odblask ziemi/trawy u dolu.
+  // Intensywnosc 0.65 (podniesiona z nocnego 0.22) - w dzien niebo samo w
+  // sobie jest silnym, rozproszonym zrodlem swiatla wypelniajacego (nie tylko
+  // kontrastowym akcentem jak noca).
+  const hemi = new THREE.HemisphereLight(0xbfe0ff, 0x8a7256, 0.65);
   scene.add(hemi);
 
-  // 2. Chlodne swiatlo ksiezycowe (Key Light) z miekkimi cieniami 2K - kolor
-  // zmieniony z cieplego 0xfffaed (dzien) na chlodny niebieskawy 0x9fc2ff
-  // (poswiata ksiezyca), intensywnosc zbita z 1.5 do 0.85. To DRUGA glowna
-  // przyczyna dziennego wygladu: cieply, mocny kierunkowy key swiecil jak
-  // slonce. Cienie (mapSize/bias/normalBias/radius/frustum) NIE ruszane -
-  // to jest oddzielnie zmierzony, udokumentowany tuning (patrz komentarze
-  // nizej), zmiana koloru/intensywnosci swiatla go nie uniewaznia.
-  const dir = new THREE.DirectionalLight(0x9fc2ff, 0.85);
-  dir.position.set(3.5, 6, 2.5);
+  // 2. Slonce (Key Light) - cieply, biały kierunkowy key z twardymi cieniami
+  // (kat ~55 stopni elewacji, "popoludniowe" swiatlo: cienie wyraznie
+  // widoczne na arenie, ale nie tak dlugie/plaskie, zeby zaslanialy postacie
+  // - patrz raport zadania, zweryfikowane zrzutem z domyslnej kamery).
+  // TYLKO ten swiatlo (nie dirWide ponizej) definiuje tesny, wysokiej
+  // rozdzielczosci cien areny - mapSize/bias/normalBias/radius/frustum
+  // ponizej to DOKLADNIE ten sam, zmierzony i udokumentowany tuning co w
+  // poprzedniej (nocnej) wersji tego pliku, bez zadnych zmian - zmiana
+  // koloru/intensywnosci/kata swiatla go nie uniewaznia, bo dotyczy tylko
+  // tego, JAK teksel mapy cieni jest probkowany, nie tego, co go oswietla.
+  // Intensywnosc 0.8 (nie 2.6): glowne slonce to dirWide ponizej. Swiatlo bez
+  // cienia poza swoim frustum (+-5) i tak oswietla caly teren, wiec gdyby to
+  // ono bylo glowne, cien dirWide przyciemnialby otoczenie areny o ledwie
+  // ~16% i rekwizyty poza arena wygladalyby jak bez cienia (sprawdzone
+  // zrzutem). Tutaj tylko doostrza cienie na samej arenie.
+  const dir = new THREE.DirectionalLight(0xfff2d9, 0.8);
+  dir.position.set(5, 8, 3);
   dir.castShadow = true;
-  // mapSize 4096 (zamiast 2048) polowi rozmiar teksela mapy cieni - mniejszy
-  // teksel = mniej widocznego "schodkowania" na plaskiej posadzce przy ruchu
-  // kamery pod plaskim katem. Zmierzone (patrz notatka z testu izolowanego
-  // niżej): przy bias=0 teksel jest na tyle duzy, ze srednia jasnosc i
-  // odchylenie posadzki skacza az 6x (mean 19 -> 65, std 0.1 -> 1.1) - dowod,
-  // ze bias/normalBias/mapSize realnie tlumia acne na tej geometrii. Przy
-  // obecnym bias=-0.0004 acne na SAMEJ plaskiej plytce podlogi jest juz dobrze
-  // stlumione (oscylacja rzedu 0.005-0.01 w izolowanym tescie) - normalBias
-  // podniesiony do 0.05 i tesniejszy frustum dodaja margines bezpieczenstwa
-  // bez zauwazalnego peter-panningu (sprawdzone wizualnie na stopach postaci).
   dir.shadow.mapSize.set(4096, 4096);
-  // Wartosci dobrane pomiarem na prawdziwym plotnie (metryka w diag.js: oscylacja
-  // wariancji Laplace'a obrazu posadzki przy powolnym ruchu kamery). Agresywne
-  // ustawienia (bias -0.0007, normalBias 0.05) dawaly oscylacje 0.0298, lagodne
-  // 0.0236 - a wiekszosc migotania i tak pochodzila nie z cieni, tylko ze
-  // wspolplaszczyznowego wierzchu placu miasta (patrz PLAZA_TOP_Y w city.js).
   dir.shadow.bias = -0.0002;
-  // normalBias odsuwa punkt probkowania mapy cieni wzdluz normalnej powierzchni.
-  // Bez niego duze plaskie powierzchnie (posadzka areny) potrafia rzucac cien
-  // same na siebie - shadow acne, widoczne jako migoczace ciemne pasy zmieniajace
-  // sie przy ruchu kamery. Sam ujemny bias tego nie rozwiazuje.
   dir.shadow.normalBias = 0.015;
-  // radius obnizony z 2.2 - mniejszy promien PCF miekkiego cienia mniej
-  // rozmywa/wzmacnia pasma na granicy tekseli mapy cieni.
   dir.shadow.radius = 1.4;
   dir.shadow.camera.near = 0.5;
   dir.shadow.camera.far = 20;
-  // Frustum zaciesniony z +-6 do +-5 (arena siega do 3.5, boss/Vanessa
-  // potrafia wyjsc poza arene - +-6 zostawia margines, ale wiekszy teksel na
-  // szerszym obszarze byl czescia problemu z acne; +-5 to kompromis
-  // zweryfikowany wizualnie - cienie bossa/Vanessy przy krawedzi areny nadal
-  // sa rzucane poprawnie).
+  // Frustum +-5 - obejmuje arene (siega do 3.5) i najblizsze otoczenie
+  // (plotek/boss/Vanessa), NIE cala strefe z cieniami (patrz dirWide nizej) -
+  // to jest swiadomy wybor: zaciesniony frustum na WYSOKIEJ rozdzielczosci
+  // mapy (4096) daje maksymalna ostrosc cienia dokladnie tam, gdzie kamera
+  // patrzy najczesciej i z najblizsza (arena/postacie), bez rozmywania tego
+  // budzetu tekseli na caly plac.
   dir.shadow.camera.left = -5;
   dir.shadow.camera.right = 5;
   dir.shadow.camera.top = 5;
   dir.shadow.camera.bottom = -5;
   scene.add(dir);
 
-  // 3. Efektowny, złoty reflektor sufitowy (Spotlight) skierowany pionowo w
-  // bankomat - intensywnosc PODNIESIONA z 4.0 do 6.5 (kat lekko zwezony), zeby
-  // w duzo ciemniejszej scenie nadal wyraznie "wybijal" bankomat jako punkt
-  // skupienia - to jest kontrast wzgledem reszty rigu (2 i 3 razy jasniejszy
-  // od key light), nie absolutna jasnosc.
-  const spot = new THREE.SpotLight(0xffd27a, 6.5, 9.0, Math.PI / 5, 0.5, 1.25);
+  // 2b. To samo slonce (IDENTYCZNY kierunek - ta sama proporcja pozycji, wiec
+  // ten sam znormalizowany wektor kierunku), ale DRUGIE zrodlo swiatla
+  // dedykowane WYLACZNIE poszerzeniu zasiegu cieni na otoczenie areny (plac,
+  // plotek ozdobny, kepki trawy/gruntu, rekwizyty klastrow, latarnie przy
+  // obwodnicy - promien r <= ok. 13, patrz wymagania zadania), bez utraty
+  // ostrosci cienia na samej arenie (dir powyzej, nietkniety).
+  //
+  // Dlaczego DWA swiatla kierunkowe zamiast jednego z duzym frustum: jeden
+  // dir o frustum +-13.5 przy tym samym mapSize=4096 dawalby teksel ~2.7x
+  // wiekszy niz obecny (+-5) - w izolowanym tescie (patrz notatka przy dir
+  // powyzej) taki skok wielkosci teksela byl GLOWNA przyczyna widocznego
+  // shadow acne. Podniesienie mapSize do ~8192 zamiast tego kosztowaloby ~4x
+  // wiecej pamieci/przepustowosci tylko dla jednego swiatla. Dwa swiatla o
+  // mapach 4096 (tesny obszar areny + szeroki obszar otoczenia) to mniej
+  // tekseli lacznie (16M+16M=32M) niz jedno duze (8192^2=64M), przy
+  // zachowaniu ostrosci tam, gdzie sie liczy najbardziej.
+  //
+  // "Podwojny cien" (dwa przesuniete odbicia tego samego obiektu), przed
+  // ktorym trzeba sie chronic przy takim podejsciu: NIE wystepuje tutaj,
+  // bo obie mapy cienia rzutuja z DOKLADNIE tego samego kierunku (ten sam
+  // znormalizowany wektor, wspolny cel w (0,0,0)) - kazdy okludent blokuje
+  // swiatlo w IDENTYCZNYM miejscu na posadzce w obu mapach, wiec cienie
+  // pokrywaja sie geometrycznie, a nie duplikuja pod innym katem. Jedyny
+  // efekt nakladania (w promieniu <=5, gdzie obie mapy dzialaja naraz) to
+  // PROPORCJONALNIE wieksze przyciemnienie (bo blokowane jest wiecej
+  // laczengo swiatla slonca), co jest fizycznie poprawne i spojne z reszta
+  // areny. To swiatlo niesie wiekszosc jasnosci slonca (2.3 z 3.1), zeby
+  // cienie rekwizytow poza arena byly rownie wyrazne jak na arenie; mapa
+  // 4096, bo przy 2048 na +-13.5 cienie drobnych kepek sie rozmywaly.
+  const dirWide = new THREE.DirectionalLight(0xfff2d9, 2.3);
+  dirWide.position.set(15, 24, 9); // ten sam kierunek co dir (x3), dalej od sceny
+  dirWide.castShadow = true;
+  dirWide.shadow.mapSize.set(4096, 4096);
+  dirWide.shadow.bias = -0.00035;
+  dirWide.shadow.normalBias = 0.025;
+  dirWide.shadow.radius = 1.6;
+  dirWide.shadow.camera.near = 1;
+  dirWide.shadow.camera.far = 45;
+  // Frustum +-13.5 - z marginesem obejmuje wymagane w zadaniu r<=13 (kepki
+  // trawy/gruntu na placu i apronie, klastry rekwizytow do r=7.65+ok.1 na
+  // sam rekwizyt, latarnie na obwodnicy r=12.5). Rogi kwadratowego frustum
+  // siegaja dalej (13.5*sqrt(2)=~19.1) niz sama "okragla" strefa r<=13, ale to
+  // nieszkodliwe - obiekty tam (wysoka zielen/zabudowa, patrz city.js) maja
+  // celowo castShadow=false, wiec i tak nie rzucaja cienia, niezaleznie od
+  // tego, czy geometrycznie mieszcza sie w tym frustum.
+  dirWide.shadow.camera.left = -13.5;
+  dirWide.shadow.camera.right = 13.5;
+  dirWide.shadow.camera.top = 13.5;
+  dirWide.shadow.camera.bottom = -13.5;
+  scene.add(dirWide);
+
+  // 3. Zloty reflektor sufitowy (Spotlight) na bankomacie - w nocnej wersji
+  // byl GLOWNYM punktem skupienia w ciemnej scenie (intensywnosc 6.5); w
+  // dzien slonce+niebo juz same w sobie dobrze oswietlaja automat, wiec to
+  // zostaje jako SUBTELNY, cieply akcent (jak wymaga zadanie), nie jako
+  // dominujace zrodlo swiatla - stad duzo nizsza intensywnosc.
+  const spot = new THREE.SpotLight(0xffd9a0, 1.3, 6.0, Math.PI / 5, 0.5, 1.25);
   spot.position.set(0, 4.2, 1.2);
   spot.target.position.copy(LOOK_TARGET);
   scene.add(spot);
   scene.add(spot.target);
 
-  // 4. Neonowy blask Kicka przy posadzce (PointLight) oświetlający podstawę
-  // automatu i monety - podniesiony z 1.8 do 2.6, zeby przy niskim hemi/key
-  // nadal wyraznie swiecil na plytkach wokol automatu (widoczny akcent
-  // ciepla/zimna: zielony neon vs chlodny key/rim).
-  const neon = new THREE.PointLight(0x53fc18, 2.6, 4.2, 1.4);
+  // 4. Neonowy blask Kicka przy posadzce (PointLight) - podobnie jak spot,
+  // zostaje jako drobny, kolorowy akcent marki (widoczny z bliska przy
+  // automacie), ale mocno przygaszony wzgledem nocnej wersji (2.6 -> 0.5),
+  // zeby nie wygladal jak wlaczony neon w pelnym sloncu.
+  const neon = new THREE.PointLight(0x53fc18, 0.5, 3.2, 1.4);
   neon.position.set(0, 0.18, 0.45);
   scene.add(neon);
 
-  // 5. Chłodne światło kontrowe (Rim / Backlight) - wydobywa krawędzie
-  // postaci i maszyn z ciemnego tla. Lekko podniesione (0.95 -> 1.1), bo przy
-  // niskim hemi sylwetki bez rima ginelyby w cieniu bardziej niz wczesniej.
-  const rim = new THREE.DirectionalLight(0x4a6bff, 1.1);
-  rim.position.set(-4, 3.5, -3.5);
-  scene.add(rim);
-
-  // 6. Cieple, szerokie swiatlo wypelniajace arene (PointLight BEZ cieni -
-  // castShadow domyslnie false, wiec zero dodatkowego kosztu shadow-mapy) -
-  // rig 1-5 jest teraz swiadomie ciemny/kontrastowy (nastroj nocy + arena
-  // jako punkt skupienia), ale to zostawialoby postacie na KRAWEDZIACH areny
-  // (np. w rogu, daleko od zlotego spotu i neonu) w prawie calkowitym cieniu -
-  // ich plakietki z nickiem (DOM, rzutowane z pozycji 3D, patrz
-  // workerOverlays.updatePositions w main.js) zostalyby czytelne, ale sama
-  // postac na canvasie nie. To swiatlo stoi wysoko nad SRODKIEM areny i ma
-  // spory zasieg (7.5 j. - obejmuje cala plyte 7x7 do naroznikow) i niska
-  // intensywnosc, wiec podnosi tylko dolna granice jasnosci (fill), nie
-  // konkuruje z zadnym z gorna akcentow.
-  const fill = new THREE.PointLight(0xffb87a, 0.9, 7.5, 1.6);
-  fill.position.set(0, 2.7, 0.1);
-  scene.add(fill);
+  // Usuniete wzgledem nocnej wersji: chlodne swiatlo kontrowe (rim) i cieple
+  // swiatlo wypelniajace bez cieni (fill) - obydwa istnialy WYLACZNIE po to,
+  // zeby podniesc dolna granice jasnosci i wydobyc sylwetki z ciemnego,
+  // kontrastowego nocnego rigu. W dzien hemi (0.65) + slonce (2.6+0.5) same
+  // w sobie oswietlaja arene rownomiernie ze wszystkich stron - dodatkowe
+  // swiatla wypelniajace nie wnosilyby nic widocznego, a kazde to kolejny
+  // realtime light do policzenia na materialach sceny (patrz raport zadania,
+  // sekcja wydajnosc: mniej swiatel = szybszy fragment shader).
 
   const controls = new OrbitControls(camera, canvas);
   controls.enableDamping = true;
@@ -241,7 +250,7 @@ export function createScene(canvas) {
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
-  return { renderer, scene, camera, controls, spot, neon, fill };
+  return { renderer, scene, camera, controls, spot, neon };
 }
 
 /** Zwraca pierwszy THREE.Mesh znaleziony w scenie GLTF (fence.glb ma dokladnie jeden). */
@@ -264,14 +273,59 @@ export async function buildRoom(scene) {
 
   const group = new THREE.Group();
 
-  // Kafelki podłogi (y = 0, ich wierzch ma grubość y = 0.025)
+  // Kafelki podłogi (y = 0, ich wierzch ma grubość y = 0.025) - jasno-
+  // brazowa/ciemno-brazowa szachownica (drewno/terakota) zamiast dawnej
+  // czarno-bialej (wlasciciel po obejrzeniu areny zmienil zdanie - patrz
+  // raport zadania). Oryginalny material floor.glb probkuje WSPOLDZIELONY
+  // atlas kolorow mini-arcade (patrz CLAUDE.md - "NIE modyfikuj tej
+  // wspoldzielonej tekstury/materialu w miejscu") i to WLASNIE ten atlas byl
+  // zrodlem dotychczasowego czarno-bialego wzoru (kazdy kafel probkowal ta
+  // sama, drobna, dwutonowa czarno-biala "kratke" z tekstury). Zamiast
+  // klonowac ten material (i tak trzeba by nadpisac jego kolor/mape, a
+  // czarne pola atlasu * dowolny odcien brazu daja z powrotem czern - proste
+  // tonowanie nie dziala), kafelki dostaja DWA NOWE, WLASNE materialy (bez
+  // mapy, plaski, cieply kolor + szorstkosc jak reszta modeli Kenney) -
+  // atlas/tekstura arcade zostaje kompletnie nietknieta, a kolor areny nie
+  // zalezy juz od tego, co jest wypalone w tym pikselu atlasu.
+  //
+  // Wydajnosc: zamiast 49 osobnych Mesh (49 draw calls, jak w poprzedniej
+  // wersji tego pliku - kazdy floorGltf.scene.clone(true) to nowy Object3D
+  // niepoddany batchowaniu), kafle to TERAZ dwa InstancedMesh (jasne/ciemne
+  // pole) - 2 draw calle zamiast 49 (zmierzone w raporcie zadania).
+  const floorMesh = firstMesh(floorGltf);
+  const FLOOR_LIGHT = 0xc79a66; // jasny brąz (jasne drewno/terakota)
+  const FLOOR_DARK = 0x6b4226; // ciemny brąz (orzech/spieczona terakota)
+  const floorLightMat = new THREE.MeshStandardMaterial({ color: FLOOR_LIGHT, roughness: 0.85, metalness: 0.04 });
+  const floorDarkMat = new THREE.MeshStandardMaterial({ color: FLOOR_DARK, roughness: 0.85, metalness: 0.04 });
+
+  const floorLightPlacements = [];
+  const floorDarkPlacements = [];
   for (let x = -HALF; x <= HALF; x++) {
     for (let z = -HALF; z <= HALF; z++) {
-      const tile = floorGltf.scene.clone(true);
-      tile.position.set(x, 0, z);
-      group.add(tile);
+      // Parzystosc na przesunietych do zera wspolrzednych (x+HALF, z+HALF),
+      // zeby wzor byl prawdziwa szachownica (naprzemienne pola w obu osiach),
+      // a nie pasy.
+      const isLight = ((x + HALF) + (z + HALF)) % 2 === 0;
+      (isLight ? floorLightPlacements : floorDarkPlacements).push([x, z]);
     }
   }
+  const floorDummy = new THREE.Object3D();
+  const makeFloorInstanced = (mat, placements) => {
+    const inst = new THREE.InstancedMesh(floorMesh.geometry, mat, placements.length);
+    inst.castShadow = true;
+    inst.receiveShadow = true;
+    inst.frustumCulled = false;
+    placements.forEach(([x, z], i) => {
+      floorDummy.position.set(x, 0, z);
+      floorDummy.updateMatrix();
+      inst.setMatrixAt(i, floorDummy.matrix);
+    });
+    inst.instanceMatrix.needsUpdate = true;
+    group.add(inst);
+    return inst;
+  };
+  makeFloorInstanced(floorLightMat, floorLightPlacements);
+  makeFloorInstanced(floorDarkMat, floorDarkPlacements);
 
   // Granica areny: plotek kenney_mini-forest (assets/forest/fence.glb) zamiast
   // dawnych scian/naroznikow z mini-arcade (wall.glb/wall-corner.glb).
@@ -365,25 +419,27 @@ export async function buildRoom(scene) {
   fenceInst.instanceMatrix.needsUpdate = true;
   group.add(fenceInst);
 
-  // Wizualna neonowa siatka 2D na podłodze areny (7x7 pól, każde pole 1.0 x 1.0 m)
+  // Wizualna siatka 2D na podłodze areny (7x7 pól, każde pole 1.0 x 1.0 m)
   const gridMesh = createFloorGridMesh(SIZE, SIZE);
-  // UWAGA: SWIADOMIE nie na warstwie bloomu. Zmierzone/sprawdzone wizualnie -
-  // to duza plaszczyzna pokrywajaca praktycznie cala widoczna arene, wiec
-  // nawet subtelny UnrealBloomPass rozmywa sie na niej w jeden, ekranowy
-  // zielony poblask, ktory bije po oczach i (co gorsza) zabiera kontrast
-  // dokladnie tym elementom, ktorych bloom mial NIE dotykac (karty, etykiety
-  // DOBIERZ/PASUJ stojace na tej samej podlodze - patrz test w raporcie
-  // zadania z boss 3). Bloom w tym projekcie jest wiec zarezerwowany dla
-  // MALYCH, punktowych zrodel (latarnie/neonowe szyldy/krawedz placu/swiatla
-  // aut w city.js) - siatka zostaje czytelnym neonem tylko dzieki wlasnej
-  // teksturze/kolorowi, bez postprocessingu.
+  // Decyzja estetyczna (wraz z przejsciem podlogi na dzienna, brazowa
+  // szachownice powyzej): dawny jaskrawo-zielony NEON (z blurem/glow,
+  // pomyslany jako nocny rave-akcent) na cieplym drewnie/terakocie w PELNYM
+  // SLONCU wygladalby jak przypadkowa plama farby, nie jak swiadomy element
+  // designu - i tak juz nie ma blooma, ktory by go "sprzedal" jako swiatlo
+  // (patrz usuniecie UnrealBloomPass w main.js, uzasadnienie w raporcie
+  // zadania). Siatka zostaje WIDOCZNA (linie pol nadal pomagaja czytac
+  // rozstaw 1x1 pod karty/etykiety minigier), ale STONOWANA i PRZEBARWIONA na
+  // cieply, przygaszony zloty - ten sam odcien co akcent bankomatu (spot w
+  // scene.js, 0xffd9a0) - zeby czytala sie jako delikatna inkrustacja/fuga w
+  // podlodze, a nie jako odrebne, "wlaczone" swiatlo. Bez shadowBlur (glow
+  // bez blooma i tak jest tylko rozmytym kwadratem, nie realnym swieceniem).
   group.add(gridMesh);
 
   scene.add(group);
   return group;
 }
 
-/** Tworzy estetyczną, świecącą siatkę 2D na posadzce z wyrysowanymi kwadratami pól. */
+/** Tworzy stonowaną, ciepłą siatkę 2D na posadzce z wyrysowanymi kwadratami pól. */
 function createFloorGridMesh(size, divisions) {
   const canvas = document.createElement('canvas');
   canvas.width = 1024;
@@ -394,11 +450,10 @@ function createFloorGridMesh(size, divisions) {
 
   const cellSize = 1024 / divisions;
 
-  // Każde pole siatki otrzymuje neonową ramkę
-  ctx.strokeStyle = 'rgba(83, 252, 24, 0.7)';
-  ctx.lineWidth = 4;
-  ctx.shadowColor = '#53fc18';
-  ctx.shadowBlur = 10;
+  // Cienka, ciepla zlota ramka pola - fuga/inkrustacja, nie neon (patrz
+  // uzasadnienie w buildRoom powyzej). Bez shadowBlur/shadowColor.
+  ctx.strokeStyle = 'rgba(255, 217, 160, 0.4)';
+  ctx.lineWidth = 3;
 
   for (let x = 0; x < divisions; x++) {
     for (let y = 0; y < divisions; y++) {
@@ -406,12 +461,6 @@ function createFloorGridMesh(size, divisions) {
       const ry = y * cellSize;
 
       ctx.strokeRect(rx + 2, ry + 2, cellSize - 4, cellSize - 4);
-
-      // Subtelny znacznik środka pola
-      ctx.fillStyle = 'rgba(83, 252, 24, 0.35)';
-      ctx.beginPath();
-      ctx.arc(rx + cellSize / 2, ry + cellSize / 2, 4, 0, Math.PI * 2);
-      ctx.fill();
     }
   }
 
@@ -428,7 +477,7 @@ function createFloorGridMesh(size, divisions) {
   const mat = new THREE.MeshBasicMaterial({
     map: texture,
     transparent: true,
-    opacity: 0.75,
+    opacity: 0.55,
     depthWrite: false,
     polygonOffset: true,
     polygonOffsetFactor: -4,
