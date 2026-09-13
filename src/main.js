@@ -1045,9 +1045,10 @@ async function main() {
     onDefeated: async (tier) => {
       await machine.setTier(tier);
       announceTierAdvance(tier);
+      const nazwaBossa = (BOSS_DEFS[tier] && BOSS_DEFS[tier].name) || (boss.def ? boss.def.name : 'Boss');
       showTopAnnouncement(
-        '🏆 KAMIL KOVALENKO POKONANY!',
-        `Boss <strong>${boss.def ? boss.def.name : 'Kamil Kovalenko'}</strong> został pokonany przez czat! Bankomat wraca do gry na nowym tierze.`,
+        `🏆 ${nazwaBossa.toUpperCase()} POKONANY!`,
+        `Boss <strong>${nazwaBossa}</strong> został pokonany przez czat! Bankomat wraca do gry na nowym tierze.`,
         3200,
       );
       if (!economy.state.bossesDefeated.includes(tier)) {

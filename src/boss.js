@@ -1079,7 +1079,7 @@ export class BossManager {
     showBossNotification(
       'boss',
       '💥 UDERZENIE W BANKOMAT!',
-      'Kamil Kovalenko rozwalił bankomat i przejmuje arenę!',
+      `${this.def.name} rozwalił bankomat i przejmuje arenę!`,
     );
 
     // Wstrzas kamery - krotki losowy offset przez kilka klatek (obslugiwany prostym timerem)
