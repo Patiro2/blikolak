@@ -1,5 +1,10 @@
 import * as THREE from 'three';
-import { createScene, buildRoom } from './scene.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { createScene, buildRoom, BLOOM_LAYER } from './scene.js';
 import { preloadAll, setTextureQuality } from './assets.js';
 import { Machine } from './machine.js';
 import { WorkerManager, parseMovementDirection } from './workers.js';
@@ -20,6 +25,128 @@ import { CityBackground } from './city.js';
 import { audio } from './audio.js';
 import { pokazGameOver } from './gameover.js';
 
+/**
+ * Selektywny bloom (UnrealBloomPass) - technika "darken non-bloomed" z
+ * oficjalnego przykladu three.js (webgl_postprocessing_unreal_bloom_selective),
+ * NIE zwykly bloom na calym obrazie. Powod: karty blackjacka (boss-blackjack.js)
+ * i etykiety podlogowe DOBIERZ/PASUJ (tlumaczenia.js) to Sprite'y renderowane
+ * WEWNATRZ sceny 3D (nie DOM) - zwykly UnrealBloomPass na calej klatce
+ * realnie rozmywalby/prześwietlal je podczas walki z bossem 3, dokladnie to,
+ * czego zadanie zabrania. Ta technika renderuje bloom TYLKO z obiektow na
+ * warstwie BLOOM_LAYER (patrz scene.js/city.js - siatka neonowa, latarnie,
+ * neonowe szyldy na dachach, krawedz placu, swiatla aut) - karty/etykiety
+ * NIGDY nie sa na tej warstwie, wiec nie moga dostac blooma, niezaleznie od
+ * progu (threshold).
+ *
+ * Koszt: DODATKOWY render calej sceny (z reszty obiektow "przyciemnionych" do
+ * czerni) do mniejszego bufora + 2 przebiegi blur UnrealBloomPass + finalny
+ * przebieg mieszajacy. Zmierzone w raporcie zadania (performance.now() wokol
+ * renderFrame() na prawdziwej scenie, srednia z wielu klatek).
+ */
+function createSelectiveBloom(renderer, scene, camera) {
+  const bloomLayer = new THREE.Layers();
+  bloomLayer.set(BLOOM_LAYER);
+
+  const darkMaterial = new THREE.MeshBasicMaterial({ color: 0x000000 });
+  const materialCache = new Map();
+  const visibilityCache = new Map();
+
+  function darkenNonBloomed(obj) {
+    if (bloomLayer.test(obj.layers)) return;
+    if (obj.isMesh || obj.isInstancedMesh) {
+      materialCache.set(obj, obj.material);
+      obj.material = darkMaterial;
+    } else if (obj.isSprite) {
+      // Sprite'y (karty, DOBIERZ/PASUJ, flagi/slowka minigier) NIE dostaja
+      // materialu zastepczego (SpriteMaterial ma inny ksztalt niz
+      // MeshBasicMaterial) - po prostu znikaja na czas przebiegu bloomu.
+      visibilityCache.set(obj, obj.visible);
+      obj.visible = false;
+    }
+  }
+
+  function restoreMaterial(obj) {
+    if (materialCache.has(obj)) {
+      obj.material = materialCache.get(obj);
+      materialCache.delete(obj);
+    } else if (visibilityCache.has(obj)) {
+      obj.visible = visibilityCache.get(obj);
+      visibilityCache.delete(obj);
+    }
+  }
+
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+
+  // Bufor bloomu w POLOWIE rozdzielczosci canvasu - blur UnrealBloomPass i tak
+  // rozmywa drobne detale, wiec pelna rozdzielczosc byla tu zmarnowanym
+  // kosztem. Polowa rozdzielczosci mierzalnie obnizyla koszt bez zauwazalnej
+  // roznicy w samym poswiacie (sprawdzone wizualnie).
+  const bloomComposer = new EffectComposer(renderer);
+  bloomComposer.renderToScreen = false;
+  bloomComposer.setSize(Math.max(1, Math.round(w / 2)), Math.max(1, Math.round(h / 2)));
+  bloomComposer.addPass(new RenderPass(scene, camera));
+  const bloomPass = new UnrealBloomPass(
+    new THREE.Vector2(Math.round(w / 2), Math.round(h / 2)),
+    0.75, // strength
+    0.35, // radius
+    0.15, // threshold (niski - obiekty na BLOOM_LAYER sa juz z definicji jedynymi kandydatami, wiec nie musimy dodatkowo odcinac jasnoscia)
+  );
+  bloomComposer.addPass(bloomPass);
+
+  const mixShader = {
+    uniforms: {
+      baseTexture: { value: null },
+      bloomTexture: { value: bloomComposer.renderTarget2.texture },
+    },
+    vertexShader: `
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform sampler2D baseTexture;
+      uniform sampler2D bloomTexture;
+      varying vec2 vUv;
+      void main() {
+        gl_FragColor = texture2D(baseTexture, vUv) + vec4(1.0) * texture2D(bloomTexture, vUv);
+      }
+    `,
+  };
+  const mixPass = new ShaderPass(new THREE.ShaderMaterial({
+    uniforms: mixShader.uniforms,
+    vertexShader: mixShader.vertexShader,
+    fragmentShader: mixShader.fragmentShader,
+    defines: {},
+  }), 'baseTexture');
+  mixPass.needsSwap = true;
+
+  const finalComposer = new EffectComposer(renderer);
+  finalComposer.setSize(w, h);
+  finalComposer.addPass(new RenderPass(scene, camera));
+  finalComposer.addPass(mixPass);
+  finalComposer.addPass(new OutputPass());
+
+  function setSize(width, height) {
+    bloomComposer.setSize(Math.max(1, Math.round(width / 2)), Math.max(1, Math.round(height / 2)));
+    bloomPass.setSize(Math.max(1, Math.round(width / 2)), Math.max(1, Math.round(height / 2)));
+    finalComposer.setSize(width, height);
+  }
+
+  function render() {
+    // 1) Przyciemnij wszystko poza warstwa bloomu, wyrenderuj TYLKO ja (rozmyta) do bloomComposer.
+    scene.traverse(darkenNonBloomed);
+    bloomComposer.render();
+    scene.traverse(restoreMaterial);
+    // 2) Normalny render + zmieszanie z poswiata z kroku 1.
+    finalComposer.render();
+  }
+
+  return { render, setSize, bloomComposer, finalComposer, bloomPass };
+}
+
 async function main() {
   // Sprzatanie po usunietym panelu logu Vanessy - osierocony klucz pozycji
   // (przeciagania okna) nie jest juz nigdzie odczytywany, wiec go kasujemy.
@@ -31,6 +158,15 @@ async function main() {
 
   const canvas = document.getElementById('scene');
   const { renderer, scene, camera, controls } = createScene(canvas);
+
+  // Selektywny bloom (patrz createSelectiveBloom powyzej) - zastepuje bezposrednie
+  // renderer.render(scene, camera) w petli animate() nizej. Resize sceny/kamery
+  // dalej robi scene.js (applyCameraFraming + renderer.setSize) - tu dokladamy
+  // TYLKO rozmiar bufora postprocessingu, ktorego scene.js nie zna.
+  const bloom = createSelectiveBloom(renderer, scene, camera);
+  window.addEventListener('resize', () => {
+    bloom.setSize(window.innerWidth, window.innerHeight);
+  });
 
   // Stan gry z serwera (Vercel KV) ma pierwszenstwo przed localStorage.
   // Economy i KickChatClient czytaja localStorage w konstruktorach, wiec
@@ -1068,6 +1204,7 @@ async function main() {
     camera,
     renderer,
     city,
+    bloom,
   };
 
   function animate() {
@@ -1144,7 +1281,7 @@ async function main() {
     // Aktualizacja pozycji plakietek z nickami i dymków czatu nad głowami pracowników w rzucie 3D -> 2D
     workerOverlays.updatePositions(workerManager.entries, camera, canvasRect);
 
-    renderer.render(scene, camera);
+    bloom.render();
   }
   animate();
 

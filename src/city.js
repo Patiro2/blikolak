@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { loadForest, loadArcade, loadDungeon, loadPirate, loadArena } from './assets.js';
+import { BLOOM_LAYER } from './scene.js';
 
 // Tlo gry: proceduralne miasto noca wokol i ponizej areny. Arena (pokoj 7x7
 // ze scianami, patrz scene.js) zostaje DOKLADNIE taka, jaka jest - stoi na
@@ -146,6 +147,28 @@ function applyTextureFiltering(tex, renderer) {
     tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
   }
   tex.needsUpdate = true;
+}
+
+/**
+ * Miekka, okragla tekstura "glow" (radialny gradient, biel->przezroczystosc)
+ * do latarni ulicznych (patrz _buildStreetlamps) - ten sam wzorzec canvasowy
+ * co reszta tekstur w tym pliku. Uzywana z SpriteMaterial.color, wiec sama
+ * tekstura zostaje neutralnie biala - barwe nadaje material.
+ */
+function createGlowSpriteTexture() {
+  const size = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const grad = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  grad.addColorStop(0, 'rgba(255,255,255,0.9)');
+  grad.addColorStop(0.4, 'rgba(255,255,255,0.35)');
+  grad.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, size, size);
+  const tex = new THREE.CanvasTexture(canvas);
+  return tex;
 }
 
 /** Generuje raz teksture nawierzchni ulicy - asfalt z jasnymi pasami jezdni. */
@@ -456,6 +479,7 @@ export class CityBackground {
     this._buildBuildings(scene, renderer);
     this._buildCars(scene);
     this._buildForegroundApron(scene, renderer);
+    this._buildStreetlamps(scene);
     // Asynchroniczne (GLB) - leci w tle, nie blokuje pierwszej klatki. Ewentualny
     // blad sieci/ladowania jest logowany, ale NIE wywraca reszty gry (patrz
     // main.js - city.build() nigdy nie jest await-owane).
@@ -493,6 +517,98 @@ export class CityBackground {
     overlay.receiveShadow = true;
     scene.add(overlay);
     this.apronGroundOverlay = overlay;
+  }
+
+  /**
+   * Praktyczne "latarnie" wzdluz obwodnicy asfaltowej narysowanej w
+   * createApronGroundTexture (promien 12.5) - jedyne PRAWDZIWE zrodla swiatla
+   * dodane do dekoracji miasta poza juz istniejacymi emissive oknami/neonami
+   * na dachach. Celowo BEZ THREE.PointLight per latarnia (kazda rzucalaby
+   * wlasny krag oswietlenia i, gdyby mialy cienie, byla to byla kosztowna
+   * shadow-mapa na kazda) - caly efekt "swiecacej latarni" to (1) maly,
+   * emisyjny "klosz" (InstancedMesh, jeden draw call na WSZYSTKIE latarnie)
+   * i (2) dodatkowy, addytywny Sprite-glow (SpriteMaterial, blending
+   * Additive, depthWrite false) w tym samym miejscu - to jest DOKLADNIE ten
+   * sam trik co juz uzywaja flagSprite/wordSprite w minigrach (patrz
+   * flagbattle.js/tlumaczenia.js), tylko z additive blendingiem zamiast
+   * zwyklego alpha. Latarnie stoja na promieniu apronu (12.5), wiec sa
+   * WYRAZNIE dalej niz arena (promien ~3.8) - nie ingeruja w oswietlenie
+   * bankomatu/postaci, czytaja sie jako tlo miasta.
+   */
+  _buildStreetlamps(scene) {
+    const LAMP_COUNT = 10;
+    const LAMP_RADIUS = 12.5; // ten sam promien co asfaltowa obwodnica w createApronGroundTexture
+    const POLE_H = 1.55;
+    const apronTopY = CITY_GROUND_Y + PLAZA_HEIGHT - 0.005; // patrz _buildForegroundApron
+
+    const poleGeo = new THREE.CylinderGeometry(0.03, 0.045, POLE_H, 6);
+    const poleMat = new THREE.MeshStandardMaterial({ color: 0x1c1e26, roughness: 0.55, metalness: 0.5 });
+    const poleMesh = new THREE.InstancedMesh(poleGeo, poleMat, LAMP_COUNT);
+    poleMesh.frustumCulled = false;
+    poleMesh.castShadow = true;
+    poleMesh.receiveShadow = true;
+
+    // "Klosz" latarni - cieply, jasny emissive (nie musi byc na warstwie
+    // bloomu, bo to MALA, mocno swiecaca bryla - juz sama w sobie czytelna;
+    // dodatkowy blask daje glow-sprite ponizej).
+    const headGeo = new THREE.SphereGeometry(0.1, 8, 6);
+    const headMat = new THREE.MeshStandardMaterial({
+      color: 0xffdca0,
+      emissive: 0xffc978,
+      emissiveIntensity: 2.4,
+      roughness: 0.4,
+    });
+    const headMesh = new THREE.InstancedMesh(headGeo, headMat, LAMP_COUNT);
+    headMesh.frustumCulled = false;
+
+    const glowTex = createGlowSpriteTexture();
+    const dummy = new THREE.Object3D();
+    this.streetlampGlows = [];
+
+    for (let i = 0; i < LAMP_COUNT; i++) {
+      const angle = (i / LAMP_COUNT) * Math.PI * 2 + randRange(-0.05, 0.05);
+      const x = Math.sin(angle) * LAMP_RADIUS;
+      const z = Math.cos(angle) * LAMP_RADIUS;
+      const headY = apronTopY + POLE_H + 0.05;
+
+      dummy.position.set(x, apronTopY + POLE_H / 2, z);
+      dummy.rotation.set(0, 0, 0);
+      dummy.updateMatrix();
+      poleMesh.setMatrixAt(i, dummy.matrix);
+
+      dummy.position.set(x, headY, z);
+      dummy.updateMatrix();
+      headMesh.setMatrixAt(i, dummy.matrix);
+
+      // Kazda latarnia to WLASNY Sprite (material wspoldzielony miedzy
+      // wszystkimi - jeden THREE.SpriteMaterial/THREE.Texture, tylko instancja
+      // Sprite jest osobna) - to 10 dodatkowych draw calls (podobny rzad
+      // wielkosci co juz istniejace flagSprite/wordSprite), zmierzone w
+      // raporcie zadania, akceptowalne wobec ~100-115 draw calls calej sceny.
+      const glowMat = new THREE.SpriteMaterial({
+        map: glowTex,
+        color: 0xffc978,
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        toneMapped: false, // czysty efekt "swiatla", nie ma byc tlumiony przez ACES/exposure
+      });
+      const glow = new THREE.Sprite(glowMat);
+      glow.scale.set(1.1, 1.1, 1);
+      glow.position.set(x, headY, z);
+      // Selektywny bloom (patrz BLOOM_LAYER w scene.js) - TYLKO ten glow,
+      // nigdy karty/etykiety minigier.
+      glow.layers.enable(BLOOM_LAYER);
+      scene.add(glow);
+      this.streetlampGlows.push(glow);
+    }
+
+    poleMesh.instanceMatrix.needsUpdate = true;
+    headMesh.instanceMatrix.needsUpdate = true;
+    scene.add(poleMesh);
+    scene.add(headMesh);
+    this.streetlampPoleMesh = poleMesh;
+    this.streetlampHeadMesh = headMesh;
   }
 
   /** Zwraca pierwszy THREE.Mesh znaleziony w scenie GLTF (kazdy model mini-forest ma dokladnie jeden). */
@@ -902,6 +1018,7 @@ export class CityBackground {
     const edgeMat = new THREE.MeshBasicMaterial({ color: 0x53fc18 });
     const edge = new THREE.Mesh(edgeGeo, edgeMat);
     edge.position.set(0, CITY_GROUND_Y + PLAZA_HEIGHT - 0.03 - EDGE_DROP, 0);
+    edge.layers.enable(BLOOM_LAYER); // neonowa krawedz placu - praktyczny akcent, bezpieczny do bloomu
     scene.add(edge);
     this.plazaEdgeMesh = edge;
   }
@@ -1030,6 +1147,7 @@ export class CityBackground {
     neonMesh.instanceMatrix.needsUpdate = true;
     if (neonMesh.instanceColor) neonMesh.instanceColor.needsUpdate = true;
 
+    neonMesh.layers.enable(BLOOM_LAYER); // neonowe szyldy na dachach - praktyczny akcent, bezpieczny do bloomu
     scene.add(buildingMesh);
     scene.add(neonMesh);
     this.buildingMesh = buildingMesh;
@@ -1076,6 +1194,10 @@ export class CityBackground {
     }
     if (bodyMesh.instanceColor) bodyMesh.instanceColor.needsUpdate = true;
 
+    // Swiatla aut (przednie/tylne) - male, jasne emissive powierzchnie,
+    // praktyczny akcent bezpieczny do selektywnego bloomu (nigdy karoseria).
+    frontMesh.layers.enable(BLOOM_LAYER);
+    rearMesh.layers.enable(BLOOM_LAYER);
     scene.add(bodyMesh);
     scene.add(frontMesh);
     scene.add(rearMesh);
