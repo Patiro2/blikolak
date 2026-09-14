@@ -4,6 +4,7 @@ import { preloadAll, setTextureQuality } from './assets.js';
 import { Machine } from './machine.js';
 import { WorkerManager, parseMovementCombo } from './workers.js';
 import { CoinPool } from './coins.js';
+import { SparkPool } from './iskry.js';
 import { GoldenCoinManager } from './goldcoin.js';
 import { FlagBattleManager } from './flagbattle.js';
 import { TlumaczeniaManager } from './tlumaczenia.js';
@@ -195,6 +196,7 @@ async function main() {
 
   const coinPool = new CoinPool(scene);
   await coinPool.init();
+  const sparkPool = new SparkPool(scene);
 
   const goldCoin = new GoldenCoinManager(scene);
   await goldCoin.init();
@@ -1054,6 +1056,7 @@ async function main() {
       if (isCrit) audio.play('kryt');
       maybePlayComboSound(combo);
       coinPool.burst(machineBurstOrigin, value);
+      sparkPool.burst(machineBurstOrigin, isCrit);
       const text = isCrit ? `KRYT! +${fmtShort(value)} (@${nick})` : `+${fmtShort(value)} (@${nick})`;
       projectAndFloat(machineBurstOrigin, text, { crit: isCrit, kick: true });
       kickUI.updateKliksCount(kickChat.stats.kliksReceived);
@@ -1279,6 +1282,7 @@ async function main() {
     audio.play('klik-gracz');
     if (isCrit) audio.play('kryt');
     coinPool.burst(point, value);
+    sparkPool.burst(point, isCrit);
     const text = isCrit ? `KRYT! +${fmtShort(value)}` : `+${fmtShort(value)}`;
     projectAndFloat(point, text, { crit: isCrit });
 
@@ -1301,6 +1305,7 @@ async function main() {
     machine,
     workerManager,
     coinPool,
+    sparkPool,
     goldCoin,
     vanessa,
     boss,
@@ -1343,6 +1348,7 @@ async function main() {
     machine.update(delta);
     workerManager.update(delta);
     coinPool.update(delta);
+    sparkPool.update(delta);
     goldCoin.update(delta);
     // Minigra jest najmlodszym i najmniej sprawdzonym modulem, a tick() leci
     // w petli klatek PRZED renderowaniem - wyjatek stad przerywal cala klatke
