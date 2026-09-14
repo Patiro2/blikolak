@@ -85,5 +85,7 @@ export class SparkPool {
     if (anyActive) {
       this.points.geometry.attributes.position.needsUpdate = true;
     }
+    // Bez aktywnych iskier nie rysujemy wcale - inaczej Points kosztuje stale +1 draw call.
+    this.points.visible = anyActive;
   }
 }
