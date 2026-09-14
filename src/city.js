@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { loadForest, loadArcade, loadDungeon, loadPirate, loadArena, loadCubePets } from './assets.js';
 // mulberry32 z rng.js - w miescie uzywany WYLACZNIE przez rozmieszczenie
 // rekwizytow na przedpolu (_buildForegroundProps), zeby kazdy widz na streamie
@@ -1079,26 +1080,37 @@ export class CityBackground {
       bucket('column', columnGltf, false).list.push(...list);
     }
 
-    // --- Materializacja: kazdy kubelek -> jeden InstancedMesh (jeden draw call
-    // niezaleznie od liczby instancji w nim). ---
-    const meshes = [];
+    // --- Materializacja: rekwizyty sa statyczne, wiec zamiast InstancedMesh na
+    // kubelek (48 kubelkow = 48 draw calli w kadrze + po 48 w KAZDEJ z dwoch
+    // map cieni) wypalamy macierze w geometrie i scalamy wszystko, co dzieli
+    // pakiet Kenney (ten sam atlas colormap i identyczne parametry materialu)
+    // i flage cienia - jeden Mesh na grupe. Material bierzemy z pierwszego
+    // modelu grupy; modele jednego pakietu roznia sie tylko obiektem tekstury,
+    // nie jej trescia. ---
+    const groups = new Map();
     for (const [, { gltf, castShadow, list }] of buckets) {
       if (list.length === 0) continue;
       const mesh = this._firstMesh(gltf);
-      const inst = new THREE.InstancedMesh(mesh.geometry, mesh.material, list.length);
-      inst.castShadow = castShadow;
-      inst.receiveShadow = castShadow;
-      inst.frustumCulled = false;
-      list.forEach((p, i) => {
+      const attrs = Object.keys(mesh.geometry.attributes).sort().join(',');
+      const key = `${gltf.parser.options.path}|${castShadow}|${attrs}|${!!mesh.geometry.index}`;
+      if (!groups.has(key)) groups.set(key, { material: mesh.material, castShadow, geos: [] });
+      const group = groups.get(key);
+      for (const p of list) {
         dummy.position.set(p.x, p.y || 0, p.z);
         dummy.rotation.set(0, p.ry || 0, 0);
         dummy.scale.setScalar(p.scale != null ? p.scale : 1);
         dummy.updateMatrix();
-        inst.setMatrixAt(i, dummy.matrix);
-      });
-      inst.instanceMatrix.needsUpdate = true;
-      scene.add(inst);
-      meshes.push(inst);
+        group.geos.push(mesh.geometry.clone().applyMatrix4(dummy.matrix));
+      }
+    }
+    const meshes = [];
+    for (const { material, castShadow, geos } of groups.values()) {
+      const merged = new THREE.Mesh(mergeGeometries(geos), material);
+      for (const g of geos) g.dispose();
+      merged.castShadow = castShadow;
+      merged.receiveShadow = castShadow;
+      scene.add(merged);
+      meshes.push(merged);
     }
     this.foregroundMeshes = meshes;
 
