@@ -43,8 +43,12 @@ function nowyStan(model, staraFaza) {
     bazowaSkalaX: model.scale.x,
     bazowaSkalaY: model.scale.y,
     bazowaSkalaZ: model.scale.z,
-    bazowaPozY: model.position.y,
-    bazowaRotZ: model.rotation.z,
+    // Pozycja Y i przechyl Z modelu to zawsze 0 (swiezy SkeletonUtils.clone,
+    // workers.js ustawia tylko skale), ale jetpack.js:270-271 nadpisuje je w
+    // locie. Zapamietanie ich przy pierwszym spotkaniu postaci W TRAKCIE lotu
+    // trzymaloby ja po wyladowaniu 1.2 j. nad ziemia - stad stale zero.
+    bazowaPozY: 0,
+    bazowaRotZ: 0,
   };
 }
 
