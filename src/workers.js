@@ -437,6 +437,10 @@ export class WorkerManager {
         targetRotY: initFacing,
         targetGridX: initGridX,
         targetGridZ: initGridZ,
+        // Licznik faktycznie wykonanych krokow - patrz moveWorker/applySync,
+        // odroznia snapshot swiezszy od przestarzalego (naprawa rubberbandingu).
+        ruchNr: 0,
+        _syncSkipStreak: 0,
       };
 
       await this._applyVisual(entry, spec);
@@ -662,6 +666,12 @@ export class WorkerManager {
     entry.targetRotY = isDiagonal ? entry.startRotY : targetHeading; // skos nie zmienia zwrotu
     entry.facingAngle = isDiagonal ? entry.facingAngle : targetHeading;
 
+    // Krok zaakceptowany (zwykly lub odbity od granicy/bankomatu/blokady
+    // minigry) - liczymy IDENTYCZNIE w obu galeziach, bo host i widz wykonuja
+    // ten sam kod na tym samym strumieniu czatu, wiec licznik zostaje spojny
+    // po obu stronach (patrz applySync nizej).
+    entry.ruchNr = (entry.ruchNr || 0) + 1;
+
     if (!inBounds || isATM || zablokowanePrzezMinigre) {
       // Gracz nie może wyjść poza obszar gry lub wejść w bankomat - przy zwyklym
       // kroku obraca się w wybraną stronę, przy skosie zostaje w miejscu bez obrotu
@@ -812,6 +822,7 @@ export class WorkerManager {
       gridX: entry.gridX,
       gridZ: entry.gridZ,
       facingAngle: entry.facingAngle,
+      ruchNr: entry.ruchNr || 0,
     }));
   }
 
@@ -841,20 +852,56 @@ export class WorkerManager {
       const facingAngle = Number(wpis.facingAngle);
       if (!Number.isFinite(gridX) || !Number.isFinite(gridZ) || !Number.isFinite(facingAngle)) continue;
 
-      const zgodna = entry.gridX === gridX && entry.gridZ === gridZ && entry.facingAngle === facingAngle;
+      // Odrzucanie przestarzalych snapshotow (naprawa rubberbandingu): host
+      // zdejmuje snapshot co 2s, krok widza trwa 0.32s, wiec snapshot moze
+      // przyjsc PO tym, jak widz juz dokonczyl krok, ktorego host jeszcze nie
+      // widzial - bez tego widz zostalby cofniety o jeden ruch. ruchNr
+      // brakujace w ogole (stary host) -> stare zachowanie bez zmian.
+      const ruchNr = wpis.ruchNr === undefined ? undefined : Number(wpis.ruchNr);
+      const przestarzaly = ruchNr !== undefined && Number.isFinite(ruchNr) && ruchNr < entry.ruchNr;
+      // Zawor bezpieczenstwa: liczniki moga trwale sie rozjechac (np. krok
+      // odrzucony u widza a przyjety u hosta przy blokadzie minigry) - bez
+      // limitu widz zostalby z bledna pozycja NA ZAWSZE. Po 3 pominieciach
+      // z rzedu wymuszamy korekte i zrownujemy liczniki.
+      if (przestarzaly && entry._syncSkipStreak < 3) {
+        entry._syncSkipStreak = (entry._syncSkipStreak || 0) + 1;
+        continue;
+      }
+      entry._syncSkipStreak = 0;
+      if (ruchNr !== undefined && Number.isFinite(ruchNr)) entry.ruchNr = ruchNr;
+
+      const zgodna = entry.gridX === gridX && entry.gridZ === gridZ && Math.abs(entry.facingAngle - facingAngle) < 1e-6;
       if (zgodna) continue;
+
+      // Korekta o najwyzej jedno pole (Manhattan <= 1) - plynny przesuw
+      // zamiast teleportu, zeby nie bylo widac szarpniecia. Wykorzystuje ten
+      // sam mechanizm co zwykly krok (startPos/targetPos/moveProgress), wiec
+      // isMoving/moveQueue zachowuja sie normalnie (krok konczy sie w update()
+      // i ewentualnie odpala kolejny z kolejki jak zawsze).
+      const manhattan = Math.abs(entry.gridX - gridX) + Math.abs(entry.gridZ - gridZ);
 
       entry.gridX = gridX;
       entry.gridZ = gridZ;
       entry.facingAngle = facingAngle;
       entry.targetGridX = gridX;
       entry.targetGridZ = gridZ;
-      entry.startRotY = facingAngle;
-      entry.targetRotY = facingAngle;
-      entry.obj.position.set(gridX, 0, gridZ);
-      entry.obj.rotation.y = facingAngle;
-      entry.startPos.set(gridX, 0, gridZ);
-      entry.targetPos.set(gridX, 0, gridZ);
+
+      if (manhattan > 0 && manhattan <= 1) {
+        entry.startRotY = entry.obj.rotation.y;
+        entry.targetRotY = facingAngle;
+        entry.isMoving = true;
+        entry.moveProgress = 0;
+        entry.moveDuration = 0.2;
+        entry.startPos.copy(entry.obj.position);
+        entry.targetPos.set(gridX, 0, gridZ);
+      } else {
+        entry.startRotY = facingAngle;
+        entry.targetRotY = facingAngle;
+        entry.obj.position.set(gridX, 0, gridZ);
+        entry.obj.rotation.y = facingAngle;
+        entry.startPos.set(gridX, 0, gridZ);
+        entry.targetPos.set(gridX, 0, gridZ);
+      }
     }
   }
 
