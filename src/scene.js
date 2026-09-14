@@ -321,7 +321,12 @@ export function createScene(canvas) {
 
   window.addEventListener('resize', () => {
     const aspect = window.innerWidth / window.innerHeight;
+    // Resize przelicza tylko proporcje i FOV pod nowy ksztalt okna - pozycja
+    // kamery zostaje taka, jak ustawil ja gracz (applyCameraFraming nadpisuje
+    // position domyslnym presetem, co cofalo kamere przy kazdej zmianie okna).
+    const pozycja = camera.position.clone();
     applyCameraFraming(camera, aspect);
+    camera.position.copy(pozycja);
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
