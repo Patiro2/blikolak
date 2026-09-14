@@ -1,5 +1,12 @@
 import * as THREE from 'three';
 import { loadForest, loadArcade, loadDungeon, loadPirate, loadArena, loadCubePets } from './assets.js';
+// mulberry32 z rng.js - w miescie uzywany WYLACZNIE przez rozmieszczenie
+// rekwizytow na przedpolu (_buildForegroundProps), zeby kazdy widz na streamie
+// widzial DOKLADNIE ten sam, powtarzalny uklad scenki miedzy przeladowaniami
+// strony. Reszta miasta (budynki daleko, samochody, latarnie) zostaje na
+// Math.random() jak dotad - nie musi byc identyczna klatka po klatce, nikt
+// tego nie porownuje 1:1.
+import { mulberry32 } from './rng.js';
 
 // Tlo gry: proceduralne miasto noca wokol i ponizej areny. Arena (pokoj 7x7
 // ze scianami, patrz scene.js) zostaje DOKLADNIE taka, jaka jest - stoi na
@@ -79,23 +86,6 @@ const FOG_FAR = 55;
 
 function randRange(min, max) {
   return min + Math.random() * (max - min);
-}
-
-// --- Seedowany PRNG (mulberry32) - uzywany WYLACZNIE przez rozmieszczenie
-// rekwizytow na przedpolu (_buildForegroundProps), zeby kazdy widz na streamie
-// widzial DOKLADNIE ten sam, powtarzalny "nasrany" ukladu scenki miedzy
-// przeladowaniami strony (patrz wymaganie #2 w zadaniu). Reszta miasta
-// (budynki daleko, samochody, latarnie) zostaje na Math.random() jak dotad -
-// nie musi byc identyczna klatka po klatce, nikt tego nie porownuje 1:1.
-function mulberry32(seed) {
-  let a = seed >>> 0;
-  return function rng() {
-    a |= 0;
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
 }
 
 function rrange(rng, min, max) {

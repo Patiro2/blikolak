@@ -179,20 +179,14 @@ export class WorkerManager {
     this.pending = new Map(); // typeIndex -> Promise<Entry>
     this.bossRef = null;
     this.vanessaRef = null;
-    this.flagBattleRef = null;
-    this.tlumaczeniaRef = null;
-    this.panstwaMiastaRef = null;
-    this.bitwaMarekRef = null;
+    this.arenaMinigryRefs = []; // isPlayerLocked/isTileLocked minigier planszowych - patrz setContext
     this.economyRef = null;
   }
 
   setContext({ boss, vanessa, flagBattle, tlumaczenia, panstwaMiasta, bitwaMarek, economy }) {
     this.bossRef = boss;
     this.vanessaRef = vanessa;
-    this.flagBattleRef = flagBattle;
-    this.tlumaczeniaRef = tlumaczenia;
-    this.panstwaMiastaRef = panstwaMiasta;
-    this.bitwaMarekRef = bitwaMarek;
+    this.arenaMinigryRefs = [flagBattle, tlumaczenia, panstwaMiasta, bitwaMarek].filter(Boolean);
     this.economyRef = economy || this.economyRef;
   }
 
@@ -578,39 +572,18 @@ export class WorkerManager {
 
     if (entry.isFainted || entry.isMoving || entry.isRobbed) return false;
 
-    // Bitwa o flagi: dwaj walczacy nie moga sie ruszyc W OGOLE (nawet obrot w
-    // miejscu), dopoki ktorys nie wygra - patrz isPlayerLocked() w
-    // flagbattle.js po uzasadnienie. To ODREBNA blokada od isTileLocked()
-    // nizej (ta chroni pole PRZED WEJSCIEM obcych, nie trzyma samych
-    // walczacych) i musi byc sprawdzona PRZED policzeniem docelowego pola,
-    // zeby zwrocic false zamiast (jak isTileLocked) "true ale z obrotem".
-    if (this.flagBattleRef && typeof this.flagBattleRef.isPlayerLocked === 'function' && this.flagBattleRef.isPlayerLocked(typeIndex)) {
-      return false;
-    }
-
-    // Bitwa tlumaczen: identyczna blokada i identyczne uzasadnienie co
-    // powyzej dla bitwy o flagi (patrz isPlayerLocked() w tlumaczenia.js) -
-    // druga minigra na siatce ma dokladnie ten sam wzorzec (dwaj walczacy nie
-    // moga sie ruszyc W OGOLE, dopoki ktorys nie wygra), wiec musi byc
-    // sprawdzona tym samym sposobem, PRZED policzeniem docelowego pola.
-    if (this.tlumaczeniaRef && typeof this.tlumaczeniaRef.isPlayerLocked === 'function' && this.tlumaczeniaRef.isPlayerLocked(typeIndex)) {
-      return false;
-    }
-
-    // Bitwa panstw-miast: identyczna blokada i identyczne uzasadnienie co
-    // powyzej dla flag/tlumaczen - trzecia minigra na siatce ma dokladnie ten
-    // sam wzorzec (dwaj walczacy nie moga sie ruszyc, dopoki ktorys nie
-    // wygra), wiec musi byc sprawdzona tym samym sposobem.
-    if (this.panstwaMiastaRef && typeof this.panstwaMiastaRef.isPlayerLocked === 'function' && this.panstwaMiastaRef.isPlayerLocked(typeIndex)) {
-      return false;
-    }
-
-    // Bitwa o marki: identyczna blokada i identyczne uzasadnienie co
-    // powyzej dla flag/tlumaczen/panstw-miast - czwarta minigra na siatce ma
-    // dokladnie ten sam wzorzec (dwaj walczacy nie moga sie ruszyc, dopoki
-    // ktorys nie wygra), wiec musi byc sprawdzona tym samym sposobem.
-    if (this.bitwaMarekRef && typeof this.bitwaMarekRef.isPlayerLocked === 'function' && this.bitwaMarekRef.isPlayerLocked(typeIndex)) {
-      return false;
+    // Minigry planszowe (bitwa o flagi, tlumaczenia, panstwa-miasta, bitwa o
+    // marki): dwaj walczacy nie moga sie ruszyc W OGOLE (nawet obrot w
+    // miejscu), dopoki ktorys nie wygra - patrz isPlayerLocked() w kazdym z
+    // ich modulow po uzasadnienie. To ODREBNA blokada od isTileLocked() nizej
+    // (ta chroni pole PRZED WEJSCIEM obcych, nie trzyma samych walczacych) i
+    // musi byc sprawdzona PRZED policzeniem docelowego pola, zeby zwrocic
+    // false zamiast (jak isTileLocked) "true ale z obrotem". Kolejnosc
+    // sprawdzania: flagi, tlumaczenia, panstwa-miasta, marki.
+    for (const ref of this.arenaMinigryRefs) {
+      if (typeof ref.isPlayerLocked === 'function' && ref.isPlayerLocked(typeIndex)) {
+        return false;
+      }
     }
 
     // Jeśli była odgrywana animacja uderzenia w bankomat, przerywamy ją natychmiast na rzecz chodu
@@ -667,31 +640,13 @@ export class WorkerManager {
     // Bankomat w centrum (0, 0) blokuje wejście
     const isATM = nextX === 0 && nextZ === 0;
 
-    let isLockedByFlagBattle = false;
-    if (this.flagBattleRef && typeof this.flagBattleRef.isTileLocked === 'function') {
-      isLockedByFlagBattle = this.flagBattleRef.isTileLocked(nextX, nextZ, typeIndex);
-    }
-    // Suma logiczna z blokada pola bitwy tlumaczen - to samo pole nigdy nie
-    // moze byc zablokowane przez obie minigry naraz (spawnBattleSquare w
-    // flagbattle.js wyklucza kafelek tlumaczen i vice versa), ale sprawdzamy
-    // niezaleznie, zeby kazda z minigier chronila wlasny kafelek niezaleznie
-    // od drugiej.
-    let isLockedByTlumaczenia = false;
-    if (this.tlumaczeniaRef && typeof this.tlumaczeniaRef.isTileLocked === 'function') {
-      isLockedByTlumaczenia = this.tlumaczeniaRef.isTileLocked(nextX, nextZ, typeIndex);
-    }
-    // Suma logiczna z blokada pola bitwy panstw-miast - ten sam wzorzec co
-    // isLockedByFlagBattle/isLockedByTlumaczenia powyzej.
-    let isLockedByPanstwaMiasta = false;
-    if (this.panstwaMiastaRef && typeof this.panstwaMiastaRef.isTileLocked === 'function') {
-      isLockedByPanstwaMiasta = this.panstwaMiastaRef.isTileLocked(nextX, nextZ, typeIndex);
-    }
-    // Suma logiczna z blokada pola bitwy o marki - ten sam wzorzec co
-    // isLockedByFlagBattle/isLockedByTlumaczenia/isLockedByPanstwaMiasta powyzej.
-    let isLockedByBitwaMarek = false;
-    if (this.bitwaMarekRef && typeof this.bitwaMarekRef.isTileLocked === 'function') {
-      isLockedByBitwaMarek = this.bitwaMarekRef.isTileLocked(nextX, nextZ, typeIndex);
-    }
+    // To samo pole nigdy nie moze byc zablokowane przez dwie minigry naraz
+    // (spawnBattleSquare w kazdej z nich wyklucza kafelki pozostalych), ale
+    // sprawdzamy kazda niezaleznie, zeby kazda minigra chronila wlasny
+    // kafelek niezaleznie od reszty.
+    const zablokowanePrzezMinigre = this.arenaMinigryRefs.some(
+      (ref) => typeof ref.isTileLocked === 'function' && ref.isTileLocked(nextX, nextZ, typeIndex)
+    );
 
     // Kolizje MIEDZY POSTACIAMI sa celowo WYLACZONE - kilku widzow moze stac
     // na tym samym polu i przechodzic przez siebie, zeby nikt nie blokowal
@@ -707,7 +662,7 @@ export class WorkerManager {
     entry.targetRotY = isDiagonal ? entry.startRotY : targetHeading; // skos nie zmienia zwrotu
     entry.facingAngle = isDiagonal ? entry.facingAngle : targetHeading;
 
-    if (!inBounds || isATM || isLockedByFlagBattle || isLockedByTlumaczenia || isLockedByPanstwaMiasta || isLockedByBitwaMarek) {
+    if (!inBounds || isATM || zablokowanePrzezMinigre) {
       // Gracz nie może wyjść poza obszar gry lub wejść w bankomat - przy zwyklym
       // kroku obraca się w wybraną stronę, przy skosie zostaje w miejscu bez obrotu
       entry.isMoving = true;
