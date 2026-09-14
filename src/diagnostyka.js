@@ -1,40 +1,55 @@
-// Panel diagnostyczny - TYLKO dla wersji testowych (gałęzie nocne/calosc*).
-// Pokazuje: FPS, najgorsza klatke, klatki > 100 ms (petla gry obcina delta do
-// 0.1 s, wiec takie klatki realnie spowalniaja ruch postaci), draw calle,
-// opoznienie Kicka (created_at wiadomosci -> odebranie w karcie), czas od
-// odebrania komendy ruchu do ruszenia postaci oraz RTT lokalnego serwera.
+// Panel diagnostyczny.
+// - Zalogowany (remote.czyAdmin(), lokalnie zawsze): pelny panel - FPS,
+//   najgorsza klatka, klatki > 100 ms (petla gry obcina delta do 0.1 s, wiec
+//   takie klatki realnie spowalniaja ruch postaci), draw calle, opoznienie
+//   Kicka (created_at wiadomosci -> odebranie w karcie), czas od komendy ruchu
+//   do ruszenia postaci, ping serwera.
+// - Widz: jedna linia - FPS i ping serwera.
+// Ping to RTT zapytania do serwera, z ktorego serwowana jest gra (przekaznik
+// realtime nie ma pingu w protokole, a protokolu nie ruszamy).
 // Nie rusza kick.js ani workers.js - owija ich callbacki z zewnatrz.
-// Wylacznik: ?diag=0 w URL. Klawisz F9 chowa/pokazuje panel.
+// F9 chowa/pokazuje panel i ZAPAMIETUJE to w przegladarce (karta prowadzaca
+// stream moze go schowac raz na stale). ?diag=0 w URL wylacza calkiem.
 
 const ROZMIAR_PROBKI = 20;
+const KLUCZ_UKRYCIA = 'bankomat-clicker-diag-ukryty';
 
 function dodaj(tab, v) {
   tab.push(v);
   if (tab.length > ROZMIAR_PROBKI) tab.shift();
 }
 
-function opis(tab) {
-  if (tab.length === 0) return '-';
-  const posort = [...tab].sort((a, b) => a - b);
-  const sr = tab.reduce((a, b) => a + b, 0) / tab.length;
-  return `ost ${Math.round(tab[tab.length - 1])}  sr ${Math.round(sr)}  max ${Math.round(posort[posort.length - 1])} ms`;
+function srednia(tab) {
+  return tab.length ? Math.round(tab.reduce((a, b) => a + b, 0) / tab.length) : null;
 }
 
-export function uruchomDiagnostyke({ renderer, kickChat, workerManager, realtime }) {
+function opis(tab) {
+  if (tab.length === 0) return '-';
+  return `ost ${Math.round(tab[tab.length - 1])}  sr ${srednia(tab)}  max ${Math.round(Math.max(...tab))} ms`;
+}
+
+export function uruchomDiagnostyke({ renderer, kickChat, workerManager, realtime, remote }) {
   if (new URLSearchParams(location.search).get('diag') === '0') return;
 
   const el = document.createElement('pre');
-  el.style.cssText = 'position:fixed;right:8px;bottom:8px;z-index:99999;margin:0;padding:8px 10px;'
-    + 'background:rgba(0,0,0,.78);color:#53fc18;font:12px/1.4 ui-monospace,Consolas,monospace;'
+  el.style.cssText = 'position:fixed;right:8px;bottom:8px;z-index:99999;margin:0;padding:6px 10px;'
+    + 'background:rgba(0,0,0,.72);color:#53fc18;font:12px/1.4 ui-monospace,Consolas,monospace;'
     + 'pointer-events:none;white-space:pre;border-radius:6px';
+  try {
+    el.hidden = localStorage.getItem(KLUCZ_UKRYCIA) === '1';
+  } catch (_) {}
   document.body.appendChild(el);
   addEventListener('keydown', (e) => {
-    if (e.key === 'F9') el.hidden = !el.hidden;
+    if (e.key !== 'F9') return;
+    el.hidden = !el.hidden;
+    try {
+      localStorage.setItem(KLUCZ_UKRYCIA, el.hidden ? '1' : '0');
+    } catch (_) {}
   });
 
   const opoznieniaKick = [];
   const reakcjeRuchu = [];
-  const rttSerwera = [];
+  const pingi = [];
   const oczekujace = []; // komendy ruchu czekajace na pierwsza zmiane pozycji/obrotu postaci
   let wiadomosci = 0;
 
@@ -103,16 +118,15 @@ export function uruchomDiagnostyke({ renderer, kickChat, workerManager, realtime
   }
   requestAnimationFrame(klatka);
 
-  // RTT lokalnego serwera (maly plik, bez cache).
-  async function zmierzSerwer() {
+  async function zmierzPing() {
     const t0 = performance.now();
     try {
       await fetch(`style.css?diag=${Date.now()}`, { cache: 'no-store' });
-      dodaj(rttSerwera, performance.now() - t0);
+      dodaj(pingi, performance.now() - t0);
     } catch (_) {}
   }
-  zmierzSerwer();
-  setInterval(zmierzSerwer, 5000);
+  zmierzPing();
+  setInterval(zmierzPing, 5000);
 
   let gpu = '?';
   try {
@@ -122,6 +136,13 @@ export function uruchomDiagnostyke({ renderer, kickChat, workerManager, realtime
   } catch (_) {}
 
   setInterval(() => {
+    if (el.hidden) return;
+    const ping = pingi.length ? `${Math.round(pingi[pingi.length - 1])} ms` : '-';
+    if (!(remote && remote.czyAdmin())) {
+      el.textContent = `FPS ${fps}  |  ping ${ping}`;
+      najgorsza = 0;
+      return;
+    }
     const przekaznik = realtime && typeof realtime.czyPolaczony === 'function'
       ? (realtime.czyPolaczony() ? 'polaczony' : 'rozlaczony / wylaczony lokalnie')
       : '-';
@@ -132,11 +153,11 @@ export function uruchomDiagnostyke({ renderer, kickChat, workerManager, realtime
       `draw calle       ${drawCalls}   trojkaty ${Math.round(trojkaty / 1000)} tys.`,
       `Kick -> karta    ${opis(opoznieniaKick)}`,
       `komenda -> ruch  ${opis(reakcjeRuchu)}`,
-      `serwer RTT       ${opis(rttSerwera)}`,
+      `ping serwera     ${opis(pingi)}`,
       `wiadomosci       ${wiadomosci}   postacie ${workerManager.entries.length}`,
       `przekaznik       ${przekaznik}`,
       `GPU              ${gpu}   pr ${renderer.getPixelRatio()}`,
-      'F9 ukryj  |  ?diag=0 wylacz',
+      'F9 ukryj (zapamietane)  |  ?diag=0 wylacz',
     ].join('\n');
     najgorsza = 0;
   }, 500);

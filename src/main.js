@@ -1344,8 +1344,8 @@ async function main() {
     renderer,
     city,
   };
-  // Panel diagnostyczny wersji testowej (FPS, opoznienia) - patrz src/diagnostyka.js.
-  uruchomDiagnostyke({ renderer, kickChat, workerManager, realtime });
+  // Panel diagnostyczny: pelny dla zalogowanego, FPS + ping dla widza - patrz src/diagnostyka.js.
+  uruchomDiagnostyke({ renderer, kickChat, workerManager, realtime, remote });
 
   function animate() {
     requestAnimationFrame(animate);
