@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { createScene, buildRoom, setCameraArenaHalf } from './scene.js';
+import { setupPostproces } from './postproces.js';
 import { preloadAll, setTextureQuality } from './assets.js';
 import { Machine } from './machine.js';
 import { WorkerManager, parseMovementCombo } from './workers.js';
@@ -71,6 +72,16 @@ async function main() {
 
   const canvas = document.getElementById('scene');
   const { renderer, scene, camera, controls, ustawNoc: ustawNocScena } = createScene(canvas);
+
+  // Post-proces (winieta + delikatny grading) - propozycja estetyczna, patrz
+  // src/postproces.js. Wylacznik ?postproces=0 w URL zwraca null i dalej w
+  // animate() lecimy dokladnie starym renderer.render(scene, camera).
+  const postproces = setupPostproces(renderer, scene, camera);
+  if (postproces) {
+    window.addEventListener('resize', () => {
+      postproces.resize(window.innerWidth, window.innerHeight);
+    });
+  }
 
   // Stan gry z serwera (Vercel KV) ma pierwszenstwo przed localStorage.
   // Economy i KickChatClient czytaja localStorage w konstruktorach, wiec
@@ -1401,7 +1412,11 @@ async function main() {
       komunikatWylaczenia: 'Wylaczona po trzech bledach pod rzad - reszta gry dziala normalnie.',
     });
 
-    renderer.render(scene, camera);
+    if (postproces) {
+      postproces.composer.render();
+    } else {
+      renderer.render(scene, camera);
+    }
   }
   animate();
 
