@@ -5,6 +5,7 @@ import { preloadAll, setTextureQuality } from './assets.js';
 import { Machine } from './machine.js';
 import { WorkerManager, parseMovementCombo } from './workers.js';
 import { updateSprezystosc } from './sprezystosc.js';
+import { uruchomDiagnostyke } from './diagnostyka.js';
 import { CoinPool } from './coins.js';
 import { SparkPool } from './iskry.js';
 import { GoldenCoinManager } from './goldcoin.js';
@@ -1343,6 +1344,8 @@ async function main() {
     renderer,
     city,
   };
+  // Panel diagnostyczny wersji testowej (FPS, opoznienia) - patrz src/diagnostyka.js.
+  uruchomDiagnostyke({ renderer, kickChat, workerManager, realtime });
 
   function animate() {
     requestAnimationFrame(animate);
