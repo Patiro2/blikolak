@@ -114,8 +114,21 @@ async function main() {
   // je bez czekania na odpytywanie co 10 s. Gdy URL_RELAYA jest puste albo
   // serwer relay nie odpowiada, modul cicho nic nie robi - reszta gry (KV +
   // odpytywanie) dziala dokladnie jak dotychczas.
+  // TYLKO test lokalny: ?relayUrl=ws://... podmienia adres przekaznika na
+  // lokalny, zeby dwie karty na localhost mogly gadac przez wlasny serwer
+  // testowy zamiast produkcyjnego. Bez tego parametru zero zmian.
+  function relayUrlLokalny() {
+    if (!czyLokalnie()) return null;
+    try {
+      return new URLSearchParams(location.search).get('relayUrl') || null;
+    } catch (_) {
+      return null;
+    }
+  }
+  const relayUrlTestowy = relayUrlLokalny();
+
   const realtime = new Realtime({
-    url: URL_RELAYA,
+    url: relayUrlTestowy || URL_RELAYA,
     rola: remote.czyAdmin() ? 'host' : 'widz',
     token: remote.token,
   });
@@ -584,9 +597,30 @@ async function main() {
   // remote.czyAdmin() defensywnie na wypadek przyszlych zmian protokolu.
   // Liczby (kasa, licznik klikow...) i tak nadpisze najblizszy snapshot co 2 s
   // - tu chodzi wylacznie o natychmiastowa reakcje wizualna/dzwiekowa.
+  const KIERUNKI_RUCHU = new Set([
+    'up', 'down', 'left', 'right',
+    'diag-left', 'diag-right', 'diag-back-left', 'diag-back-right',
+  ]);
+
   function zastosujZdarzenieZdalne(nazwa, dane) {
     if (remote.czyAdmin()) return;
-    if (nazwa === 'klik') {
+    if (nazwa === 'ruch') {
+      // Ruch widza z czatu hosta - dedup przez wykonajRuchCzatu robi, ze
+      // wygrywa to zrodlo (wlasny Kick tej karty czy to zdarzenie), ktore
+      // dotrze pierwsze. applySync/ruchNr zostaja jako siatka bezpieczenstwa.
+      const slot = dane && Number.isInteger(dane.slot) ? dane.slot : null;
+      const dirs = dane && Array.isArray(dane.dirs) ? dane.dirs : null;
+      const id = dane && typeof dane.id === 'string' && dane.id ? dane.id : null;
+      if (
+        slot !== null &&
+        workerManager.getWorkerType(slot) &&
+        dirs && dirs.length > 0 && dirs.length <= 5 &&
+        dirs.every((d) => typeof d === 'string' && KIERUNKI_RUCHU.has(d)) &&
+        id
+      ) {
+        wykonajRuchCzatu(slot, dirs, id);
+      }
+    } else if (nazwa === 'klik') {
       // Zdarzenie 'klik' jest rozglaszane WYLACZNIE dla klikniec wlasciciela
       // myszka w model 3D (patrz machine.onClickHit nizej) - klik z czatu NIE
       // jest tu rozglaszany, bo kazda karta widza ma wlasne polaczenie z
@@ -984,6 +1018,25 @@ async function main() {
     }
   }
 
+  // Dedup ruchow czatu miedzy wlasnym polaczeniem z Kickiem a zdarzeniem
+  // 'ruch' przekazanym przez hosta (patrz onMessage nizej i zastosujZdarzenieZdalne).
+  // Kazda wiadomosc Kicka ma unikalne id (kick.js: id: msg.id) - kto pierwszy
+  // wykona ruch pod danym id, ten wygrywa, druga kopia jest cicho pomijana.
+  const wykonaneRuchyId = new Set();
+  const wykonaneRuchyKolejka = [];
+  const WYKONANE_RUCHY_LIMIT = 500;
+
+  function wykonajRuchCzatu(slot, dirs, id) {
+    if (wykonaneRuchyId.has(id)) return false;
+    wykonaneRuchyId.add(id);
+    wykonaneRuchyKolejka.push(id);
+    if (wykonaneRuchyKolejka.length > WYKONANE_RUCHY_LIMIT) {
+      wykonaneRuchyId.delete(wykonaneRuchyKolejka.shift());
+    }
+    workerManager.queueMoves(slot, dirs);
+    return true;
+  }
+
   const kickChat = new KickChatClient({
     chatroomId: 37663,
     channelName: 'patiro',
@@ -1027,7 +1080,14 @@ async function main() {
           (!boss.isFainted || !boss.isFainted(msg.username)) &&
           (!vanessa.isStealingFrom || !vanessa.isStealingFrom(msg.username))
         ) {
-          workerManager.queueMoves(slot, moveCombo);
+          const wykonano = wykonajRuchCzatu(slot, moveCombo, msg.id);
+          // Host rozglasza ruch widzom natychmiast (przekaznik przekazuje
+          // zdarzenie tym samym polaczeniem co snapshoty, wiec dociera przed
+          // nimi) - widz wykona ten sam ruch z tego zrodla albo z wlasnego
+          // Kicka, ktore przyjdzie pierwsze (patrz zastosujZdarzenieZdalne).
+          if (wykonano && remote.czyAdmin()) {
+            realtime.wyslijZdarzenie('ruch', { slot, dirs: moveCombo, id: msg.id });
+          }
         }
       }
     },
@@ -1250,6 +1310,9 @@ async function main() {
   // Wlacznik na zadanie: ?relay=1 w adresie albo
   // localStorage['bankomat-clicker-relay-lokalnie'] = '1'.
   function relayDozwolonyLokalnie() {
+    // ?relayUrl=... juz wskazuje na lokalny serwer testowy, nigdy na produkcje
+    // (patrz relayUrlLokalny wyzej) - test lokalny wlacza sie sam, bez ?relay=1.
+    if (relayUrlTestowy) return true;
     try {
       if (new URLSearchParams(location.search).get('relay') === '1') return true;
       return localStorage.getItem('bankomat-clicker-relay-lokalnie') === '1';

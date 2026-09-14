@@ -51,7 +51,14 @@ export class RemoteState {
    * hasla, uprawnien NIE MA.
    */
   czyAdmin() {
-    if (czyLokalnie()) return true;
+    if (czyLokalnie()) {
+      // TYLKO test lokalny: ?widz=1 symuluje widza na karcie deweloperskiej.
+      // Na publicznym adresie ta galaz nie jest osiagalna (czyLokalnie() === false).
+      try {
+        if (new URLSearchParams(location.search).get('widz') === '1') return false;
+      } catch (_) {}
+      return true;
+    }
     return this.zalogowany;
   }
 
