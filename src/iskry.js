@@ -8,6 +8,26 @@ const LIFE_MAX = 0.5;
 const GRAVITY = 6.0;
 const HIDDEN_Y = -9999; // tu chowamy nieaktywne czastki (bez zmiany rozmiaru per-vertex)
 
+// Okragla tekstura iskry z miekkim brzegiem, generowana raz z canvas 2D
+// (radialny gradient: biały srodek -> przezroczysty brzeg). PointsMaterial
+// bez tekstury renderuje kwadratowe piksele - to jest fix na to.
+function makeSparkTexture() {
+  const size = 32;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const grad = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  grad.addColorStop(0, 'rgba(255,255,255,1)');
+  grad.addColorStop(0.4, 'rgba(255,255,255,1)');
+  grad.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, size, size);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
 export class SparkPool {
   constructor(scene) {
     this.enabled = new URLSearchParams(location.search).get('iskry') !== '0';
@@ -27,7 +47,10 @@ export class SparkPool {
 
     const material = new THREE.PointsMaterial({
       color: 0xffe7a0,
-      size: 0.08,
+      // 0.08 -> 0.12: miekki brzeg gradientu "zjada" krawedz kwadratu,
+      // wiec optycznie iskra wychodzi mniejsza - podbite o ok. 50%, zeby wizualny rozmiar zostal taki sam.
+      size: 0.12,
+      map: makeSparkTexture(),
       sizeAttenuation: true,
       transparent: true,
       opacity: 0.9,
