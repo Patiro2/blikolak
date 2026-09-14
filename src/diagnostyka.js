@@ -53,13 +53,73 @@ export function uruchomDiagnostyke({ renderer, kickChat, workerManager, realtime
   const oczekujace = []; // komendy ruchu czekajace na pierwsza zmiane pozycji/obrotu postaci
   let wiadomosci = 0;
 
+  // Skoki opoznienia Kicka (> 3 s) zapisywane Z KONTEKSTEM, zeby przy
+  // nastepnym wystapieniu bylo wiadomo, co je spowodowalo: dluga cisza na
+  // gniezdzie i paczka ramek naraz = zastoj polaczenia, duzy lag petli zdarzen
+  // = zablokowana strona, karta w tle, albo nic z tego = opoznienie po stronie Kicka.
+  const skoki = [];
+  let skokowLacznie = 0;
+  let ostRamka = performance.now();
+  let paczkaStart = 0;
+  let paczka = 0;
+  let lagi = []; // przestoje petli zdarzen > 150 ms z ostatnich 20 s
+  function podepnijGniazdo() {
+    const ws = kickChat.ws;
+    if (!ws || ws.__diag) return;
+    ws.__diag = true;
+    // Ten sluchacz odpala sie PO onmessage z kick.js, wiec w wrapperze onMessage
+    // nizej ostRamka to jeszcze czas POPRZEDNIEJ ramki - dokladnie o to chodzi.
+    ws.addEventListener('message', () => {
+      const t = performance.now();
+      if (t - paczkaStart < 50) paczka++;
+      else {
+        paczka = 1;
+        paczkaStart = t;
+      }
+      ostRamka = t;
+    });
+  }
+  podepnijGniazdo();
+  setInterval(podepnijGniazdo, 2000); // kick.js tworzy nowe gniazdo przy kazdym ponownym polaczeniu
+  let oczekiwanyTik = performance.now() + 100;
+  setInterval(() => {
+    const t = performance.now();
+    const lag = t - oczekiwanyTik;
+    oczekiwanyTik = t + 100;
+    if (lag > 150) lagi.push({ t, lag });
+    lagi = lagi.filter((x) => t - x.t < 20000);
+  }, 100);
+
+  function przyczynaSkoku(s) {
+    if (s.wTle) return 'karta w tle';
+    if (s.lag > s.op / 2) return 'strona zablokowana';
+    if (s.cisza > s.op - 2000 || s.paczka > 3) return 'zastoj polaczenia z Kickiem';
+    return 'opoznienie po stronie Kicka';
+  }
+
   // Opoznienie Kicka: roznica zegara serwera Kick i tej karty - zawiera tez
   // ewentualne rozjechanie zegarow, wiec to gorna granica, nie dokladny ping.
   const oryginalOnMessage = kickChat.onMessage;
   kickChat.onMessage = (m) => {
     wiadomosci++;
     const ts = Date.parse(m && (m.created_at || m.createdAt || m.timestamp));
-    if (!Number.isNaN(ts)) dodaj(opoznieniaKick, Date.now() - ts);
+    if (!Number.isNaN(ts)) {
+      const op = Date.now() - ts;
+      dodaj(opoznieniaKick, op);
+      if (op > 3000) {
+        const t = performance.now();
+        const s = {
+          op,
+          cisza: t - ostRamka,
+          paczka: t - paczkaStart < 50 ? paczka + 1 : 1,
+          lag: lagi.reduce((max, x) => Math.max(max, x.lag), 0),
+          wTle: document.hidden,
+        };
+        skokowLacznie++;
+        dodaj(skoki, s);
+        console.warn(`[diag] Skok opoznienia Kicka ${Math.round(op)} ms - ${przyczynaSkoku(s)}`, s);
+      }
+    }
     return oryginalOnMessage.call(kickChat, m);
   };
 
@@ -152,6 +212,11 @@ export function uruchomDiagnostyke({ renderer, kickChat, workerManager, realtime
       `klatki >100 ms   ${wolneKlatki}  (spowalniaja ruch)`,
       `draw calle       ${drawCalls}   trojkaty ${Math.round(trojkaty / 1000)} tys.`,
       `Kick -> karta    ${opis(opoznieniaKick)}`,
+      `skoki Kick >3 s  ${skokowLacznie === 0 ? 'brak' : (() => {
+        const s = skoki[skoki.length - 1];
+        return `${skokowLacznie}  ost ${Math.round(s.op)} ms: ${przyczynaSkoku(s)} `
+          + `(cisza ${(s.cisza / 1000).toFixed(1)} s, paczka ${s.paczka}, lag ${Math.round(s.lag)} ms)`;
+      })()}`,
       `komenda -> ruch  ${opis(reakcjeRuchu)}`,
       `ping serwera     ${opis(pingi)}`,
       `wiadomosci       ${wiadomosci}   postacie ${workerManager.entries.length}`,
