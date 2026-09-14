@@ -26,8 +26,10 @@ const winietaGradingShader = {
     vinIntensity: { value: 0.25 },
     // promien od ktorego zaczyna dzialac winieta (0-1, od srodka kadru)
     vinRadius: { value: 0.55 },
-    // delikatny kontrast (1.0 = bez zmian)
-    contrast: { value: 1.05 },
+    // kontrast (1.0 = bez zmian). Wylaczony: pivot 0.5 w przestrzeni LINIOWEJ
+    // lezy wysoko ponad typowa radiancja sceny (ekspozycja 0.7), wiec 1.05
+    // przyciemnial caly kadr - zmierzone: srednia luminancja 133.8 -> 126.7.
+    contrast: { value: 1.0 },
     // delikatna nasycenie (1.0 = bez zmian)
     saturation: { value: 1.05 },
   },
