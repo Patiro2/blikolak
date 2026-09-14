@@ -3,6 +3,7 @@ import { createScene, buildRoom, setCameraArenaHalf } from './scene.js';
 import { preloadAll, setTextureQuality } from './assets.js';
 import { Machine } from './machine.js';
 import { WorkerManager, parseMovementCombo } from './workers.js';
+import { updateSprezystosc } from './sprezystosc.js';
 import { CoinPool } from './coins.js';
 import { GoldenCoinManager } from './goldcoin.js';
 import { FlagBattleManager } from './flagbattle.js';
@@ -1342,6 +1343,7 @@ async function main() {
     vanessa.paused = boss.isActive();
     machine.update(delta);
     workerManager.update(delta);
+    updateSprezystosc(workerManager, delta);
     coinPool.update(delta);
     goldCoin.update(delta);
     // Minigra jest najmlodszym i najmniej sprawdzonym modulem, a tick() leci
