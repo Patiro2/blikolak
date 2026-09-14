@@ -96,9 +96,11 @@ export function updateSprezystosc(workerManager, delta) {
       // Podskok w rytm kroku (wartosc bezwzgledna sinusa = dwa "uderzenia" na cykl,
       // jak lewa/prawa noga) + squash/stretch: rozciagniecie w gorze skoku,
       // splaszczenie przy "ladowaniu".
-      const fazaSin = Math.sin(stan.walkPhase);
-      const podskok = Math.abs(fazaSin) * AMPLITUDA_PODSKOKU * stan.mix;
-      const rozciagniecie = fazaSin * AMPLITUDA_SQUASH * stan.mix;
+      // |sin| = 1 w szczycie, 0 przy ladowaniu; (2h - 1) zamiast sin, bo sin = -1
+      // tez wypada w szczycie i splaszczalby postac w powietrzu co drugi krok.
+      const h = Math.abs(Math.sin(stan.walkPhase));
+      const podskok = h * AMPLITUDA_PODSKOKU * stan.mix;
+      const rozciagniecie = (2 * h - 1) * AMPLITUDA_SQUASH * stan.mix;
 
       model.position.y = stan.bazowaPozY + podskok;
       model.scale.y = stan.bazowaSkalaY * (1 + rozciagniecie);
