@@ -3,6 +3,7 @@ import { createScene, buildRoom, setCameraArenaHalf } from './scene.js';
 import { preloadAll, setTextureQuality } from './assets.js';
 import { Machine } from './machine.js';
 import { WorkerManager, parseMovementCombo } from './workers.js';
+import { updateSprezystosc } from './sprezystosc.js';
 import { CoinPool } from './coins.js';
 import { SparkPool } from './iskry.js';
 import { GoldenCoinManager } from './goldcoin.js';
@@ -1347,6 +1348,7 @@ async function main() {
     vanessa.paused = boss.isActive();
     machine.update(delta);
     workerManager.update(delta);
+    updateSprezystosc(workerManager, delta);
     coinPool.update(delta);
     sparkPool.update(delta);
     goldCoin.update(delta);
