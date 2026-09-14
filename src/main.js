@@ -674,6 +674,23 @@ async function main() {
       // 'flaga-info'/'tlumaczenia-info'/'panstwa-miasta-info' powyzej.
       const text = dane && typeof dane.text === 'string' ? dane.text : null;
       if (text) bitwaMarek.announce(text);
+    } else if (nazwa === 'boss-postep') {
+      // Natychmiastowy postep walki z bossem bazowym (bez mechaniki) od hosta -
+      // patrz boss.postepHosta/onPostepHosta. Dociera przed snapshotem (ten sam
+      // kanal, ta sama kolejnosc wysylki), wiec eliminuje miganie miedzy starym
+      // a nowym dzialaniem opisane w zadaniu. Walidacja jak przy kazdym innym
+      // zdarzeniu zdalnym - dane od hosta, ale nigdy im nie ufamy w ciemno.
+      const licznikRownan = dane && Number.isInteger(dane.licznikRownan) && dane.licznikRownan >= 0
+        ? dane.licznikRownan
+        : null;
+      const licznikAtakow = dane && Number.isInteger(dane.licznikAtakow) && dane.licznikAtakow >= 0
+        ? dane.licznikAtakow
+        : undefined;
+      const hp = dane && typeof dane.hp === 'number' && Number.isFinite(dane.hp) && dane.hp >= 0
+        ? dane.hp
+        : undefined;
+      const nowe = !!dane && dane.nowe === true;
+      if (licznikRownan !== null) boss.postepHosta({ licznikRownan, licznikAtakow, hp, nowe });
     } else if (nazwa === 'game-over') {
       // Wlasciciel przegral cala pule z Dzordzo (boss 3) albo dal sie okrasc
       // Skorpionowi (boss 4, patrz boss.onGameOver nizej) - widz WYLACZNIE
@@ -1181,6 +1198,13 @@ async function main() {
   // powyzej - patrz komentarz przy czyNaliczanieDozwolone w boss.js: naliczanie
   // nagrody 10 zl za poprawna odpowiedz to decyzja, wiec tylko host ja podejmuje.
   boss.czyNaliczanieDozwolone = () => remote.czyAdmin();
+  // Host rozglasza natychmiastowy postep walki z bossem bazowym (bez
+  // mechaniki), zeby widzowie nie migali miedzy starym a nowym dzialaniem,
+  // gdy czekaliby tylko na snapshot co 2 s - patrz boss.postepHosta i
+  // zastosujZdarzenieZdalne ponizej ('boss-postep').
+  boss.onPostepHosta = (dane) => {
+    if (remote.czyAdmin()) realtime.wyslijZdarzenie('boss-postep', dane);
+  };
   boss.setContext({
     workerManager,
     workerOverlays,

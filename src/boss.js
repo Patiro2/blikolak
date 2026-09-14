@@ -351,6 +351,13 @@ export class BossManager {
     // przelicza biezace rownanie ze wspolnego strumienia.
     this.licznikRownan = 0;
     this.licznikAtakow = 0;
+    // Ile snapshotow/zdarzen HOSTA z rzedu bylo przestarzalych (licznikRownan
+    // mniejszy od lokalnego) dla bossa bazowego - patrz postepHosta nizej.
+    this._postepPrzestarzalyZRzedu = 0;
+    // Host (patrz czyNaliczanieDozwolone) rozglasza tedy natychmiastowy postep
+    // walki z bossem BEZ mechaniki - main.js podpina tu wyslanie zdarzenia
+    // 'boss-postep'. Patrz _nextEquation/_onCorrectAnswer.
+    this.onPostepHosta = null;
     this._licznikIdle = 0; // pomocniczy licznik dla harmonogramu bezczynnego rozgladania sie (nie synchronizowany - czysto kosmetyczny)
     this.startWalki = null; // Date.now() z chwili startu walki - czesc stanu synchronizowanego
 
@@ -1176,6 +1183,17 @@ export class BossManager {
 
   _nextEquation() {
     this.licznikRownan += 1;
+    this._pokazDzialanie();
+    this._rozglosPostepHosta(true);
+  }
+
+  /**
+   * Czesc _nextEquation odpowiedzialna za POKAZANIE biezacego this.licznikRownan
+   * (tekst, dymek, pasek czasu, dzwiek) - wydzielona, zeby postepHosta nizej
+   * mogla pokazac dzialanie przyslane przez hosta BEZ inkrementacji licznika
+   * (licznik przychodzi juz gotowy ze stanu).
+   */
+  _pokazDzialanie() {
     this.currentEq = genEquation(this._rownanieRng(this.licznikRownan));
     this.eqTimer = ANSWER_WINDOW;
     this.interDelay = 0;
@@ -1189,6 +1207,28 @@ export class BossManager {
       this.timerFillEl.classList.remove('danger');
     }
     this._log('info', `Nowe dzialanie: ${this.currentEq.text} (wynik ${this.currentEq.result})`);
+  }
+
+  /**
+   * Bossa bazowego (bez mechaniki) prowadzi NAPRAWDE tylko host - kazda karta
+   * widza liczy dzialania i hp lokalnie, tylko dla wlasnej animacji (patrz
+   * komentarz przy czyNaliczanieDozwolone). Host rozglasza wiec swoj postep
+   * natychmiast (nie czekajac 2 s na kolejny snapshot), zeby widzowie nie
+   * migali miedzy starym a nowym dzialaniem - patrz zadanie w main.js
+   * (zastosujZdarzenieZdalne -> 'boss-postep' -> boss.postepHosta).
+   */
+  // nowe=true tylko z _nextEquation: host WLASNIE pokazal to dzialanie, wiec
+  // widz, ktory juz je ma, wyrownuje do tej chwili zegar odpowiedzi (patrz
+  // postepHosta). Snapshoty i zdarzenie trafienia nie niosa tej flagi.
+  _rozglosPostepHosta(nowe = false) {
+    if (this.def && MECHANIKI[this.def.mechanika]) return;
+    if (!this.czyNaliczanieDozwolone || !this.czyNaliczanieDozwolone()) return;
+    this.onPostepHosta?.({
+      licznikRownan: this.licznikRownan,
+      licznikAtakow: this.licznikAtakow,
+      hp: this.hp,
+      nowe,
+    });
   }
 
   /** Wywolywane z main.js z kazdej wiadomosci na czacie (odpowiedzi + "pomoc"). */
@@ -1315,12 +1355,12 @@ export class BossManager {
       `Odpowiedział <strong>${eqText}</strong> — boss traci ${dmg} HP! (${this.hp}/${this.maxHp})`,
     );
 
-    if (this.hpFillEl) this.hpFillEl.style.width = `${(this.hp / this.maxHp) * 100}%`;
-    if (this.hpTextEl) this.hpTextEl.textContent = `${this.hp} / ${this.maxHp}`;
+    this._aktualizujPasekHp();
     if (this.eqTextEl) this.eqTextEl.textContent = pick(BOSS_TAUNTS_HIT);
 
     this.currentEq = null;
     if (this.bubbleEl) this.bubbleEl.style.display = 'none';
+    this._rozglosPostepHosta();
 
     if (this.hp <= 0) {
       this._onDefeatedBoss();
@@ -1328,6 +1368,12 @@ export class BossManager {
     }
 
     this.interDelay = HIT_TO_NEXT_EQ_DELAY;
+  }
+
+  /** Wspolny kawalek applySync/_onCorrectAnswer/postepHosta - patrz tam. */
+  _aktualizujPasekHp() {
+    if (this.hpFillEl) this.hpFillEl.style.width = `${(this.hp / this.maxHp) * 100}%`;
+    if (this.hpTextEl) this.hpTextEl.textContent = `${this.hp} / ${this.maxHp}`;
   }
 
   _shakeBossOnce() {
@@ -2031,27 +2077,89 @@ export class BossManager {
       return;
     }
     if (bossState.aktywny && localActive) {
-      if (typeof bossState.hp === 'number') {
-        this.hp = bossState.hp;
-        if (this.hpFillEl) this.hpFillEl.style.width = `${(this.hp / this.maxHp) * 100}%`;
-        if (this.hpTextEl) this.hpTextEl.textContent = `${this.hp} / ${this.maxHp}`;
-      }
       if (this.def && MECHANIKI[this.def.mechanika]) {
+        // Mechaniki delegowane: hp bezwarunkowo (jak zawsze), reszta stanu
+        // idzie do podklasy bez zmian - to zadanie dotyczy WYLACZNIE bossa
+        // bazowego (bez mechaniki), patrz postepHosta nizej.
+        if (typeof bossState.hp === 'number') {
+          this.hp = bossState.hp;
+          this._aktualizujPasekHp();
+        }
         const stanMech = bossState[this.def.mechanika];
         if (this.podboss && stanMech) this.podboss.applySync(stanMech);
         return;
       }
 
-      const rownanieZmienione = bossState.licznikRownan !== undefined && bossState.licznikRownan !== this.licznikRownan;
-      if (bossState.licznikRownan !== undefined) this.licznikRownan = bossState.licznikRownan;
-      if (bossState.licznikAtakow !== undefined) this.licznikAtakow = bossState.licznikAtakow;
-      // Wyrownanie licznika rownan samo w sobie NIE zmienia this.currentEq -
-      // trzeba je jawnie przeliczyc ze wspolnego strumienia, inaczej widz
-      // dalej widzialby swoje wlasne, lokalnie wygenerowane dzialanie.
-      if (rownanieZmienione && this.state === 'FIGHT' && this.interDelay <= 0) {
-        this._recalcCurrentEquation();
-      }
+      this.postepHosta(bossState);
     }
+  }
+
+  /**
+   * Postep hosta dla bossa BAZOWEGO (bez mechaniki) - jedyne miejsce, ktore
+   * decyduje, czy stan z hosta (snapshot co 2 s w applySync, albo zdarzenie
+   * natychmiastowe 'boss-postep' z main.js) jest nowszy, przestarzaly czy
+   * rowny lokalnemu. Zasada: widz NIGDY nie cofa sie do starszego dzialania.
+   *
+   * - licznikRownan MNIEJSZY od lokalnego = przestarzaly stan hosta (dotarl
+   *   z opoznieniem wzgledem lokalnej odpowiedzi/timeoutu widza) - ignorujemy
+   *   go calkowicie (liczniki, dzialanie, hp zostaja). Zawor bezpieczenstwa:
+   *   po 3 przestarzalych z rzedu wymuszamy pelne wyrownanie do stanu hosta,
+   *   inaczej widz ktorego trafienie host odrzucil (bo np. juz przeszedl do
+   *   kolejnego dzialania) rozjechalby sie na zawsze.
+   * - WIEKSZY = host jest dalej - pokazujemy JEGO dzialanie natychmiast (bez
+   *   inkrementacji licznika, bo licznik juz przyszedl gotowy).
+   * - ROWNY = to samo dzialanie, wyrownujemy tylko licznikAtakow.
+   *
+   * hp: bazowy boss NIE ma leczenia (grep na `this.hp +=` w tym pliku - zero
+   * trafien), wiec hp hosta jest zawsze <= lokalnemu hp poza przypadkiem
+   * przestarzalego stanu - przyjmujemy je, gdy stan nie jest przestarzaly I
+   * (licznik wiekszy LUB hp ze stanu <= lokalne), zeby nigdy nie cofnac
+   * zadanego trafienia widza.
+   *
+   * Zwyciestwo przy hp=0 przyslanym synchronizacja: NIE wywolujemy tu
+   * _onDefeatedBoss - tak dzialalo to juz wczesniej w applySync (jedyne
+   * miejsce wywolujace _onDefeatedBoss to lokalny _onCorrectAnswer i debug
+   * damage()) - widz dowiaduje sie o zwyciestwie przez pole `aktywny:false`
+   * w kolejnym snapshocie (patrz galaz applySync wyzej), zostaje bez zmian.
+   */
+  postepHosta(stan) {
+    if (!stan || this.state !== 'FIGHT' || (this.def && MECHANIKI[this.def.mechanika])) return;
+    const nowyLicznik = typeof stan.licznikRownan === 'number' ? stan.licznikRownan : null;
+    if (nowyLicznik === null) return;
+
+    const przestarzaly = nowyLicznik < this.licznikRownan;
+    if (przestarzaly) {
+      this._postepPrzestarzalyZRzedu += 1;
+      if (this._postepPrzestarzalyZRzedu < 3) return;
+      // Wymuszone pelne wyrownanie - patrz komentarz metody wyzej.
+      this._postepPrzestarzalyZRzedu = 0;
+      this.licznikRownan = nowyLicznik;
+      if (typeof stan.licznikAtakow === 'number') this.licznikAtakow = stan.licznikAtakow;
+      if (typeof stan.hp === 'number') this.hp = stan.hp;
+      this._recalcCurrentEquation();
+      this._aktualizujPasekHp();
+      return;
+    }
+
+    this._postepPrzestarzalyZRzedu = 0;
+    const wiekszy = nowyLicznik > this.licznikRownan;
+    if (wiekszy) {
+      this.licznikRownan = nowyLicznik;
+      if (typeof stan.licznikAtakow === 'number') this.licznikAtakow = stan.licznikAtakow;
+      this._pokazDzialanie();
+    } else {
+      if (typeof stan.licznikAtakow === 'number') this.licznikAtakow = stan.licznikAtakow;
+      // Widz pokazal to dzialanie sam wczesniej (np. dostal odpowiedz z Kicka
+      // przed hostem), wiec jego zegar odpowiedzi ruszyl za wczesnie i timeout
+      // wypadalby przed hostem przy KAZDYM kolejnym dzialaniu. Host wlasnie je
+      // pokazal - wyrownujemy zegar do tej chwili.
+      if (stan.nowe === true && this.currentEq) this.eqTimer = ANSWER_WINDOW;
+    }
+
+    if (typeof stan.hp === 'number' && (wiekszy || stan.hp <= this.hp)) {
+      this.hp = stan.hp;
+    }
+    this._aktualizujPasekHp();
   }
 
   /**
