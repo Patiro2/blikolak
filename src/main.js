@@ -1,9 +1,13 @@
 import * as THREE from 'three';
 import { createScene, buildRoom, setCameraArenaHalf } from './scene.js';
+import { setupPostproces } from './postproces.js';
 import { preloadAll, setTextureQuality } from './assets.js';
 import { Machine } from './machine.js';
 import { WorkerManager, parseMovementCombo } from './workers.js';
+import { updateSprezystosc } from './sprezystosc.js';
+import { uruchomDiagnostyke } from './diagnostyka.js';
 import { CoinPool } from './coins.js';
+import { SparkPool } from './iskry.js';
 import { GoldenCoinManager } from './goldcoin.js';
 import { FlagBattleManager } from './flagbattle.js';
 import { TlumaczeniaManager } from './tlumaczenia.js';
@@ -71,6 +75,16 @@ async function main() {
 
   const canvas = document.getElementById('scene');
   const { renderer, scene, camera, controls, ustawNoc: ustawNocScena } = createScene(canvas);
+
+  // Post-proces (winieta + delikatny grading) - propozycja estetyczna, patrz
+  // src/postproces.js. Wylacznik ?postproces=0 w URL zwraca null i dalej w
+  // animate() lecimy dokladnie starym renderer.render(scene, camera).
+  const postproces = setupPostproces(renderer, scene, camera);
+  if (postproces) {
+    window.addEventListener('resize', () => {
+      postproces.resize(window.innerWidth, window.innerHeight);
+    });
+  }
 
   // Stan gry z serwera (Vercel KV) ma pierwszenstwo przed localStorage.
   // Economy i KickChatClient czytaja localStorage w konstruktorach, wiec
@@ -195,6 +209,7 @@ async function main() {
 
   const coinPool = new CoinPool(scene);
   await coinPool.init();
+  const sparkPool = new SparkPool(scene);
 
   const goldCoin = new GoldenCoinManager(scene);
   await goldCoin.init();
@@ -1054,6 +1069,7 @@ async function main() {
       if (isCrit) audio.play('kryt');
       maybePlayComboSound(combo);
       coinPool.burst(machineBurstOrigin, value);
+      sparkPool.burst(machineBurstOrigin, isCrit);
       const text = isCrit ? `KRYT! +${fmtShort(value)} (@${nick})` : `+${fmtShort(value)} (@${nick})`;
       projectAndFloat(machineBurstOrigin, text, { crit: isCrit, kick: true });
       kickUI.updateKliksCount(kickChat.stats.kliksReceived);
@@ -1279,6 +1295,7 @@ async function main() {
     audio.play('klik-gracz');
     if (isCrit) audio.play('kryt');
     coinPool.burst(point, value);
+    sparkPool.burst(point, isCrit);
     const text = isCrit ? `KRYT! +${fmtShort(value)}` : `+${fmtShort(value)}`;
     projectAndFloat(point, text, { crit: isCrit });
 
@@ -1301,6 +1318,7 @@ async function main() {
     machine,
     workerManager,
     coinPool,
+    sparkPool,
     goldCoin,
     vanessa,
     boss,
@@ -1326,6 +1344,8 @@ async function main() {
     renderer,
     city,
   };
+  // Panel diagnostyczny: pelny dla zalogowanego, FPS + ping dla widza - patrz src/diagnostyka.js.
+  uruchomDiagnostyke({ renderer, kickChat, workerManager, realtime, remote });
 
   function animate() {
     requestAnimationFrame(animate);
@@ -1342,7 +1362,9 @@ async function main() {
     vanessa.paused = boss.isActive();
     machine.update(delta);
     workerManager.update(delta);
+    updateSprezystosc(workerManager, delta);
     coinPool.update(delta);
+    sparkPool.update(delta);
     goldCoin.update(delta);
     // Minigra jest najmlodszym i najmniej sprawdzonym modulem, a tick() leci
     // w petli klatek PRZED renderowaniem - wyjatek stad przerywal cala klatke
@@ -1401,7 +1423,11 @@ async function main() {
       komunikatWylaczenia: 'Wylaczona po trzech bledach pod rzad - reszta gry dziala normalnie.',
     });
 
-    renderer.render(scene, camera);
+    if (postproces) {
+      postproces.composer.render();
+    } else {
+      renderer.render(scene, camera);
+    }
   }
   animate();
 
